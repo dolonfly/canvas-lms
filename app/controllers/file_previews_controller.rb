@@ -48,6 +48,10 @@ class FilePreviewsController < ApplicationController
       if (Canvas::Plugin.value_to_boolean(params[:annotate]) && (url = @file.crocodoc_url(@current_user))) ||
          (url = @file.canvadoc_url(@current_user))
         redirect_to url
+      # self docs
+      elsif SelfHostDocsPreview.previewable?(@domain_root_account, @file)
+        url = SelfHostDocsPreview.url_for(@file)
+        redirect_to("//baidu.com/?" + { embedded: true, url: }.to_query)
       # google docs
       elsif GoogleDocsPreview.previewable?(@domain_root_account, @file)
         url = GoogleDocsPreview.url_for(@file)

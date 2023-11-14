@@ -39,6 +39,11 @@ module AccountServices
                                       description: "",
                                       expose_to_ui: :service
                                     },
+                                    self_host_docs_previews: {
+                                      name: I18n.t("Self Host Docs Preview"),
+                                      description: "",
+                                      expose_to_ui: :service
+                                    },
                                     skype: {
                                       name: I18n.t("Skype"),
                                       description: "",
