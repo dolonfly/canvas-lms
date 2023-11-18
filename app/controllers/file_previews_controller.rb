@@ -51,7 +51,7 @@ class FilePreviewsController < ApplicationController
       # self docs
       elsif SelfHostDocsPreview.previewable?(@domain_root_account, @file)
         url = SelfHostDocsPreview.url_for(@file)
-        redirect_to("//http://39.99.249.87:8012/onlinePreview?url=" + URI.escape(Base64.encode64(url), Regexp.new("[^#{URI::PATTERN::UNRESERVED}]")) + { embedded: true, url: }.to_query)
+        redirect_to("//http://39.99.249.87:8012/onlinePreview?url=" + CGI.escape(Base64.encode64(url), Regexp.new("[^#{URI::PATTERN::UNRESERVED}]")) + { embedded: true, url: }.to_query)
       # google docs
       elsif GoogleDocsPreview.previewable?(@domain_root_account, @file)
         url = GoogleDocsPreview.url_for(@file)
