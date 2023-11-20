@@ -43,6 +43,7 @@ module SelfHostDocsPreview
     application/postscript
     application/pdf
     application/vnd.ms-powerpoint
+    application/wpsoffice
   ].freeze
 
   def self.previewable?(account, attachment)
