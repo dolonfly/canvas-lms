@@ -51,7 +51,7 @@ class FilePreviewsController < ApplicationController
       # self docs
       elsif SelfHostDocsPreview.previewable?(@domain_root_account, @file)
         url = SelfHostDocsPreview.url_for(@file)
-        redirect_to("//39.99.249.87:8012/onlinePreview?url=" + CGI.escape(Base64.encode64(url + "&fullfilename=" + @file.filename)))
+        redirect_to(Rails.application.config_for(:self_host_file_preview_server)[:host] +  "/onlinePreview?url=" + CGI.escape(Base64.encode64(url + "&fullfilename=" + @file.filename)))
       # google docs
       elsif GoogleDocsPreview.previewable?(@domain_root_account, @file)
         url = GoogleDocsPreview.url_for(@file)
