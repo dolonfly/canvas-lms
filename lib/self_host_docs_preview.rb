@@ -48,7 +48,8 @@ module SelfHostDocsPreview
 
   def self.previewable?(account, attachment)
     account&.service_enabled?(:google_docs_previews) &&
-      PREVIEWABLE_TYPES.include?(attachment.content_type) &&
+      (%r{\A(audio|video)/}.match?(attachment.content_type) ||
+        PREVIEWABLE_TYPES.include?(attachment.content_type)) &&
       attachment.downloadable?
   end
 
