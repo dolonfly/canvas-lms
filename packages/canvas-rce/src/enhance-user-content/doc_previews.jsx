@@ -177,10 +177,11 @@ export function loadDocPreview($container, options) {
     // else if it's something google docs preview can handle and we can get a public url to this document.
     const loadGooglePreview = function () {
       // this handles both ssl and plain http.
-      const googleDocPreviewUrl = `//docs.google.com/viewer?${new URLSearchParams({
-        embedded: true,
-        url: opts.public_url,
-      }).toString()}`
+      // const googleDocPreviewUrl = `//docs.google.com/viewer?${new URLSearchParams({
+      //   embedded: true,
+      //   url: opts.public_url,
+      // }).toString()}`
+      const  googleDocPreviewUrl = opts.preview_full_url
       if (!opts.ajax_valid || opts.ajax_valid()) {
         const iframe = document.createElement('iframe')
         iframe.addEventListener('load', () => {

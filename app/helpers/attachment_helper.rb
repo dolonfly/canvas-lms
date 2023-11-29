@@ -38,6 +38,8 @@ module AttachmentHelper
     elsif attachment.canvadocable?
       attrs[:canvadoc_session_url] = attachment.canvadoc_url(@current_user, url_opts)
     end
+    attrs[:preview_full_url] = Rails.application.config_for(:self_host_file_preview_server)[:host] +  "/onlinePreview?url=" + CGI.escape(Base64.encode64(url + "&fullfilename=" + @file.filename))
+    attrs[:display_name] = attachment.display_name
     attrs[:attachment_id] = attachment.id
     attrs[:mimetype] = attachment.mimetype
     context_name = url_helper_context_from_object(attachment.context)
