@@ -35,7 +35,7 @@
   <div>
     <span style="font-size: 1.2em;">
       <%= link_to "Download #{@attachment.display_name}", download_url, download: "true" %>
-    </span> (<%= @attachment.readable_size %>)
+    </span> (<%= @attachment.readable_size %>) (<%= @attachment.content_type %>)
   </div>
   <% if @attachment.content_type == "application/x-shockwave-flash" %>
     <object classid="clsid:D27CDB6E-AE6D-11cf-96B8-444553540000" class="embedded_swf">
