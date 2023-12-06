@@ -99,14 +99,6 @@ module Api::V1::Assignment
     grader_names_visible_to_final_grader
   ].freeze
 
-  ASSIGNMENT_DATE_DETAILS_FIELDS = %w[
-    id
-    due_at
-    unlock_at
-    lock_at
-    only_visible_to_overrides
-  ].freeze
-
   def assignments_json(assignments, user, session, opts = {})
     # check if all assignments being serialized belong to the same course
     contexts = assignments.map { |a| [a.context_id, a.context_type] }.uniq
@@ -484,10 +476,6 @@ module Api::V1::Assignment
     hash
   end
 
-  def assignment_date_details_json(assignment, user, session)
-    api_json(assignment, user, session, only: ASSIGNMENT_DATE_DETAILS_FIELDS)
-  end
-
   def turnitin_settings_json(assignment)
     settings = assignment.turnitin_settings.with_indifferent_access
     %i[s_paper_check internet_check journal_check exclude_biblio exclude_quoted submit_papers_to].each do |key|
@@ -655,29 +643,39 @@ module Api::V1::Assignment
           migration_type:,
           initiated_source: :new_quizzes
         )
-        use_global_identifiers = content_migration.use_global_identifiers?
 
         data.each do |key, _|
           import_object = Context.find_asset_by_url(key)
+
+          next unless import_object.respond_to?(:context) && import_object.context.is_a?(Course)
+
           if import_object.is_a?(WikiPage)
             copy_values[:wiki_pages] ||= []
-            copy_values[:wiki_pages] << CC::CCHelper.create_key(import_object, global: use_global_identifiers)
+            copy_values[:wiki_pages] << import_object
             source_course ||= import_object.context
           elsif import_object.is_a?(Attachment)
             copy_values[:attachments] ||= []
-            copy_values[:attachments] << CC::CCHelper.create_key(import_object, global: use_global_identifiers)
+            copy_values[:attachments] << import_object
             source_course ||= import_object.context
           end
         end
 
         return response if source_course.nil?
 
+        content_migration.source_course = source_course
+        use_global_identifiers = content_migration.use_global_identifiers?
+
+        copy_values.transform_values! do |import_objects|
+          import_objects.map do |import_object|
+            CC::CCHelper.create_key(import_object, global: use_global_identifiers)
+          end
+        end
+
         content_migration.update_migration_settings({
                                                       import_quizzes_next: false,
                                                       source_course_id: source_course.id
                                                     })
         content_migration.workflow_state = "created"
-        content_migration.source_course = source_course
         content_migration.migration_settings[:import_immediately] = false
         content_migration.save
 
