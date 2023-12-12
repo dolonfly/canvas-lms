@@ -105,6 +105,7 @@ module LiveEvents
             end
             total_bytes += r[:total_bytes]
           end
+          logger.info(records.to_json)
           send_events(records)
         rescue => e
           logger.error("Exception making LiveEvents async call: #{e}\n#{e.backtrace.first}")
