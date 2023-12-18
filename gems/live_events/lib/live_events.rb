@@ -24,6 +24,7 @@ module LiveEvents
   class << self
     attr_accessor :logger, :cache, :statsd, :on_work_unit_end
     attr_reader :stream_client
+    attr_reader :kafka_brokers_client
 
     # rubocop:disable Style/TrivialAccessors
     def settings=(settings)
@@ -53,6 +54,8 @@ module LiveEvents
 
     require "live_events/client"
     require "live_events/async_worker"
+    require 'live_events/kafka/client'
+    require 'live_events/kafka/async_worker'
 
     def get_context
       materialized_context&.clone
@@ -85,7 +88,12 @@ module LiveEvents
           logger.warn "Starting new LiveEvents worker thread due to fork."
         end
 
-        @worker = LiveEvents::AsyncWorker.new(stream_client: client.stream_client, stream_name: client.stream_name)
+        if use_kafka?
+          @worker = LiveEvents::AsyncWorkerForKafka.new(kafka_brokers_client: clientForKafka.kafka_brokers_client, kafka_broker_topic: clientForKafka.kafka_broker_topic)
+        else
+          @worker = LiveEvents::AsyncWorker.new(stream_client: client.stream_client, stream_name: client.stream_name)
+        end
+
         @launched_pid = Process.pid
       end
 
@@ -117,9 +125,17 @@ module LiveEvents
     def client
       if @client && !new_client?
         @client
+      elsif use_kafka?
+        @client = LiveEvents::ClientForKafka.new(LiveEvents::ClientForKafka.config, @kafka_brokers_client, @kafka_broker_topic, worker: @workerForKafka)
       else
         @client = LiveEvents::Client.new(LiveEvents::Client.config, @stream_client, @stream_client&.stream_name, worker: @worker)
       end
+    end
+
+    def use_kafka?
+      @config ||= LiveEvents::Client.config
+      return true if @config['use_kafka']
+      false
     end
 
     def new_client?

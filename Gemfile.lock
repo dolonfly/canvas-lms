@@ -495,6 +495,8 @@ GEM
       thread_safe (~> 0.3, >= 0.3.1)
     diff-lcs (1.5.0)
     dig_rb (1.0.1)
+    digest-crc (0.6.5)
+      rake (>= 12.0.0, < 14.0.0)
     digest-murmurhash (1.1.1)
     diplomat (2.6.4)
       deep_merge (~> 1.2)
@@ -982,6 +984,8 @@ GEM
       activesupport (>= 3.0.0)
       i18n
       iso8601
+    ruby-kafka (1.5.0)
+      digest-crc
     ruby-progressbar (1.13.0)
     ruby-rc4 (0.1.5)
     ruby-rtf (0.0.5)
@@ -1308,6 +1312,7 @@ DEPENDENCIES
   rubocop-rake (~> 0.6)
   rubocop-rspec (~> 2.22)
   ruby-duration (= 3.2.3)
+  ruby-kafka (~> 1.5)
   ruby-rtf (= 0.0.5)
   rubycas-client (= 2.3.9)
   rubyzip (~> 2.3)
