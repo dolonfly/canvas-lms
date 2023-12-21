@@ -139,7 +139,7 @@ module LiveEvents
         end
 
         # `#deliver_messages` will return immediately.
-        producer.deliver_messages
+        @kafka_brokers_client.deliver_messages
 
       end
       process_results(res, records)
