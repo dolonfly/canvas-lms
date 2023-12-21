@@ -135,11 +135,12 @@ module LiveEvents
       res = time_block do
 
         records.each do |record|
-          @kafka_brokers_client.produce(record[:data].to_json, topic: @kafka_broker_topic, partition_key: record[:partition_key])
+          logger.info("-----2 kafka 2 ----->\n#{record.to_json}\n<---------")
+          @kafka_brokers_client.deliver_message(record[:data].to_json, topic: @kafka_broker_topic, partition_key: record[:partition_key])
         end
 
         # `#deliver_messages` will return immediately.
-        @kafka_brokers_client.deliver_messages
+        # @kafka_brokers_client.deliver_messages
 
       end
       process_results(res, records)
