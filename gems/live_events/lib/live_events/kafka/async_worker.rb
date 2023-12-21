@@ -135,7 +135,7 @@ module LiveEvents
       res = time_block do
 
         records.each do |record|
-          @kafka_brokers_client.produce(record.to_json, topic: @kafka_broker_topic, partition: record[:partition_key])
+          @kafka_brokers_client.produce(record[:data].to_json, topic: @kafka_broker_topic, partition_key: record[:partition_key])
         end
 
         # `#deliver_messages` will return immediately.
@@ -148,24 +148,7 @@ module LiveEvents
     def process_results(res, records)
       records.each_with_index do |r, i|
         record = records[i]
-        if r.error_code == "InternalFailure"
-          record[:retries_count] ||= 0
-          record[:retries_count] += 1
-
-          if record[:retries_count] <= RETRY_LIMIT
-            @queue.push(record)
-            LiveEvents.statsd&.increment("#{record[:statsd_prefix]}.retry", tags: record[:tags])
-          else
-            internal_error_message = "This record has failed too many times an will no longer be retried. #{r.error_message}"
-            log_unprocessed(record, r.error_code, internal_error_message)
-            LiveEvents.statsd&.increment("#{record[:statsd_prefix]}.final_retry", tags: record[:tags])
-          end
-
-        elsif r.error_code.present?
-          log_unprocessed(record, r.error_code, r.error_message)
-        else
           LiveEvents.statsd&.increment("#{record[:statsd_prefix]}.sends", tags: record[:tags])
-        end
       end
     end
 
