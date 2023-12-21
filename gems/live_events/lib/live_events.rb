@@ -89,7 +89,7 @@ module LiveEvents
         end
 
         if use_kafka?
-          @worker = LiveEvents::AsyncWorkerForKafka.new(kafka_brokers_client: clientForKafka.kafka_brokers_client, kafka_broker_topic: clientForKafka.kafka_broker_topic)
+          @worker = LiveEvents::AsyncWorkerForKafka.new(kafka_brokers_client: client.kafka_brokers_client, kafka_broker_topic: client.kafka_broker_topic)
         else
           @worker = LiveEvents::AsyncWorker.new(stream_client: client.stream_client, stream_name: client.stream_name)
         end
