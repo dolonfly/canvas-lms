@@ -27,7 +27,7 @@ module LiveEvents
   class ClientForKafka
     ATTRIBUTE_BLACKLIST = [:compact_live_events].freeze
 
-    attr_reader :kafka_brokers_client, :kafka_broker_topic
+    attr_reader :logger, :kafka_brokers_client, :kafka_broker_topic
 
     def self.config
       res = LiveEvents.settings
@@ -49,6 +49,7 @@ module LiveEvents
 
     def initialize(config = nil, kafka_brokers_client = nil, kafka_broker_topic = nil, worker: nil)
       config ||= LiveEvents::ClientForKafka.config
+      @logger = LiveEvents.logger
       logger.info("-----kafka init ----->\n#{config.to_json}\n<---------")
       @kafka_brokers_client = kafka_brokers_client || Kafka.new([config["kafka_seed_brokers"]], client_id: "canvas-lms-application").async_producer(
         # Trigger a delivery once 100 messages have been buffered.
