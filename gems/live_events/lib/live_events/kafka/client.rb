@@ -50,16 +50,14 @@ module LiveEvents
     def initialize(config = nil, kafka_brokers_client = nil, kafka_broker_topic = nil, worker: nil)
       config ||= LiveEvents::ClientForKafka.config
       @logger = LiveEvents.logger
-      logger.info("-----kafka init ----->\n#{config.to_json}\n<---------")
-      @kafka_brokers_client = kafka_brokers_client || Kafka.new([config["kafka_seed_brokers"]],logger: logger, client_id: "canvas-lms-application")
-      #                                                      .async_producer(
-      #   # Trigger a delivery once 100 messages have been buffered.
-      #   delivery_threshold: 100,
-      #
-      #   # Trigger a delivery every 30 seconds.
-      #   delivery_interval: 10,
-      # )
-      logger.info("-----kafka init end -----><---------")
+      @kafka_brokers_client = kafka_brokers_client || Kafka.new([config["kafka_seed_brokers"]], logger: logger, client_id: "canvas-lms-application")
+                                                           .async_producer(
+                                                             # Trigger a delivery once 100 messages have been buffered.
+                                                             delivery_threshold: 100,
+
+                                                             # Trigger a delivery every 30 seconds.
+                                                             delivery_interval: 10,
+                                                           )
       @kafka_broker_topic = kafka_broker_topic || config["kafka_broker_topic"]
       if worker
         @worker = worker

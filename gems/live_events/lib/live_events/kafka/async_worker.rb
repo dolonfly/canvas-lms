@@ -105,7 +105,6 @@ module LiveEvents
             end
             total_bytes += r[:total_bytes]
           end
-          logger.info("-----2 kafka ----->\n#{records.to_json}\n<---------")
           send_events(records)
         rescue => e
           logger.error("Exception making LiveEvents async call: #{e}\n#{e.backtrace.first}")
@@ -135,12 +134,11 @@ module LiveEvents
       res = time_block do
 
         records.each do |record|
-          logger.info("-----2 kafka 2 ----->\n#{record.to_json}\n<---------")
-          @kafka_brokers_client.deliver_message(record[:data].to_json, topic: @kafka_broker_topic, partition_key: record[:partition_key])
+          @kafka_brokers_client.produce(record[:data].to_json, topic: @kafka_broker_topic, partition_key: record[:partition_key])
         end
 
         # `#deliver_messages` will return immediately.
-        # @kafka_brokers_client.deliver_messages
+        @kafka_brokers_client.deliver_messages
 
       end
       process_results(res, records)
