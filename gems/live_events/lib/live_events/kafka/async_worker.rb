@@ -146,7 +146,7 @@ module LiveEvents
     end
 
     def process_results(res, records)
-      res.records.each_with_index do |r, i|
+      records.each_with_index do |r, i|
         record = records[i]
         if r.error_code == "InternalFailure"
           record[:retries_count] ||= 0
