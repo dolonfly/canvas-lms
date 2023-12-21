@@ -51,7 +51,7 @@ module LiveEvents
       config ||= LiveEvents::ClientForKafka.config
       @logger = LiveEvents.logger
       logger.info("-----kafka init ----->\n#{config.to_json}\n<---------")
-      @kafka_brokers_client = kafka_brokers_client || Kafka.new([config["kafka_seed_brokers"]], client_id: "canvas-lms-application")
+      @kafka_brokers_client = kafka_brokers_client || Kafka.new([config["kafka_seed_brokers"]],logger: logger, client_id: "canvas-lms-application")
       #                                                      .async_producer(
       #   # Trigger a delivery once 100 messages have been buffered.
       #   delivery_threshold: 100,
