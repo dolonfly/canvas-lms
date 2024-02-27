@@ -24,12 +24,13 @@ import {showConfirmationDialog} from '@canvas/feature-flags/react/ConfirmationDi
 import getTextWidth from '../shared/helpers/TextMeasure'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import _ from 'lodash'
-import htmlEscape, {unescape} from 'html-escape'
+import htmlEscape, {unescape} from '@instructure/html-escape'
 import filterTypes from './constants/filterTypes'
 import type {
   ColumnSizeSettings,
   CustomColumn,
   CustomStatusIdString,
+  EnrollmentFilter,
   Filter,
   FilterPreset,
   FilterType,
@@ -59,15 +60,18 @@ import type {
 import type {GridColumn, SlickGridKeyboardEvent} from './grid'
 import {columnWidths} from './initialState'
 import SubmissionStateMap from '@canvas/grading/SubmissionStateMap'
-import {GradeStatus} from '@canvas/grading/accountGradingStatus'
+import type {GradeStatus} from '@canvas/grading/accountGradingStatus'
 
 const I18n = useI18nScope('gradebook')
 
-const dateTimeFormatter = Intl.DateTimeFormat(I18n.currentLocale(), {
-  year: 'numeric',
-  month: 'numeric',
-  day: 'numeric',
-})
+const createDateTimeFormatter = (timeZone: string) => {
+  return Intl.DateTimeFormat(I18n.currentLocale(), {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    timeZone,
+  })
+}
 
 const ASSIGNMENT_KEY_REGEX = /^assignment_(?!group)/
 
@@ -387,11 +391,11 @@ export const getLabelForFilter = (
     }
   } else if (filter.type === 'start-date') {
     if (typeof filter.value !== 'string') throw new Error('invalid start-date value')
-    const value = dateTimeFormatter.format(new Date(filter.value))
+    const value = createDateTimeFormatter(ENV.TIMEZONE).format(new Date(filter.value))
     return I18n.t('Start Date %{value}', {value})
   } else if (filter.type === 'end-date') {
     if (typeof filter.value !== 'string') throw new Error('invalid end-date value')
-    const value = dateTimeFormatter.format(new Date(filter.value))
+    const value = createDateTimeFormatter(ENV.TIMEZONE).format(new Date(filter.value))
     return I18n.t('End Date %{value}', {value})
   }
 
@@ -707,9 +711,45 @@ export const filterStudentBySubmissionFn = (
   }
 }
 
+const getIncludedEnrollmentStates = (enrollmentFilter: EnrollmentFilter) => {
+  const enrollmentStates = ['active', 'invited']
+  if (enrollmentFilter.inactive) {
+    enrollmentStates.push('inactive')
+  }
+  if (enrollmentFilter.concluded) {
+    enrollmentStates.push('completed')
+  }
+  return enrollmentStates
+}
+
+export const filterStudentBySectionFn = (
+  appliedFilters: Filter[],
+  enrollmentFilter: EnrollmentFilter
+) => {
+  const sectionFilters = findFilterValuesOfType(
+    'section',
+    appliedFilters
+  ) as SubmissionFilterValue[]
+
+  return (student: Student) => {
+    if (sectionFilters.length === 0) {
+      return true
+    }
+    const includedEnrollmentStates = getIncludedEnrollmentStates(enrollmentFilter)
+    const enrollmentStates = student.enrollments
+      .filter(e => e.course_section_id === sectionFilters[0])
+      .map(enrollment => enrollment.enrollment_state)
+    return student.sections
+      ? enrollmentStates.length > 0 &&
+          _.intersection(enrollmentStates, includedEnrollmentStates).length > 0
+      : false
+  }
+}
+
 export const filterAssignmentsBySubmissionsFn = (
   appliedFilters: Filter[],
   submissionStateMap: SubmissionStateMap,
+  searchFilteredStudentIds: string[],
   customStatuses: GradeStatus[]
 ) => {
   const {filtersNeedingSome, filtersNeedingEvery} = categorizeFilters(
@@ -722,7 +762,13 @@ export const filterAssignmentsBySubmissionsFn = (
       return true
     }
 
-    const submissions = submissionStateMap.getSubmissionsByAssignment(assignment.id)
+    let submissions = submissionStateMap.getSubmissionsByAssignment(assignment.id)
+
+    if (searchFilteredStudentIds.length > 0) {
+      submissions = submissions.filter(submission =>
+        searchFilteredStudentIds.includes(submission.user_id)
+      )
+    }
 
     const result = filterSubmissionsByCategorizedFilters(
       filtersNeedingSome,

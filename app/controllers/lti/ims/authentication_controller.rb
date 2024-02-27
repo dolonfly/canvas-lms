@@ -51,17 +51,19 @@ module Lti
       # domain in the authentication requests rather than keeping
       # track of institution-specific domain.
       def authorize_redirect
-        if Setting.get("interop_8200_session_token_redirect", nil) == "true" ||
-           Setting.get("interop_8200_session_token_redirect/#{canvas_domain}", nil) == "true"
-          csp_frame_ancestors << canvas_domain
-          render template: "shared/html_redirect",
-                 layout: false,
-                 formats: :html,
-                 locals: {
-                   url: authorize_redirect_url
-                 }
-        else
-          redirect_to authorize_redirect_url
+        Utils::InstStatsdUtils::Timing.track "lti.authorize_redirect" do
+          if Setting.get("interop_8200_session_token_redirect", nil) == "true" ||
+             Setting.get("interop_8200_session_token_redirect/#{canvas_domain}", nil) == "true"
+            csp_frame_ancestors << canvas_domain
+            render template: "shared/html_redirect",
+                   layout: false,
+                   formats: :html,
+                   locals: {
+                     url: authorize_redirect_url
+                   }
+          else
+            redirect_to authorize_redirect_url
+          end
         end
       end
 
@@ -83,21 +85,28 @@ module Lti
       # For more details on how the cached ID token is generated,
       # please refer to the inline documentation of "app/models/lti/lti_advantage_adapter.rb"
       def authorize
-        validate_oidc_params!
-        validate_current_user!
-        validate_client_id!
-        validate_launch_eligibility!
-        set_extra_csp_frame_ancestor! unless @oidc_error
+        Utils::InstStatsdUtils::Timing.track "lti.authorize" do
+          validate_oidc_params!
+          validate_current_user!
+          validate_client_id!
+          validate_launch_eligibility!
+          set_extra_csp_frame_ancestor! unless @oidc_error
 
-        render(
-          "lti/ims/authentication/authorize",
-          formats: :html,
-          layout: "borderless_lti",
-          locals: {
-            redirect_uri:,
-            parameters: @oidc_error || launch_parameters
-          }
-        )
+          render(
+            "lti/ims/authentication/authorize",
+            formats: :html,
+            layout: "borderless_lti",
+            locals: {
+              redirect_uri:,
+              parameters: @oidc_error || launch_parameters
+            }
+          )
+
+          report_lti_launch_debug_logger_metrics!
+        end
+      rescue RequestError, ActiveRecord::RecordNotFound => e
+        report_lti_launch_debug_logger_metrics!(e)
+        raise
       end
 
       private
@@ -117,6 +126,77 @@ module Lti
           report_oidc_invalid_user_metric(@current_user)
           set_oidc_error!("login_required", "Must have an active user session")
         end
+      end
+
+      def report_lti_launch_debug_logger_metrics?(error)
+        log_level = Lti::LaunchDebugLogger.log_level(@domain_root_account)
+        if log_level <= 0
+          # Log nothing
+          false
+        elsif log_level == 1
+          # Log only "login_required" errors
+          @launch_debug_logger_oidc_errors&.include?("login_required")
+        elsif log_level == 2
+          # Log all errors except "really bogus" requests like an invalid message hint
+          @launch_debug_logger_oidc_errors && !error
+        elsif log_level == 3
+          # Log all non-"really bogus" requests
+          !error
+        else
+          # Log everything
+          true
+        end
+      end
+
+      # extract debug info added in concerns/sessionless_launches.rb
+      def lti_launch_debug_logger_sessionless_source_metrics(launch_kickoff_path)
+        launch_kickoff_path
+          &.then { URI.parse _1 }
+          &.query
+          &.then { CGI.parse _1 }
+          &.dig("sessionless_source")
+          &.first
+          &.then { Lti::LaunchDebugLogger.decode_debug_trace _1 }
+          &.transform_keys { "sessionless_#{_1}" }
+      rescue => e
+        Rails.logger.error("Error finding sessionless source debug_trace_metrics: #{e}")
+      end
+
+      def report_lti_launch_debug_logger_metrics!(error = nil)
+        return unless report_lti_launch_debug_logger_metrics?(error)
+
+        metrics_endpoint = DynamicSettings.find(tree: :private)["frontend_data_collection_endpoint"]
+        return unless metrics_endpoint
+
+        #  Metrics added when constructing the launch (see AdvantageAdapter#cache_payload:
+        debug_trace_metrics = (@decoded_jwt && Lti::LaunchDebugLogger.decode_debug_trace(@decoded_jwt["debug_trace"])) || {}
+        orig_timestamp = debug_trace_metrics&.dig("time")&.then { Time.parse _1 }
+
+        metrics = [{
+          id: SecureRandom.uuid,
+          type: "lti_launch_debug_logger",
+
+          error: error && "#{error.class}: #{error.message}",
+
+          state: oidc_params[:state],
+          oidc_errors: @launch_debug_logger_oidc_errors&.then { _1.sort.join(",") },
+          user: @current_user&.global_id,
+          pseudonym: @current_pseudonym&.global_id,
+          host: request.host,
+          pseudonym_session_login_error: @pseudonym_session.try(:login_error)&.inspect,
+          pseudonym_session_errors: @pseudonym_session.try(:errors)&.inspect,
+          pseudonym_session_class: @pseudonym_session.class.name,
+          time_since_launch_kickoff: orig_timestamp && (Time.now - orig_timestamp).round(3),
+
+          **Lti::LaunchDebugLogger.request_related_fields(request:, session:, cookies:) || {},
+
+          **debug_trace_metrics.transform_keys { |orig_key| "init_#{orig_key}" } || {},
+          **lti_launch_debug_logger_sessionless_source_metrics(debug_trace_metrics["path"]) || {}
+        }.compact]
+
+        CanvasHttp.put(metrics_endpoint, {}, body: metrics.to_json, content_type: "application/json")
+      rescue => e
+        Rails.logger.warn("Couldn't send OIDC invalid user metric: #{e.inspect}")
       end
 
       def report_oidc_invalid_user_metric(user)
@@ -159,6 +239,8 @@ module Lti
       end
 
       def set_oidc_error!(error, error_description)
+        (@launch_debug_logger_oidc_errors ||= []) << error
+
         @oidc_error = {
           error:,
           error_description:,
@@ -210,7 +292,7 @@ module Lti
       def lti_storage_target
         return nil unless decoded_jwt["include_storage_target"]
 
-        Lti::PlatformStorage.lti_storage_target
+        Lti::PlatformStorage::FORWARDING_TARGET
       end
 
       def id_token
@@ -222,6 +304,9 @@ module Lti
         parts = canvas_domain.split(":")
         url.host = parts.first
         url.port = parts.last if parts.size > 1
+        if Lti::LaunchDebugLogger.log_level(@domain_root_account) > 0
+          url.query = url.query.present? ? "#{url.query}&authredir=1" : "authredir=1"
+        end
         url.to_s
       end
 

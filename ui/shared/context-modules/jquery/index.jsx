@@ -28,25 +28,25 @@ import {useScope as useI18nScope} from '@canvas/i18n'
 import Helper from './context_modules_helper'
 import CyoeHelper from '@canvas/conditional-release-cyoe-helper'
 import ContextModulesView from '../backbone/views/context_modules' /* handles the publish/unpublish state */
-import RelockModulesDialog from '../backbone/views/RelockModulesDialog'
+import RelockModulesDialog from '@canvas/relock-modules-dialog'
 import vddTooltip from '@canvas/due-dates/jquery/vddTooltip'
 import vddTooltipView from '../jst/_vddTooltip.handlebars'
 import Publishable from '../backbone/models/Publishable'
 import PublishButtonView from '@canvas/publish-button-view'
-import htmlEscape from 'html-escape'
+import htmlEscape from '@instructure/html-escape'
 import ContentTypeExternalToolTray from '@canvas/trays/react/ContentTypeExternalToolTray'
 import {monitorLtiMessages, ltiState} from '@canvas/lti/jquery/messages'
 import get from 'lodash/get'
 import axios from '@canvas/axios'
 import {showFlashError} from '@canvas/alerts/react/FlashAlert'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/datetime' /* dateString, datetimeString, time_field, datetime_field */
-import '@canvas/forms/jquery/jquery.instructure_forms' /* formSubmit, fillFormData, formErrors, errorBox */
+import '@canvas/datetime/jquery' /* dateString, datetimeString, time_field, datetime_field */
+import '@canvas/jquery/jquery.instructure_forms' /* formSubmit, fillFormData, formErrors, errorBox */
 import 'jqueryui/dialog'
 import '@canvas/util/jquery/fixDialogButtons'
 import '@canvas/jquery/jquery.instructure_misc_helpers' /* /\$\.underscore/ */
 import '@canvas/jquery/jquery.instructure_misc_plugins' /* .dim, confirmDelete, fragmentChange, showIf */
-import '@canvas/keycodes'
+import '@canvas/jquery-keycodes'
 import '@canvas/loading-image'
 import '@canvas/util/templateData' /* fillTemplateData, getTemplateData */
 import 'date-js' /* Date.parse */
@@ -70,9 +70,9 @@ import ContextModulesPublishMenu from '../react/ContextModulesPublishMenu'
 import {renderContextModulesPublishIcon} from '../utils/publishOneModuleHelper'
 import {underscoreString} from '@canvas/convert-case'
 import {selectContentDialog} from '@canvas/select-content-dialog'
-import DifferentiatedModulesTray from '@canvas/differentiated-modules'
-import ItemAssignToTray from '@canvas/differentiated-modules/react/Item/ItemAssignToTray'
-import {parseModule, parseModuleList} from '@canvas/differentiated-modules/utils/moduleHelpers'
+import DifferentiatedModulesTray from '../differentiated-modules'
+import ItemAssignToTray from '../differentiated-modules/react/Item/ItemAssignToTray'
+import {parseModule, parseModuleList} from '../differentiated-modules/utils/moduleHelpers'
 import {addModuleElement} from '../utils/moduleHelpers'
 
 if (!('INST' in window)) window.INST = {}
@@ -99,22 +99,29 @@ window.modules = (function () {
       return indent
     },
 
-    addModule(callback = () => { }) {
+    addModule(callback = () => {}) {
       if (ENV.FEATURES.differentiated_modules) {
-        const options = { initialTab: 'settings' };
+        const options = {initialTab: 'settings'}
         const settings = {
           moduleList: parseModuleList(),
           addModuleUI: (data, $moduleElement) => {
             if (typeof callback === 'function') {
               callback(data, $moduleElement)
             } else {
-              addModuleElement(data, $moduleElement, updatePublishMenuDisabledState, new RelockModulesDialog(), {})
+              addModuleElement(
+                data,
+                $moduleElement,
+                updatePublishMenuDisabledState,
+                new RelockModulesDialog(),
+                {}
+              )
             }
-            $moduleElement.css('display', 'block');
-          }
+            $moduleElement.css('display', 'block')
+          },
         }
         const $module = $('#context_module_blank').clone(true).attr('id', 'context_module_new')
         $('#context_modules').append($module)
+        // eslint-disable-next-line no-restricted-globals
         renderDifferentiatedModulesTray(event.target, $module, settings, options)
       } else {
         const $module = $('#context_module_blank').clone(true).attr('id', 'context_module_new')
@@ -324,6 +331,8 @@ window.modules = (function () {
               } else {
                 $context_module_item.find('.mc_objectives').remove()
               }
+
+              $context_module_item.addClass('rendered')
             })
 
             vddTooltip()
@@ -602,11 +611,10 @@ window.modules = (function () {
           const $a = $assignToMenuItem.find('a')
           $a.attr('data-item-id', data.id)
           $a.attr('data-item-name', data.title)
-          $a.attr('data-item-type', data.quiz_lti ? 'lti-quiz' : data.type)
+          $a.attr('data-item-type', data.quiz_lti ? 'lti-quiz' : data.content_type == 'Quizzes::Quiz' ? 'quiz' : data.type)
           $a.attr('data-item-context-id', data.context_id)
           $a.attr('data-item-context-type', data.context_type)
           $a.attr('data-item-content-id', data.content_id)
-          $a.attr('data-item-content-type', data.content_type)
         }
       }
 
@@ -821,7 +829,7 @@ const renderDifferentiatedModulesTray = (
   returnFocusTo,
   moduleElement,
   settingsProps,
-  options = {initialTab: 'settings'},
+  options = {initialTab: 'settings'}
 ) => {
   const container = document.getElementById('differentiated-modules-mount-point')
   ReactDOM.render(
@@ -839,6 +847,27 @@ const renderDifferentiatedModulesTray = (
   )
 }
 
+// Based on the logic from ui/shared/context-modules/differentiated-modules/utils/moduleHelpers.ts
+const updateUnlockTime = function ($module, unlock_at) {
+  const friendlyDatetime = unlock_at ? $.datetimeString(unlock_at) : ''
+
+  const unlockAtElement = $module.find('.unlock_at')
+  if (unlockAtElement.length) {
+    unlockAtElement.text(friendlyDatetime)
+  }
+
+  const displayedUnlockAtElement = $module.find('.displayed_unlock_at')
+  if (displayedUnlockAtElement.length) {
+    displayedUnlockAtElement.text(friendlyDatetime)
+    displayedUnlockAtElement.attr('data-html-tooltip-title', friendlyDatetime)
+  }
+
+  const unlockDetailsElement = $module.find('.unlock_details')
+  if (unlockDetailsElement.length) {
+    // User has selected a lock date and that date is in the future
+    $module.find('.unlock_details').showIf(unlock_at && Date.parse(unlock_at) > new Date())
+  }
+}
 
 const updatePrerequisites = function ($module, prereqs) {
   const $prerequisitesDiv = $module.find('.prerequisites')
@@ -964,8 +993,6 @@ modules.initModuleManagement = function (duplicate) {
 
   // -------- BINDING THE UPDATE EVENT -----------------
   $('.context_module').bind('update', (event, data) => {
-    data.context_module.displayed_unlock_at = $.datetimeString(data.context_module.unlock_at)
-    data.context_module.unlock_at = $.datetimeString(data.context_module.unlock_at)
     const $module = $('#context_module_' + data.context_module.id)
     $module.attr('data-module-id', data.context_module.id)
     $module.attr('aria-label', data.context_module.name)
@@ -980,11 +1007,7 @@ modules.initModuleManagement = function (duplicate) {
       hrefValues: ['id'],
     })
 
-    $module
-      .find('.unlock_details')
-      .showIf(
-        data.context_module.unlock_at && Date.parse(data.context_module.unlock_at) > new Date()
-      )
+    updateUnlockTime($module, data.context_module.unlock_at)
     updatePrerequisites($module, data.context_module.prerequisites)
     updateOtherPrerequisites(data.context_module.id, data.context_module.name)
 
@@ -1068,7 +1091,14 @@ modules.initModuleManagement = function (duplicate) {
       $module.removeClass('dont_remove')
       return $module
     },
-    success: (data, $module) => addModuleElement(data, $module, updatePublishMenuDisabledState, relock_modules_dialog, moduleItems),
+    success: (data, $module) =>
+      addModuleElement(
+        data,
+        $module,
+        updatePublishMenuDisabledState,
+        relock_modules_dialog,
+        moduleItems
+      ),
     error(data, $module) {
       $module.loadingImage('remove')
     },
@@ -1344,9 +1374,7 @@ modules.initModuleManagement = function (duplicate) {
             const $contextModules = $('#context_modules .context_module')
             if (!$contextModules.length) {
               $('#expand_collapse_all').hide()
-              if (window.ENV?.FEATURES?.module_publish_menu) {
-                updatePublishMenuDisabledState(true)
-              }
+              updatePublishMenuDisabledState(true)
             }
           })
           $.flashMessage(
@@ -1656,7 +1684,14 @@ modules.initModuleManagement = function (duplicate) {
 
   $(document).on('click', '.add_module_link', event => {
     event.preventDefault()
-    const addModuleCallback =  (data, $moduleElement) => addModuleElement(data, $moduleElement, updatePublishMenuDisabledState, relock_modules_dialog, moduleItems);
+    const addModuleCallback = (data, $moduleElement) =>
+      addModuleElement(
+        data,
+        $moduleElement,
+        updatePublishMenuDisabledState,
+        relock_modules_dialog,
+        moduleItems
+      )
     modules.addModule(addModuleCallback)
   })
 
@@ -2337,7 +2372,7 @@ $(document).ready(function () {
     $.ajaxJSON(url, 'POST', {collapse})
   })
 
-  function setExternalToolTray(tool, moduleData, selectable, returnFocusTo) {
+  function setExternalToolTray(tool, moduleData, placement = 'module_index_menu', returnFocusTo) {
     const handleDismiss = () => {
       setExternalToolTray(null)
       returnFocusTo.focus()
@@ -2349,7 +2384,7 @@ $(document).ready(function () {
     ReactDOM.render(
       <ContentTypeExternalToolTray
         tool={tool}
-        placement="module_index_menu"
+        placement={placement}
         acceptedResourceTypes={[
           'assignment',
           'audio',
@@ -2362,7 +2397,7 @@ $(document).ready(function () {
           'video',
         ]}
         targetResourceType="module"
-        allowItemSelection={selectable}
+        allowItemSelection={placement === 'module_index_menu'}
         selectableItems={moduleData}
         onDismiss={handleDismiss}
         open={tool !== null}
@@ -2450,7 +2485,7 @@ $(document).ready(function () {
         name: currentModule.find('.name').attr('title'),
       })
     }
-    setExternalToolTray(tool, moduleData, launchType === 'module_index_menu', $('.al-trigger')[0])
+    setExternalToolTray(tool, moduleData, launchType, $('.al-trigger')[0])
   }
 
   $('.menu_tray_tool_link').click(openExternalTool)
@@ -2557,13 +2592,11 @@ $(document).ready(function () {
           renderItemAssignToTray(false, returnFocusTo, itemProps)
           returnFocusTo.focus()
         }}
-        onSave={() => {}}
         courseId={itemProps.courseId}
-        moduleItemId={itemProps.moduleItemId}
-        moduleItemName={itemProps.moduleItemName}
-        moduleItemType={itemProps.moduleItemType}
-        moduleItemContentType={itemProps.moduleItemContentType}
-        moduleItemContentId={itemProps.moduleItemContentId}
+        itemName={itemProps.moduleItemName}
+        itemType={itemProps.moduleItemType}
+        iconType={itemProps.moduleItemType}
+        itemContentId={itemProps.moduleItemContentId}
         pointsPossible={itemProps.pointsPossible}
         locale={ENV.LOCALE || 'en'}
         timezone={ENV.TIMEZONE || 'UTC'}
@@ -2576,8 +2609,9 @@ $(document).ready(function () {
   // to all the assignment's data (due due dates, availability, etc)
   function parseModuleItemElement(element) {
     const pointsPossibleElem = element?.querySelector('.points_possible_display')
-    const points = pointsPossibleElem?.textContent
-    return {pointsPossible: points}
+    const points = parseFloat(pointsPossibleElem?.textContent)
+    // eslint-disable-next-line no-restricted-globals
+    return {pointsPossible: isNaN(points) ? undefined : points}
   }
 
   $('.module-item-assign-to-link').on('click keyclick', function (event) {
@@ -2587,17 +2621,14 @@ $(document).ready(function () {
     const moduleItemName = event.target.getAttribute('data-item-name')
     const moduleItemType = event.target.getAttribute('data-item-type')
     const courseId = event.target.getAttribute('data-item-context-id')
-    const moduleItemContentType = event.target.getAttribute('data-item-content-type')
     const moduleItemContentId = event.target.getAttribute('data-item-content-id')
     const itemProps = parseModuleItemElement(
       document.getElementById(`context_module_item_${moduleItemId}`)
     )
     renderItemAssignToTray(true, returnFocusTo, {
       courseId,
-      moduleItemId,
       moduleItemName,
       moduleItemType,
-      moduleItemContentType,
       moduleItemContentId,
       ...itemProps,
     })

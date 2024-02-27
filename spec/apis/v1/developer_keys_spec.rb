@@ -82,7 +82,7 @@ describe DeveloperKeysController, type: :request do
       d.update! visible: true
       get "/api/v1/accounts/#{a.id}/developer_keys", params: { inherited: true }
       expect(json_parse.first.keys).to match_array(
-        %w[name created_at icon_url workflow_state id developer_key_account_binding is_lti_key inherited_from]
+        %w[name created_at icon_url workflow_state id developer_key_account_binding is_lti_key inherited_from is_lti_registration]
       )
     end
 
@@ -105,7 +105,7 @@ describe DeveloperKeysController, type: :request do
       it "only includes a subset of attributes" do
         subject
         expect(json_parse.first.keys).to match_array(
-          %w[name created_at icon_url workflow_state id developer_key_account_binding is_lti_key inherited_from]
+          %w[name created_at icon_url workflow_state id developer_key_account_binding is_lti_key inherited_from is_lti_registration]
         )
       end
 
@@ -144,7 +144,7 @@ describe DeveloperKeysController, type: :request do
                         format: "json",
                         account_id: sa_id.to_s
                       })
-      expect(json.first.keys).not_to be_include("test_cluster_only")
+      expect(json.first.keys).not_to include("test_cluster_only")
     end
 
     it "does include `test_cluster_only` when enabled" do
@@ -157,7 +157,7 @@ describe DeveloperKeysController, type: :request do
                         format: "json",
                         account_id: sa_id.to_s
                       })
-      expect(json.first.keys).to be_include("test_cluster_only")
+      expect(json.first.keys).to include("test_cluster_only")
     end
 
     describe "developer key account bindings" do

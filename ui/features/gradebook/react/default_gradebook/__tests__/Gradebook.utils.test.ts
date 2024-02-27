@@ -22,6 +22,7 @@ import {
   doesSubmissionNeedGrading,
   doFiltersMatch,
   findFilterValuesOfType,
+  filterStudentBySectionFn,
   getAssignmentColumnId,
   getAssignmentGroupColumnId,
   getCustomColumnId,
@@ -33,13 +34,15 @@ import {
   onGridKeyDown,
   otherGradingPeriodAssignmentIds,
   sectionList,
+  getLabelForFilter,
 } from '../Gradebook.utils'
 import {isDefaultSortOrder, localeSort} from '../Gradebook.sorting'
 import {createGradebook} from './GradebookSpecHelper'
 import {fireEvent, screen, waitFor} from '@testing-library/dom'
-import type {FilterPreset} from '../gradebook.d'
+import type {FilterPreset, Filter} from '../gradebook.d'
 import type {SlickGridKeyboardEvent} from '../grid.d'
-import type {Submission} from '../../../../../api.d'
+import type {Submission, Student, Enrollment} from '../../../../../api.d'
+import {enrollment, student, enrollmentFilter, appliedFilters} from './fixtures'
 
 const unsubmittedSubmission: Submission = {
   anonymous_id: 'dNq5T',
@@ -527,5 +530,170 @@ describe('isGradedOrExcusedSubmissionUnposted', () => {
 
   it('returns false if submission is ungraded', () => {
     expect(isGradedOrExcusedSubmissionUnposted(ungradedSubmission)).toStrictEqual(false)
+  })
+})
+
+describe('filterStudentBySectionFn', () => {
+  describe('section filtering', () => {
+    let modifiedStudents: Student[]
+    const enrollmentFilterTest = {...enrollmentFilter}
+    const appliedFilterTest = [...appliedFilters]
+    beforeEach(() => {
+      const enrollment1: Enrollment = {
+        ...enrollment,
+        course_section_id: 'section1',
+        enrollment_state: 'active',
+      }
+      const enrollment2: Enrollment = {
+        ...enrollment,
+        course_section_id: 'section1',
+        enrollment_state: 'active',
+      }
+      const enrollment3: Enrollment = {
+        ...enrollment,
+        course_section_id: 'section2',
+        enrollment_state: 'active',
+      }
+      const modifiedStudent1: Student = {...student, name: 'Jim Doe', enrollments: [enrollment1]}
+      const modifiedStudent2: Student = {
+        ...student,
+        name: 'Bob Jim',
+        enrollments: [enrollment2, enrollment3],
+      }
+      modifiedStudents = [modifiedStudent1, modifiedStudent2]
+    })
+    it('students appear in the correct sections when switching between filters', () => {
+      appliedFilterTest[0].value = 'section1'
+      const filteredStudentsSection1 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilters, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection1.length).toBe(2)
+      appliedFilterTest[0].value = 'section2'
+      const filteredStudentsSection2 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilters, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection2[0].name).toBe('Bob Jim')
+    })
+  })
+
+  describe('enrollment filters', () => {
+    let modifiedStudents: Student[]
+    const enrollmentFilterTest = {...enrollmentFilter}
+    const appliedFilterTest = [...appliedFilters]
+    beforeEach(() => {
+      const enrollment1: Enrollment = {
+        ...enrollment,
+        course_section_id: 'section1',
+        enrollment_state: 'completed',
+      }
+      const enrollment2: Enrollment = {
+        ...enrollment,
+        course_section_id: 'section1',
+        enrollment_state: 'inactive',
+      }
+      const modifiedStudent1: Student = {...student, name: 'Jim Doe', enrollments: [enrollment1]}
+      const modifiedStudent2: Student = {...student, name: 'Bob Jim', enrollments: [enrollment2]}
+      modifiedStudents = [modifiedStudent1, modifiedStudent2]
+    })
+    it('student appears in section 1 with a completed enrollment when the concluded enrollment filter is on ', () => {
+      enrollmentFilterTest.concluded = true
+      appliedFilterTest[0].value = 'section1'
+      const filteredStudentsSection1 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilters, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection1.length).toBe(1)
+      expect(filteredStudentsSection1[0].name).toBe('Jim Doe')
+    })
+    it('student appears in section 1 with a inactive enrollment when the inactive enrollment filter is on ', () => {
+      enrollmentFilterTest.inactive = true
+      enrollmentFilterTest.concluded = false
+      appliedFilterTest[0].value = 'section1'
+      const filteredStudentsSection1 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilters, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection1.length).toBe(1)
+      expect(filteredStudentsSection1[0].name).toBe('Bob Jim')
+    })
+    it('both students appear in section 1 when concluded and inactive enrollment filters are both on ', () => {
+      enrollmentFilterTest.inactive = true
+      enrollmentFilterTest.concluded = true
+      appliedFilterTest[0].value = 'section1'
+      const filteredStudentsSection1 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilters, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection1.length).toBe(2)
+    })
+  })
+
+  describe('dual enrollment', () => {
+    const enrollmentFilterTest = {...enrollmentFilter}
+    const appliedFilterTest = [...appliedFilters]
+    let modifiedStudents: Student[]
+    beforeEach(() => {
+      const enrollment1: Enrollment = {
+        ...enrollment,
+        course_section_id: 'section1',
+        enrollment_state: 'active',
+      }
+      const enrollment2: Enrollment = {
+        ...enrollment,
+        course_section_id: 'section2',
+        enrollment_state: 'completed',
+      }
+      const modifiedStudent: Student = {...student, enrollments: [enrollment1, enrollment2]}
+      modifiedStudents = [modifiedStudent]
+    })
+    it('dual enrollment student appears in section 1 with an active enrollment ', () => {
+      appliedFilterTest[0].value = 'section1'
+      const filteredStudentsSection1 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilterTest, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection1[0].name).toBe('Jim Doe')
+    })
+
+    it('dual enrollment student does not appear section 2 with a concluded enrollment ', () => {
+      appliedFilterTest[0].value = 'section2'
+      const filteredStudentsSection2 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilterTest, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection2.length).toBe(0)
+    })
+
+    it('dual enrollment student appears in section 2 with a concluded enrollment when the concluded enrollment filter is on ', () => {
+      enrollmentFilterTest.concluded = true
+      appliedFilterTest[0].value = 'section2'
+      const filteredStudentsSection2 = modifiedStudents.filter(
+        filterStudentBySectionFn(appliedFilterTest, enrollmentFilterTest)
+      )
+      expect(filteredStudentsSection2[0].name).toBe('Jim Doe')
+    })
+  })
+
+  describe('filter start and end date pill display', () => {
+    ENV.TIMEZONE = 'Asia/Tokyo'
+
+    const startFilter: Filter = {
+      id: '1',
+      type: 'start-date',
+      created_at: '',
+      value: '2023-12-13T16:00:00.000Z',
+    }
+
+    const endFilter: Filter = {
+      id: '1',
+      type: 'end-date',
+      created_at: '',
+      value: '2023-12-15T16:00:00.000Z',
+    }
+
+    it('takes the UTC filter start-date and converts it to user local time for filter pill display', () => {
+      const result = getLabelForFilter(startFilter, [], [], [], [], {}, [])
+      expect(result).toEqual('Start Date 12/14/2023')
+    })
+
+    it('takes the UTC filter end-date and converts it to user local time for filter pill display', () => {
+      const result = getLabelForFilter(endFilter, [], [], [], [], {}, [])
+      expect(result).toEqual('End Date 12/16/2023')
+    })
   })
 })

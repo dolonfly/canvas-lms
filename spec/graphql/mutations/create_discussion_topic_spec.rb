@@ -104,11 +104,20 @@ describe Mutations::CreateDiscussionTopic do
               name
               pointsPossible
               gradingType
+              groupSet {
+                _id
+              }
               peerReviews {
                 anonymousReviews
                 automaticReviews
                 count
                 enabled
+              }
+              assignmentOverrides {
+                nodes {
+                  _id
+                  title
+                }
               }
             }
           }
@@ -132,12 +141,12 @@ describe Mutations::CreateDiscussionTopic do
 
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
       requireInitialPost: #{require_initial_post}
-      anonymousState: "off"
+      anonymousState: off
     GQL
 
     result = execute_with_input(query)
@@ -172,12 +181,12 @@ describe Mutations::CreateDiscussionTopic do
     query = <<~GQL
       isAnnouncement: #{is_announcement}
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
       requireInitialPost: #{require_initial_post}
-      anonymousState: "off"
+      anonymousState: off
     GQL
 
     result = execute_with_input(query)
@@ -212,12 +221,12 @@ describe Mutations::CreateDiscussionTopic do
     query = <<~GQL
       isAnnouncement: #{is_announcement}
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
       requireInitialPost: #{require_initial_post}
-      anonymousState: "off"
+      anonymousState: off
       locked: #{locked}
     GQL
 
@@ -236,7 +245,7 @@ describe Mutations::CreateDiscussionTopic do
   it "creates an allow_rating discussion topic" do
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "Course"
+      contextType: Course
       title: "Allows Ratings"
       message: "You can like this"
       allowRating: true
@@ -255,7 +264,7 @@ describe Mutations::CreateDiscussionTopic do
   it "creates an only_graders_can_rate discussion topic" do
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "Course"
+      contextType: Course
       title: "Allows Ratings"
       message: "You can like this"
       allowRating: true
@@ -279,11 +288,11 @@ describe Mutations::CreateDiscussionTopic do
     published = true
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
-      anonymousState: "off"
+      anonymousState: off
     GQL
 
     result = execute_with_input(query)
@@ -305,11 +314,11 @@ describe Mutations::CreateDiscussionTopic do
     file_id = attachment.id
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
-      anonymousState: "off"
+      anonymousState: off
       fileId: "#{file_id}"
     GQL
 
@@ -328,11 +337,11 @@ describe Mutations::CreateDiscussionTopic do
     anonymous_state = "full_anonymity"
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
-      anonymousState: "#{anonymous_state}"
+      anonymousState: #{anonymous_state}
     GQL
 
     result = execute_with_input(query)
@@ -349,11 +358,11 @@ describe Mutations::CreateDiscussionTopic do
 
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "Course"
+      contextType: Course
       title: "Student Anonymous Create"
       message: "this should not return an error"
       published: true
-      anonymousState: "full_anonymity"
+      anonymousState: full_anonymity
     GQL
 
     result = execute_with_input(query, @teacher)
@@ -372,11 +381,11 @@ describe Mutations::CreateDiscussionTopic do
     anonymous_state = "partial_anonymity"
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
-      anonymousState: "#{anonymous_state}"
+      anonymousState: #{anonymous_state}
     GQL
 
     result = execute_with_input(query)
@@ -396,11 +405,11 @@ describe Mutations::CreateDiscussionTopic do
     anonymous_state = "partial_anonymity"
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
-      anonymousState: "#{anonymous_state}"
+      anonymousState: #{anonymous_state}
       isAnonymousAuthor: true
     GQL
 
@@ -421,11 +430,11 @@ describe Mutations::CreateDiscussionTopic do
     anonymous_state = "partial_anonymity"
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
-      anonymousState: "#{anonymous_state}"
+      anonymousState: #{anonymous_state}
       isAnonymousAuthor: false
     GQL
 
@@ -446,10 +455,10 @@ describe Mutations::CreateDiscussionTopic do
 
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "Course"
+      contextType: Course
       title: "TODO Discussion"
       published: true
-      anonymousState: "full_anonymity"
+      anonymousState: full_anonymity
       todoDate: "#{todo_date}"
     GQL
 
@@ -472,12 +481,12 @@ describe Mutations::CreateDiscussionTopic do
 
     query = <<~GQL
       contextId: "#{@course.id}"
-      contextType: "#{context_type}"
+      contextType: #{context_type}
       title: "#{title}"
       message: "#{message}"
       published: #{published}
       requireInitialPost: #{require_initial_post}
-      anonymousState: "off"
+      anonymousState: off
       podcastEnabled: #{podcast_enabled}
       podcastHasStudentPosts: #{podcast_has_student_posts}
     GQL
@@ -503,7 +512,7 @@ describe Mutations::CreateDiscussionTopic do
       it "returns 'not found' with an incorrect ID" do
         query = <<~GQL
           contextId: "1"
-          contextType: "Course"
+          contextType: Course
         GQL
         result = execute_with_input(query)
         expect_error(result, "Not found")
@@ -512,10 +521,11 @@ describe Mutations::CreateDiscussionTopic do
       it "returns 'invalid context' with an incorrect context type" do
         query = <<~GQL
           contextId: "1"
-          contextType: "NotAContextType"
+          contextType: NotAContextType
         GQL
         result = execute_with_input(query)
-        expect_error(result, "Invalid context")
+        expected_error_message = "Argument 'contextType' on InputObject 'CreateDiscussionTopicInput' has an invalid value \\(NotAContextType\\)\\. Expected type 'DiscussionTopicContextType!'\\."
+        expect_error(result, expected_error_message)
       end
     end
 
@@ -530,7 +540,7 @@ describe Mutations::CreateDiscussionTopic do
 
         query = <<~GQL
           contextId: "#{@course.id}"
-          contextType: "#{context_type}"
+          contextType: #{context_type}
           title: "#{title}"
           message: "#{message}"
           published: #{published}
@@ -554,7 +564,7 @@ describe Mutations::CreateDiscussionTopic do
 
         query = <<~GQL
           contextId: "#{@course.id}"
-          contextType: "#{context_type}"
+          contextType: #{context_type}
           title: "#{title}"
           message: "#{message}"
           published: #{published}
@@ -582,11 +592,11 @@ describe Mutations::CreateDiscussionTopic do
 
         query = <<~GQL
           contextId: "#{group.id}"
-          contextType: "#{context_type}"
+          contextType: #{context_type}
           title: "#{title}"
           message: "#{message}"
           published: #{published}
-          anonymousState: "#{anonymous_state}"
+          anonymousState: #{anonymous_state}
         GQL
 
         result = execute_with_input(query)
@@ -600,11 +610,11 @@ describe Mutations::CreateDiscussionTopic do
 
         query = <<~GQL
           contextId: "#{@course.id}"
-          contextType: "Course"
+          contextType: Course
           title: "Student Anonymous Create"
           message: "this should return an error"
           published: true
-          anonymousState: "full_anonymity"
+          anonymousState: full_anonymity
         GQL
 
         result = execute_with_input(query, @student)
@@ -617,7 +627,7 @@ describe Mutations::CreateDiscussionTopic do
         todo_date = 5.days.from_now.iso8601
         query = <<~GQL
           contextId: "#{@course.id}"
-          contextType: "Course",
+          contextType: Course,
           todoDate: "#{todo_date}"
         GQL
 
@@ -636,12 +646,12 @@ describe Mutations::CreateDiscussionTopic do
       require_initial_post = true
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         requireInitialPost: #{require_initial_post}
-        anonymousState: "off"
+        anonymousState: off
         specificSections: "all"
       GQL
 
@@ -668,12 +678,12 @@ describe Mutations::CreateDiscussionTopic do
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         requireInitialPost: #{require_initial_post}
-        anonymousState: "off"
+        anonymousState: off
         specificSections: "#{section.id},#{section2.id}"
       GQL
 
@@ -708,12 +718,12 @@ describe Mutations::CreateDiscussionTopic do
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         requireInitialPost: #{require_initial_post}
-        anonymousState: "off"
+        anonymousState: off
         specificSections: "#{sections}"
       GQL
 
@@ -736,12 +746,12 @@ describe Mutations::CreateDiscussionTopic do
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         requireInitialPost: #{require_initial_post}
-        anonymousState: "off"
+        anonymousState: off
         delayedPostAt: "#{delayed_post_at}"
         lockAt: "#{lock_at}"
       GQL
@@ -767,12 +777,12 @@ describe Mutations::CreateDiscussionTopic do
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         requireInitialPost: #{require_initial_post}
-        anonymousState: "off"
+        anonymousState: off
         delayedPostAt: "#{delayed_post_at}"
         lockAt: "#{lock_at}"
       GQL
@@ -797,12 +807,12 @@ describe Mutations::CreateDiscussionTopic do
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         requireInitialPost: #{require_initial_post}
-        anonymousState: "off"
+        anonymousState: off
         lockAt: "#{lock_at}"
       GQL
 
@@ -827,12 +837,12 @@ describe Mutations::CreateDiscussionTopic do
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         requireInitialPost: #{require_initial_post}
-        anonymousState: "off"
+        anonymousState: off
         delayedPostAt: #{delayed_post_at}
         lockAt: #{lock_at}
       GQL
@@ -853,27 +863,35 @@ describe Mutations::CreateDiscussionTopic do
       title = "Graded Discussion"
       message = "Lorem ipsum..."
       published = true
+      student = @course.enroll_student(User.create!, enrollment_state: "active").user
+      group_category = @course.group_categories.create! name: "foo"
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
+        groupCategoryId: "#{group_category.id}"
         assignment: {
-          courseId: "1",
-            name: "#{title}",
-            pointsPossible: 15,
-            gradingType: percent,
-            peerReviews: {
-              anonymousReviews: true,
-              automaticReviews: true,
-              count: 2,
-              enabled: true,
-              intraReviews: true,
-              dueAt: "#{5.days.from_now.iso8601}",
-            }
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          pointsPossible: 15,
+          gradingType: percent,
+          postToSis: true,
+          groupCategoryId: "#{group_category.id}"
+          peerReviews: {
+            anonymousReviews: true,
+            automaticReviews: true,
+            count: 2,
+            enabled: true,
+            intraReviews: true,
+            dueAt: "#{5.days.from_now.iso8601}",
           }
+          assignmentOverrides: {
+            studentIds: ["#{student.id}"]
+          }
+        }
       GQL
 
       result = execute_with_input_with_assignment(query)
@@ -887,9 +905,59 @@ describe Mutations::CreateDiscussionTopic do
         expect(discussion_topic["assignment"]["peerReviews"]["anonymousReviews"]).to be true
         expect(discussion_topic["assignment"]["peerReviews"]["automaticReviews"]).to be true
         expect(discussion_topic["assignment"]["peerReviews"]["count"]).to eq 2
+        expect(discussion_topic["assignment"]["assignmentOverrides"]["nodes"]).to match([{ "_id" => assignment.assignment_overrides.first.id.to_s, "title" => assignment.assignment_overrides.first.title }])
         expect(discussion_topic["assignment"]["_id"]).to eq assignment.id.to_s
+        expect(discussion_topic["assignment"]["groupSet"]["_id"]).to eq group_category.id.to_s
         expect(discussion_topic["_id"]).to eq assignment.discussion_topic.id.to_s
         expect(DiscussionTopic.count).to eq 1
+        expect(DiscussionTopic.last.assignment.post_to_sis).to be true
+      end
+    end
+
+    it "successfully creates a graded discussion topic with a group override" do
+      context_type = "Course"
+      title = "Graded Discussion"
+      message = "Lorem ipsum..."
+      published = true
+      @course.enroll_student(User.create!, enrollment_state: "active").user
+      group_category = @course.group_categories.create! name: "foo"
+      group = group_category.groups.create! name: "bar", context: @course
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        groupCategoryId: "#{group_category.id}"
+        assignment: {
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          pointsPossible: 15,
+          postToSis: true,
+          groupCategoryId: "#{group_category.id}"
+          assignmentOverrides: {
+            groupId: "#{group.id}"
+          }
+        }
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+      assignment = Assignment.last
+      discussion_topic = result.dig("data", "createDiscussionTopic", "discussionTopic")
+      override = assignment.assignment_overrides.first
+      aggregate_failures do
+        expect(result.dig("data", "discussionTopic", "errors")).to be_nil
+        expect(discussion_topic["assignment"]["name"]).to eq title
+        expect(discussion_topic["assignment"]["pointsPossible"]).to eq 15
+        expect(discussion_topic["assignment"]["assignmentOverrides"]["nodes"]).to match([{ "_id" => assignment.assignment_overrides.first.id.to_s, "title" => assignment.assignment_overrides.first.title }])
+        expect(discussion_topic["assignment"]["_id"]).to eq assignment.id.to_s
+        expect(discussion_topic["assignment"]["groupSet"]["_id"]).to eq group_category.id.to_s
+        expect(discussion_topic["_id"]).to eq assignment.discussion_topic.id.to_s
+        expect(DiscussionTopic.count).to eq 2
+        expect(DiscussionTopic.last.assignment.post_to_sis).to be true
+        expect(override.assignment_id).to eq assignment.id
+        expect(override.workflow_state).to eq "active"
       end
     end
 
@@ -901,31 +969,381 @@ describe Mutations::CreateDiscussionTopic do
 
       query = <<~GQL
         contextId: "#{@course.id}"
-        contextType: "#{context_type}"
+        contextType: #{context_type}
         title: "#{title}"
         message: "#{message}"
         published: #{published}
         assignment: {
-          courseId: "1",
-            name: "#{title}",
-            pointsPossible: 15,
-            gradingType: percent,
-            peerReviews: {
-              anonymousReviews: true,
-              automaticReviews: true,
-              count: 2,
-              enabled: true,
-              intraReviews: true,
-              dueAt: "#{5.days.from_now.iso8601}",
-            }
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          pointsPossible: 15,
+          gradingType: percent,
+          peerReviews: {
+            anonymousReviews: true,
+            automaticReviews: true,
+            count: 2,
+            enabled: true,
+            intraReviews: true,
+            dueAt: "#{5.days.from_now.iso8601}",
           }
+        }
       GQL
 
       student = @course.enroll_student(User.create!, enrollment_state: "active").user
       result = execute_with_input_with_assignment(query, student)
       discussion_topic = result.dig("data", "createDiscussionTopic", "discussionTopic")
       expect(discussion_topic).to be_nil
-      expect(result["data"]["createDiscussionTopic"]["errors"][0]["message"]).to eq "You do not have permissions to create assignments in the provided course"
+      expect(result["errors"][0]["message"]).to eq "invalid course: #{@course.id}"
+    end
+
+    it "error for: assignment context_id must match discussion topic context_id" do
+      context_type = "Course"
+      title = "Graded Discussion"
+      message = "Lorem ipsum..."
+      published = true
+
+      course2 = Course.create!(name: "Course 2", workflow_state: "active")
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        assignment: {
+          courseId: "#{course2.id}",
+          name: "#{title}",
+          pointsPossible: 15,
+          gradingType: percent,
+          peerReviews: {
+            anonymousReviews: true,
+            automaticReviews: true,
+            count: 2,
+            enabled: true,
+            intraReviews: true,
+            dueAt: "#{5.days.from_now.iso8601}",
+          }
+        }
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+      discussion_topic = result.dig("data", "createDiscussionTopic", "discussionTopic")
+      expect(discussion_topic).to be_nil
+      expect(result["data"]["createDiscussionTopic"]["errors"][0]["message"]).to eq "Assignment context_id must match discussion topic context_id"
+    end
+
+    it "error: unknown student ids" do
+      context_type = "Course"
+      title = "Graded Discussion"
+      message = "Lorem ipsum..."
+      published = true
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        assignment: {
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          pointsPossible: 15,
+          gradingType: percent,
+          assignmentOverrides: {
+            studentIds: ["#{@teacher.id - 1}"]
+          }
+        }
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+      discussion_topic = result.dig("data", "createDiscussionTopic", "discussionTopic")
+      expect(discussion_topic).to be_nil
+      expect(result["data"]["createDiscussionTopic"]["errors"][0]["message"]).to eq "[[:base, \"unknown student ids: [\\\"#{@teacher.id - 1}\\\"]\"]]"
+    end
+  end
+
+  context "checkpoints" do
+    before(:once) do
+      @course.root_account.enable_feature!(:discussion_checkpoints)
+    end
+
+    it "successfully creates a discussion topic with checkpoints" do
+      context_type = "Course"
+      title = "Graded Discussion w/Checkpoints"
+      message = "Lorem ipsum..."
+      published = true
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        assignment: {
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          forCheckpoints: true
+        }
+        checkpoints: [
+          {
+            checkpointLabel: "reply_to_topic",
+            pointsPossible: 10,
+            dates: [{ type: everyone, dueAt: "#{5.days.from_now.iso8601}" }]
+          },
+          {
+            checkpointLabel: "reply_to_entry",
+            pointsPossible: 15,
+            dates: [{ type: everyone, dueAt: "#{10.days.from_now.iso8601}" }],
+            repliesRequired: 3
+          }
+        ]
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+      expect(result["errors"]).to be_nil
+    end
+
+    it "successfully creates a discussion topic with checkpoints using dueAt, lockAt, unlockAt" do
+      context_type = "Course"
+      title = "Graded Discussion w/Checkpoints"
+      message = "Lorem ipsum..."
+      published = true
+      due_at = 5.days.from_now
+      lock_at = 5.days.from_now
+      unlock_at = 2.days.from_now
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        assignment: {
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          forCheckpoints: true
+        }
+        checkpoints: [
+          {
+            checkpointLabel: "reply_to_topic",
+            pointsPossible: 10,
+            dates: [{ type: everyone, dueAt: "#{due_at.iso8601}", lockAt: "#{lock_at.iso8601}", unlockAt: "#{unlock_at.iso8601}" }]
+          },
+          {
+            checkpointLabel: "reply_to_entry",
+            pointsPossible: 15,
+            dates: [{ type: everyone, dueAt: "#{10.days.from_now.iso8601}" }],
+            repliesRequired: 3
+          }
+        ]
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+      expect(result["errors"]).to be_nil
+
+      checkpoint = SubAssignment.find_by(sub_assignment_tag: "reply_to_topic")
+      expect(checkpoint.due_at).to be_within(1.second).of due_at
+      expect(checkpoint.lock_at).to be_within(1.second).of lock_at
+      expect(checkpoint.unlock_at).to be_within(1.second).of unlock_at
+    end
+
+    it "successfully creates a discussion topic with checkpoints and CourseSection overrides" do
+      section1 = add_section("M03")
+      section2 = add_section("M06")
+
+      context_type = "Course"
+      title = "Graded Discussion w/Checkpoints and CourseSection overrides"
+      message = "Lorem ipsum..."
+      published = true
+
+      reply_to_entry_due_at1 = 12.days.from_now
+      reply_to_entry_due_at2 = 14.days.from_now
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        assignment: {
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          forCheckpoints: true
+        }
+        checkpoints: [
+          {
+            checkpointLabel: "reply_to_topic",
+            pointsPossible: 10,
+            dates: [{ type: everyone, dueAt: "#{5.days.from_now.iso8601}" }]
+          },
+          {
+            checkpointLabel: "reply_to_entry",
+            pointsPossible: 15,
+            dates: [
+              { type: everyone, dueAt: "#{10.days.from_now.iso8601}" },
+              { type: override, dueAt: "#{reply_to_entry_due_at1.iso8601}", setType: CourseSection, setId: #{section1.id} },
+              { type: override, dueAt: "#{reply_to_entry_due_at2.iso8601}", setType: CourseSection, setId: #{section2.id} }
+            ],
+            repliesRequired: 3
+          }
+        ]
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+      expect(result["errors"]).to be_nil
+
+      assignment = Assignment.last
+
+      expect(assignment.has_sub_assignments?).to be true
+
+      sub_assignments = SubAssignment.where(parent_assignment_id: assignment.id)
+      sub_assignment1 = sub_assignments.find_by(sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC)
+      sub_assignment2 = sub_assignments.find_by(sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY)
+
+      expect(sub_assignment1.sub_assignment_tag).to eq "reply_to_topic"
+      expect(sub_assignment1.points_possible).to eq 10
+      expect(sub_assignment2.sub_assignment_tag).to eq "reply_to_entry"
+      expect(sub_assignment2.points_possible).to eq 15
+
+      assignment_override1 = AssignmentOverride.find_by(assignment: sub_assignment2, set_type: "CourseSection", set_id: section1.id)
+      assignment_override2 = AssignmentOverride.find_by(assignment: sub_assignment2, set_type: "CourseSection", set_id: section2.id)
+
+      expect(assignment_override1).to be_present
+      expect(assignment_override2).to be_present
+      expect(assignment_override1.due_at).to be_within(1.second).of reply_to_entry_due_at1
+      expect(assignment_override2.due_at).to be_within(1.second).of reply_to_entry_due_at2
+    end
+
+    it "successfully creates a discussion topic with checkpoints and Group overrides" do
+      group = @course.groups.create!
+      student_in_group = student_in_course(course: @course, active_all: true).user
+      group.group_memberships.create!(user: student_in_group)
+
+      context_type = "Course"
+      title = "Graded Discussion w/Checkpoints and Group overrides"
+      message = "Lorem ipsum..."
+      published = true
+
+      reply_to_entry_due_at = 12.days.from_now
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        groupCategoryId: #{group.group_category.id}
+        assignment: {
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          forCheckpoints: true
+        }
+        checkpoints: [
+          {
+            checkpointLabel: "reply_to_topic",
+            pointsPossible: 10,
+            dates: [{ type: everyone, dueAt: "#{5.days.from_now.iso8601}" }]
+          },
+          {
+            checkpointLabel: "reply_to_entry",
+            pointsPossible: 15,
+            dates: [
+              { type: everyone, dueAt: "#{10.days.from_now.iso8601}" },
+              { type: override, dueAt: "#{reply_to_entry_due_at.iso8601}", setType: Group, setId: #{group.id} }
+            ],
+            repliesRequired: 3
+          }
+        ]
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+
+      expect(result["errors"]).to be_nil
+
+      assignment = Assignment.last
+
+      expect(assignment.has_sub_assignments?).to be true
+
+      sub_assignments = SubAssignment.where(parent_assignment_id: assignment.id)
+      sub_assignment1 = sub_assignments.find_by(sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC)
+      sub_assignment2 = sub_assignments.find_by(sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY)
+
+      expect(sub_assignment1.sub_assignment_tag).to eq "reply_to_topic"
+      expect(sub_assignment1.points_possible).to eq 10
+      expect(sub_assignment2.sub_assignment_tag).to eq "reply_to_entry"
+      expect(sub_assignment2.points_possible).to eq 15
+
+      assignment_override = AssignmentOverride.find_by(assignment: sub_assignment2, set_type: "Group", set_id: group.id)
+
+      expect(assignment_override).to be_present
+      expect(assignment_override.due_at).to be_within(1.second).of reply_to_entry_due_at
+    end
+
+    it "successfully creates a discussion topic with checkpoints and AdHoc overrides" do
+      student1 = student_in_course(course: @course, active_all: true).user
+      student2 = student_in_course(course: @course, active_all: true).user
+
+      context_type = "Course"
+      title = "Graded Discussion w/Checkpoints and AdHoc overrides"
+      message = "Lorem ipsum..."
+      published = true
+
+      reply_to_entry_due_at = 12.days.from_now
+
+      query = <<~GQL
+        contextId: "#{@course.id}"
+        contextType: #{context_type}
+        title: "#{title}"
+        message: "#{message}"
+        published: #{published}
+        assignment: {
+          courseId: "#{@course.id}",
+          name: "#{title}",
+          forCheckpoints: true
+        }
+        checkpoints: [
+          {
+            checkpointLabel: "reply_to_topic",
+            pointsPossible: 10,
+            dates: [{ type: everyone, dueAt: "#{5.days.from_now.iso8601}" }]
+          },
+          {
+            checkpointLabel: "reply_to_entry",
+            pointsPossible: 15,
+            dates: [
+              { type: everyone, dueAt: "#{10.days.from_now.iso8601}" },
+              { type: override, dueAt: "#{reply_to_entry_due_at.iso8601}", setType: ADHOC, studentIds: [#{student1.id}, #{student2.id}] }
+            ],
+            repliesRequired: 3
+          }
+        ]
+      GQL
+
+      result = execute_with_input_with_assignment(query)
+      expect(result["errors"]).to be_nil
+
+      assignment = Assignment.last
+
+      expect(assignment.has_sub_assignments?).to be true
+
+      sub_assignments = SubAssignment.where(parent_assignment_id: assignment.id)
+      sub_assignment1 = sub_assignments.find_by(sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC)
+      sub_assignment2 = sub_assignments.find_by(sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY)
+
+      expect(sub_assignment1.sub_assignment_tag).to eq "reply_to_topic"
+      expect(sub_assignment1.points_possible).to eq 10
+      expect(sub_assignment2.sub_assignment_tag).to eq "reply_to_entry"
+      expect(sub_assignment2.points_possible).to eq 15
+
+      assignment_override = AssignmentOverride.find_by(assignment: sub_assignment2)
+
+      expect(assignment_override).to be_present
+      expect(assignment_override.set_type).to eq "ADHOC"
+      expect(assignment_override.due_at).to be_within(1.second).of reply_to_entry_due_at
+
+      student_ids = assignment_override.assignment_override_students.pluck(:user_id)
+
+      expect(student_ids).to match_array [student1.id, student2.id]
     end
   end
 end

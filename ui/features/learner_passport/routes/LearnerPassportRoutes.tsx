@@ -16,14 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
-import {Navigate, Route} from 'react-router-dom'
+import {LearnerPassportAdminRoutes} from './LearnerPassportAdminRoutes'
+import {LearnerPassportLearnerRoutes} from './LearnerPassportLearnerRoutes'
 
-export const LearnerPassportRoutes = (
-  <Route path="/users/:userId/passport" lazy={() => import('../pages/LearnerPassportLayout')}>
-    <Route path="" element={<Navigate to="achievements" replace={true} />} />
-    <Route path="achievements" lazy={() => import('../pages/Achievements')} />
-    <Route path="portfolios" lazy={() => import('../pages/Portfolios')} />
-    <Route path="projects" lazy={() => import('../pages/Projects')} />
-  </Route>
-)
+export {LearnerPassportLearnerRoutes, LearnerPassportAdminRoutes}

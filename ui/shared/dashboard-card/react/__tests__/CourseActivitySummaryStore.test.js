@@ -18,6 +18,7 @@
 
 import CourseActivitySummaryStore from '../CourseActivitySummaryStore'
 import wait from 'waait'
+import fetchMock from 'fetch-mock'
 
 describe('CourseActivitySummaryStore', () => {
   const stream = [
@@ -75,6 +76,7 @@ describe('CourseActivitySummaryStore', () => {
 
       jest.spyOn(window, 'fetch').mockImplementation(() =>
         Promise.resolve().then(() => ({
+          ok: true,
           status: 401,
           statusText: 'Unauthorized',
           json: () => {

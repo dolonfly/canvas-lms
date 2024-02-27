@@ -20,13 +20,14 @@ import React from 'react'
 import {render, waitFor} from '@testing-library/react'
 import {TempEnrollSearch} from '../TempEnrollSearch'
 import fetchMock from 'fetch-mock'
+import type {User} from '../types'
 
 describe('TempEnrollSearch', () => {
   const props = {
     user: {
       name: 'user1',
       id: '1',
-    },
+    } as User,
     accountId: '1',
     searchFail: jest.fn(),
     searchSuccess: jest.fn(),
@@ -39,20 +40,36 @@ describe('TempEnrollSearch', () => {
   }
   const mockSame = {users: [{userTemplate, user_id: '1', address: ''}]}
   const mockNoUser = {users: []}
-  const mockFindUser = {
+  const mockUserList = {
     users: [
       {
         userTemplate,
         user_id: '2',
-        email: 'user@email.com',
-        sis_user_id: 'user_sis',
-        login_id: 'user_login',
+        address: 'user1',
       },
     ],
   }
+  const mockFindUser = {
+    id: '2',
+    sis_user_id: 'user_sis',
+    primary_email: 'user@email.com',
+    login_id: 'user_login',
+  }
+  const userDetailsUriMock = (userId: string, response: object) =>
+    fetchMock.get(`/api/v1/users/${userId}/profile`, response)
+
+  beforeAll(() => {
+    // @ts-expect-error
+    window.ENV = {ACCOUNT_ID: '1'}
+  })
 
   afterEach(() => {
     fetchMock.restore()
+  })
+
+  afterAll(() => {
+    // @ts-expect-error
+    window.ENV = {}
   })
 
   it('shows search page', () => {
@@ -70,6 +87,7 @@ describe('TempEnrollSearch', () => {
 
   it('displays error message when user is same as original user', async () => {
     fetchMock.post(`/accounts/1/user_lists.json?user_list=&v2=true&search_type=cc_path`, mockSame)
+    userDetailsUriMock(mockSame.users[0].user_id, {})
     const {queryAllByText} = render(<TempEnrollSearch page={1} {...props} />)
     await waitFor(() =>
       expect(
@@ -89,9 +107,9 @@ describe('TempEnrollSearch', () => {
   it('displays new page when user is found', async () => {
     fetchMock.post(
       `/accounts/1/user_lists.json?user_list=&v2=true&search_type=cc_path`,
-      mockFindUser
+      mockUserList
     )
-    fetchMock.get('/api/v1/users/2', mockFindUser.users[0])
+    userDetailsUriMock(mockFindUser.id, {})
     const {queryByText} = render(<TempEnrollSearch page={1} {...props} />)
     await waitFor(() =>
       expect(queryByText(/is ready to be assigned temporary enrollments/)).toBeTruthy()
@@ -125,9 +143,9 @@ describe('TempEnrollSearch', () => {
   it('shows found user information on confirmation page', async () => {
     fetchMock.post(
       `/accounts/1/user_lists.json?user_list=&v2=true&search_type=cc_path`,
-      mockFindUser
+      mockUserList
     )
-    fetchMock.get('/api/v1/users/2', mockFindUser.users[0])
+    userDetailsUriMock(mockFindUser.id, mockFindUser)
     const {queryByText} = render(<TempEnrollSearch page={1} {...props} />)
     await waitFor(() => expect(queryByText('user@email.com')).toBeInTheDocument())
     await waitFor(() => expect(queryByText('user_sis')).toBeInTheDocument())
@@ -137,9 +155,9 @@ describe('TempEnrollSearch', () => {
   it('does not show sis id on confirmation page when permission is off', async () => {
     fetchMock.post(
       `/accounts/1/user_lists.json?user_list=&v2=true&search_type=cc_path`,
-      mockFindUser
+      mockUserList
     )
-    fetchMock.get('/api/v1/users/2', mockFindUser.users[0])
+    userDetailsUriMock(mockFindUser.id, mockFindUser)
     const {queryByText} = render(<TempEnrollSearch page={1} {...props} canReadSIS={false} />)
     await waitFor(() => expect(queryByText('SIS ID')).toBeFalsy())
   })

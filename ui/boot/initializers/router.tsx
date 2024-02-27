@@ -18,7 +18,6 @@
 
 import ReactDOM from 'react-dom'
 import React from 'react'
-import ready from '@instructure/ready'
 import {
   createBrowserRouter,
   createRoutesFromElements,
@@ -30,9 +29,10 @@ import accountGradingSettingsRoutes from '../../features/account_grading_setting
 import {RubricRoutes} from '../../features/rubrics/routes/rubricRoutes'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import {QueryProvider} from '@canvas/query'
-import {LearnerPassportRoutes} from '../../features/learner_passport/routes/LearnerPassportRoutes'
-
-const I18n = useI18nScope('main')
+import {
+  LearnerPassportLearnerRoutes,
+  LearnerPassportAdminRoutes,
+} from '../../features/learner_passport/routes/LearnerPassportRoutes'
 
 const portalRouter = createBrowserRouter(
   createRoutesFromElements(
@@ -48,25 +48,29 @@ const portalRouter = createBrowserRouter(
 
       {accountGradingSettingsRoutes}
 
-      {(window.ENV.FEATURES.instui_nav || localStorage.instui_nav_dev) && (
-        <Route
-          path="/accounts/:accountId/*"
-          lazy={() => import('../../features/navigation_header/react/NavigationHeaderRoute')}
-        />
-      )}
+      {(window.ENV.FEATURES.instui_nav || localStorage.instui_nav_dev) &&
+        ['/', '/accounts/*', '/calendar/*', '/courses/*', '/conversations/*'].map(path => (
+          <Route
+            key={`key-to-${path}`}
+            path={path}
+            lazy={() => import('../../features/navigation_header/react/NavigationHeaderRoute')}
+          />
+        ))}
 
       {window.ENV.FEATURES.enhanced_rubrics && RubricRoutes}
 
-      {/* @ts-expect-error */}
-      {window.ENV.FEATURES.learner_passport && LearnerPassportRoutes}
+      {window.ENV.FEATURES.learner_passport && LearnerPassportLearnerRoutes}
+      {window.ENV.FEATURES.learner_passport_r2 && LearnerPassportAdminRoutes}
 
       <Route path="*" element={<></>} />
     </Route>
   )
 )
 
-ready(() => {
+export function loadReactRouter() {
   const mountNode = document.querySelector('#react-router-portals')
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const I18n = useI18nScope('main')
   if (mountNode) {
     ReactDOM.render(
       <QueryProvider>
@@ -78,4 +82,4 @@ ready(() => {
       mountNode
     )
   }
-})
+}

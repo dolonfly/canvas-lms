@@ -31,10 +31,22 @@ type Setting =
   | 'comment_library_suggestions_enabled'
   | 'elementary_dashboard_disabled'
 
+type Role = {
+  addable_by_user: boolean
+  base_role_name: string
+  deleteable_by_user: boolean
+  id: string
+  label: string
+  name: string
+  plural_label: string
+}
+
 export interface EnvCommon {
   ASSET_HOST: string
   active_brand_config_json_url: string
-  active_brand_config: object
+  active_brand_config: {
+    variables: Record<string, string>
+  }
   badge_counts?: {
     discussions: number
     assignments: number
@@ -51,8 +63,10 @@ export interface EnvCommon {
   csp?: string
   current_user_id: string | null
   current_user_global_id: string
+  COURSE_ROLES: Role[]
   current_user_roles: string[]
   current_user_is_student: boolean
+  current_user_is_admin: boolean
   current_user_types: string[]
   current_user_disabled_inbox: boolean
   current_user_visited_tabs: null | string[]
@@ -62,6 +76,7 @@ export interface EnvCommon {
     id: string
     label: string
   }[]
+  ACCOUNT_ID: string
   DOMAIN_ROOT_ACCOUNT_ID: string
   ROOT_ACCOUNT_ID: string
   k12: false
@@ -73,13 +88,16 @@ export interface EnvCommon {
   disable_keyboard_shortcuts: boolean
   LTI_LAUNCH_FRAME_ALLOWANCES: string[]
   DEEP_LINKING_POST_MESSAGE_ORIGIN: string
-  DEEP_LINKING_LOGGING: null | unknown
   comment_library_suggestions_enabled: boolean
   INCOMPLETE_REGISTRATION: boolean
   SETTINGS: Record<Setting, boolean>
   FULL_STORY_ENABLED: boolean
   RAILS_ENVIRONMENT: 'development' | 'CD' | 'Beta' | 'Production' | string
   IN_PACED_COURSE: boolean
+  PREFERENCES?: {
+    hide_dashcard_color_overlays: boolean
+    custom_colors: unknown
+  }
 
   SENTRY_FRONTEND?: {
     /**
@@ -182,23 +200,20 @@ export interface EnvCommon {
  */
 export type SiteAdminFeatureId =
   | 'featured_help_links'
-  | 'lti_platform_storage'
-  | 'calendar_series'
   | 'account_level_blackout_dates'
   | 'account_calendar_events'
   | 'instui_nav'
   | 'render_both_to_do_lists'
   | 'course_paces_redesign'
   | 'course_paces_for_students'
-  | 'module_publish_menu'
   | 'explicit_latex_typesetting'
-  | 'dev_key_oidc_alert'
   | 'media_links_use_attachment_id'
   | 'permanent_page_links'
   | 'differentiated_modules'
   | 'enhanced_course_creation_account_fetching'
   | 'instui_for_import_page'
   | 'enhanced_rubrics'
+  | 'multiselect_gradebook_filters'
 
 /**
  * From ApplicationController#JS_ENV_ROOT_ACCOUNT_FEATURES
@@ -209,6 +224,7 @@ export type RootAccountFeatureId =
   | 'granular_permissions_manage_users'
   | 'create_course_subaccount_picker'
   | 'lti_deep_linking_module_index_menu_modal'
+  | 'lti_dynamic_registration'
   | 'lti_multiple_assignment_deep_linking'
   | 'lti_overwrite_user_url_input_select_content_dialog'
   | 'buttons_and_icons_root_account'
@@ -228,7 +244,11 @@ export type BrandAccountFeatureId = 'embedded_release_notes'
  * Feature id exported in ApplicationController that aren't mentioned in
  * JS_ENV_SITE_ADMIN_FEATURES or JS_ENV_ROOT_ACCOUNT_FEATURES or JS_ENV_BRAND_ACCOUNT_FEATURES
  */
-export type OtherFeatureId = 'canvas_k6_theme' | 'new_math_equation_handling'
+export type OtherFeatureId =
+  | 'canvas_k6_theme'
+  | 'new_math_equation_handling'
+  | 'learner_passport'
+  | 'learner_passport_r2'
 
 /**
  * From ApplicationHelper#set_tutorial_js_env

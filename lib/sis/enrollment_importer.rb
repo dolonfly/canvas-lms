@@ -20,6 +20,8 @@
 
 module SIS
   class EnrollmentImporter < BaseImporter
+    BATCH_SIZE = 100
+
     def process(messages)
       i = Work.new(@batch, @root_account, @logger, messages)
 
@@ -134,7 +136,7 @@ module SIS
         return if @batch.skip_deletes? && enrollment.status =~ /deleted/i
 
         @enrollment_batch << enrollment
-        process_batch if @enrollment_batch.size >= Setting.get("sis_enrollment_batch_size", "100").to_i # no idea if this is a good number
+        process_batch if @enrollment_batch.size >= BATCH_SIZE
       end
 
       def any_left_to_process?
@@ -411,7 +413,7 @@ module SIS
           message = if user.deleted?
                       invalid_active_enrollment(enrollment, enrollment_info)
                     elsif pseudo.deleted?
-                      "Attempted enrolling with deleted sis login #{pseudo.id} in course #{enrollment_info.course_id}"
+                      "Attempted enrolling with deleted sis login #{pseudo.unique_id} in course #{enrollment_info.course_id}"
                     end
           if message
             @messages << SisBatch.build_error(enrollment_info.csv,

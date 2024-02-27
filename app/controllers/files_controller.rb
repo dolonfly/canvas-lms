@@ -238,7 +238,7 @@ class FilesController < ApplicationController
       session["file_access_user_id"] = access_verifier[:user].global_id
       session["file_access_real_user_id"] = access_verifier[:real_user]&.global_id
       session["file_access_developer_key_id"] = access_verifier[:developer_key]&.global_id
-      session["file_access_root_acocunt_id"] = access_verifier[:root_account]&.global_id
+      session["file_access_root_account_id"] = access_verifier[:root_account]&.global_id
       session["file_access_oauth_host"] = access_verifier[:oauth_host]
       session["file_access_expiration"] = 1.hour.from_now.to_i
       session.file_access_user = access_verifier[:user]
@@ -831,7 +831,7 @@ class FilesController < ApplicationController
       # request to get the data.
       # Protect ourselves against reading huge files into memory -- if the
       # attachment is too big, don't return it.
-      if @attachment.size > Setting.get("attachment_json_response_max_size", 1.megabyte.to_s).to_i
+      if @attachment.size > 1.megabyte
         render json: { error: t("errors.too_large", "The file is too large to edit") }
         return
       end
@@ -1046,6 +1046,7 @@ class FilesController < ApplicationController
     model = Object.const_get(params[:context_type])
     @context = model.where(id: params[:context_id]).first
 
+    overwritten_instfs_uuid = nil
     @attachment = if params.key?(:precreated_attachment_id)
                     att = Attachment.where(id: params[:precreated_attachment_id]).take
                     if att.nil?
@@ -1055,7 +1056,18 @@ class FilesController < ApplicationController
                       att
                     end
                   else
-                    @context.shard.activate { Attachment.where(context: @context).build }
+                    @context.shard.activate do
+                      # avoid creating an identical Attachment
+                      unless params[:on_duplicate] == "rename"
+                        att = Attachment.find_by(context: @context,
+                                                 folder_id: params[:folder_id],
+                                                 display_name: params[:display_name] || params[:name],
+                                                 size: params[:size],
+                                                 md5: params[:sha512])
+                        overwritten_instfs_uuid = att.instfs_uuid if att
+                      end
+                      att || Attachment.where(context: @context).build
+                    end
                   end
 
     # service metadata
@@ -1090,7 +1102,11 @@ class FilesController < ApplicationController
     @attachment.save!
 
     # apply duplicate handling
-    @attachment.handle_duplicates(params[:on_duplicate])
+    if overwritten_instfs_uuid
+      InstFS.delay_if_production.delete_file(overwritten_instfs_uuid)
+    else
+      @attachment.handle_duplicates(params[:on_duplicate])
+    end
 
     # trigger upload success callbacks
     if @context.respond_to?(:file_upload_success_callback)

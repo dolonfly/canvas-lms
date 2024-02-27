@@ -27,7 +27,7 @@ import {recordEulaAgreement, verifyPledgeIsChecked} from './helper'
 import '@canvas/rails-flash-notifications'
 import '@canvas/jquery/jquery.ajaxJSON'
 import '@canvas/jquery/jquery.tree'
-import '@canvas/forms/jquery/jquery.instructure_forms' /* ajaxJSONPreparedFiles, getFormData */
+import '@canvas/jquery/jquery.instructure_forms' /* ajaxJSONPreparedFiles, getFormData */
 import 'jqueryui/dialog'
 import '@canvas/jquery/jquery.instructure_misc_plugins' /* fragmentChange, showIf, /\.log\(/ */
 import '@canvas/util/templateData'
@@ -41,6 +41,7 @@ import {ProgressCircle} from '@instructure/ui-progress'
 import {Alert} from '@instructure/ui-alerts'
 import Attachment from '../react/Attachment'
 import {EmojiPicker, EmojiQuickPicker} from '@canvas/emoji'
+import { captureException } from '@sentry/react'
 
 const I18n = useI18nScope('submit_assignment')
 
@@ -453,7 +454,9 @@ $(document).ready(function () {
         window.opener.location.toString()
       )
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error(e)
+      captureException(e)
     }
   }
 

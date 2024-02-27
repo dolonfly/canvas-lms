@@ -34,6 +34,7 @@ class ApplicationController < ActionController::Base
   include LegalInformationHelper
   include FullStoryHelper
   include ObserverEnrollmentsHelper
+  include LtiLaunchDebugLoggerHelper
 
   helper :all
 
@@ -243,7 +244,6 @@ class ApplicationController < ActionController::Base
           disable_keyboard_shortcuts: @current_user&.prefers_no_keyboard_shortcuts?,
           LTI_LAUNCH_FRAME_ALLOWANCES: Lti::Launch.iframe_allowances,
           DEEP_LINKING_POST_MESSAGE_ORIGIN: request.base_url,
-          DEEP_LINKING_LOGGING: Setting.get("deep_linking_logging", nil),
           comment_library_suggestions_enabled: @current_user&.comment_library_suggestions_enabled?,
           SETTINGS: {
             open_registration: @domain_root_account&.open_registration?,
@@ -290,6 +290,7 @@ class ApplicationController < ActionController::Base
           canvas_k6_theme: @context.try(:feature_enabled?, :canvas_k6_theme)
         )
         @js_env[:current_user] = @current_user ? Rails.cache.fetch(["user_display_json", @current_user].cache_key, expires_in: 1.hour) { user_display_json(@current_user, :profile, [:avatar_is_fallback]) } : {}
+        @js_env[:current_user_is_admin] = @context.account_membership_allows(@current_user) if @context.is_a?(Course)
         @js_env[:page_view_update_url] = page_view_path(@page_view.id, page_view_token: @page_view.token) if @page_view
         @js_env[:IS_LARGE_ROSTER] = true if !@js_env[:IS_LARGE_ROSTER] && @context.respond_to?(:large_roster?) && @context.large_roster?
         @js_env[:context_asset_string] = @context.try(:asset_string) unless @js_env[:context_asset_string]
@@ -345,21 +346,19 @@ class ApplicationController < ActionController::Base
   # so altogether we can get them faster the vast majority of the time
   JS_ENV_SITE_ADMIN_FEATURES = %i[
     featured_help_links
-    lti_platform_storage
-    calendar_series
     account_level_blackout_dates
+    deleted_user_tools
     render_both_to_do_lists
     course_paces_redesign
     course_paces_for_students
-    module_publish_menu
     explicit_latex_typesetting
-    dev_key_oidc_alert
     media_links_use_attachment_id
     permanent_page_links
     differentiated_modules
     enhanced_course_creation_account_fetching
     instui_for_import_page
     enhanced_rubrics
+    multiselect_gradebook_filters
   ].freeze
   JS_ENV_ROOT_ACCOUNT_FEATURES = %i[
     product_tours
@@ -367,6 +366,7 @@ class ApplicationController < ActionController::Base
     granular_permissions_manage_users
     create_course_subaccount_picker
     lti_deep_linking_module_index_menu_modal
+    lti_dynamic_registration
     lti_multiple_assignment_deep_linking
     lti_overwrite_user_url_input_select_content_dialog
     lti_unique_tool_form_ids
@@ -379,6 +379,7 @@ class ApplicationController < ActionController::Base
     mobile_offline_mode
     react_discussions_post
     instui_nav
+    enhanced_developer_keys_tables
   ].freeze
   JS_ENV_BRAND_ACCOUNT_FEATURES = [
     :embedded_release_notes
@@ -522,6 +523,10 @@ class ApplicationController < ActionController::Base
     end
     hash[:base_title] = tool.default_label(I18n.locale) if custom_settings.include?(:base_title)
     hash[:external_url] = tool.url if custom_settings.include?(:external_url)
+    if type == :submission_type_selection && tool.submission_type_selection[:submission_type_selection_launch_points].present?
+      hash[:submission_type_selection_launch_points] = tool.submission_type_selection[:submission_type_selection_launch_points]
+    end
+
     hash
   end
   helper_method :external_tool_display_hash
@@ -639,7 +644,7 @@ class ApplicationController < ActionController::Base
 
     link_settings = @tag&.link_settings || {}
 
-    tool_dimensions.each do |k, _v|
+    tool_dimensions.each_key do |k|
       # it may happen that we get "link_settings"=>{"selection_width"=>"", "selection_height"=>""}
       if link_settings[k.to_s].present?
         tool_dimensions[k] = link_settings[k.to_s]
@@ -691,7 +696,7 @@ class ApplicationController < ActionController::Base
     if context.is_a?(UserProfile)
       name = name.to_s.sub("context", "profile")
     else
-      klass = context.class.base_class
+      klass = context.class.url_context_class
       name = name.to_s.sub("context", klass.name.underscore)
       opts.unshift(context)
     end
@@ -889,7 +894,7 @@ class ApplicationController < ActionController::Base
     # we can't block frames on the files domain, since files domain requests
     # are typically embedded in an iframe in canvas, but the hostname is
     # different
-    if !files_domain? && Setting.get("block_html_frames", "true") == "true" && !@embeddable
+    if !files_domain? && !@embeddable
       append_to_header("Content-Security-Policy", "frame-ancestors 'self' #{csp_frame_ancestors&.uniq&.join(" ")};")
     end
     RequestContext::Generator.store_request_meta(request, @context, @sentry_trace)
@@ -1575,15 +1580,11 @@ class ApplicationController < ActionController::Base
 
   def set_no_cache_headers
     response.headers["Pragma"] = "no-cache"
-    response.headers["Cache-Control"] = if Setting.get("legacy_cache_control", "false") == "true"
-                                          "no-cache, no-store"
-                                        else
-                                          "no-store"
-                                        end
+    response.headers["Cache-Control"] = "no-store"
   end
 
   def manage_robots_meta
-    @allow_robot_indexing = true if @domain_root_account&.enable_search_indexing? || Setting.get("enable_search_indexing", "false") == "true"
+    @allow_robot_indexing = true if @domain_root_account&.enable_search_indexing?
   end
 
   def set_page_view
@@ -1750,8 +1751,7 @@ class ApplicationController < ActionController::Base
   end
 
   def log_gets
-    if @page_view && !request.xhr? && request.get? && ((response.media_type || "").to_s.include?("html") ||
-      ((Setting.get("create_get_api_page_views", "true") == "true") && api_request?))
+    if @page_view && !request.xhr? && request.get? && ((response.media_type || "").to_s.include?("html") || api_request?)
       @page_view.render_time ||= (Time.now.utc - @page_before_render) rescue nil
       @page_view_update = true
     end
@@ -2074,7 +2074,8 @@ class ApplicationController < ActionController::Base
       @resource_url = @tag.url
       @tool = ContextExternalTool.from_content_tag(tag, context)
 
-      @assignment&.prepare_for_ags_if_needed!(@tool)
+      @assignment&.migrate_to_1_3_if_needed!(@tool)
+      tag.migrate_to_1_3_if_needed!(@tool)
 
       tag.context_module_action(@current_user, :read)
       if @tool
@@ -2141,7 +2142,8 @@ class ApplicationController < ActionController::Base
                       expander: variable_expander,
                       include_storage_target: !in_lti_mobile_webview?,
                       opts: opts.merge(
-                        resource_link: @tag.associated_asset_lti_resource_link
+                        resource_link: @tag.associated_asset_lti_resource_link,
+                        lti_launch_debug_logger: make_lti_launch_debug_logger(@tool)
                       )
                     )
                   else
@@ -2183,7 +2185,8 @@ class ApplicationController < ActionController::Base
         @lti_launch.resource_url = @tool.login_or_launch_url(preferred_launch_url: @resource_url)
         @lti_launch.link_text = @resource_title
         @lti_launch.analytics_id = @tool.tool_id
-        InstStatsd::Statsd.increment("lti.launch", tags: { lti_version: @tool.lti_version, type: :content_tag_redirect })
+
+        Lti::LogService.new(tool: @tool, context:, user: @current_user, placement: nil, launch_type: :content_item).call
 
         @append_template = "context_modules/tool_sequence_footer" if render_external_tool_append_template?
         render Lti::AppUtil.display_template(external_tool_redirect_display_type)
@@ -2787,11 +2790,6 @@ class ApplicationController < ActionController::Base
     !!(mobile_device? && (in_android_app || in_ios_app))
   end
 
-  # temp: will remove in INTEROP-8277
-  include Lti::Oidc
-  helper_method :oidc_authorization_domain
-  # end temp
-
   def ms_office?
     request.user_agent.to_s.include?("ms-office") ||
       request.user_agent.to_s.match?(%r{Word/\d+\.\d+})
@@ -2853,9 +2851,9 @@ class ApplicationController < ActionController::Base
       hash = {}
       objtypes.each do |instance_symbol|
         instance_name = instance_symbol.to_s
-        obj = instance_variable_get("@#{instance_name}")
+        obj = instance_variable_get(:"@#{instance_name}")
         policy = obj.check_policy(@current_user, session) unless obj.nil? || !obj.respond_to?(:check_policy)
-        hash["#{instance_name.upcase}_RIGHTS".to_sym] = ActiveSupport::HashWithIndifferentAccess[policy.map { |right| [right, true] }] unless policy.nil?
+        hash[:"#{instance_name.upcase}_RIGHTS"] = ActiveSupport::HashWithIndifferentAccess[policy.map { |right| [right, true] }] unless policy.nil?
       end
 
       js_env hash

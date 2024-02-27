@@ -127,6 +127,10 @@ class DeveloperKey < ActiveRecord::Base
     super(value)
   end
 
+  def lti_registration?
+    lti_registration.present?
+  end
+
   def validate_redirect_uris
     uris = redirect_uris&.map do |value|
       value, _ = CanvasHttp.validate_url(value, allowed_schemes: nil)
@@ -220,6 +224,13 @@ class DeveloperKey < ActiveRecord::Base
     def by_cached_vendor_code(vendor_code)
       MultiCache.fetch("developer_keys/#{vendor_code}") do
         DeveloperKey.shard([Shard.current, Account.site_admin.shard].uniq).where(vendor_code:).to_a
+      end
+    end
+
+    def mobile_app_keys(active: true)
+      GuardRail.activate(:secondary) do
+        keys = shard(Shard.default).where.not(sns_arn: nil)
+        active ? keys.nondeleted : keys
       end
     end
   end
@@ -387,7 +398,7 @@ class DeveloperKey < ActiveRecord::Base
   end
 
   def tool_configuration
-    (lti_registration.presence || referenced_tool_configuration)
+    lti_registration.presence || referenced_tool_configuration
   end
 
   private

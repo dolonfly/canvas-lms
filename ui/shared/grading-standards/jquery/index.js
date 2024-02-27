@@ -21,7 +21,7 @@ import {useScope as useI18nScope} from '@canvas/i18n'
 import numberHelper from '@canvas/i18n/numberHelper'
 import $ from 'jquery'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/forms/jquery/jquery.instructure_forms' /* fillFormData, getFormData */
+import '@canvas/jquery/jquery.instructure_forms' /* fillFormData, getFormData */
 import 'jqueryui/dialog'
 import '@canvas/jquery/jquery.instructure_misc_plugins' /* ifExists, .dim, undim, confirmDelete */
 import '@canvas/rails-flash-notifications'
@@ -123,7 +123,7 @@ $(document).ready(() => {
       $standard
         .find('.update_grading_standard_url')
         .attr('href', $('#update_grading_standard_url').attr('href'))
-      const data = $.parseJSON($('#default_grading_standard_data').val())
+      const data = JSON.parse($('#default_grading_standard_data').val())
       const standard = {title: '', id: null, data}
       $standard
         .fillTemplateData({

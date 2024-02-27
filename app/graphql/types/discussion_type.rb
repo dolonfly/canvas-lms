@@ -64,6 +64,7 @@ module Types
     field :is_announcement, Boolean, null: false
     field :is_section_specific, Boolean, null: true
     field :require_initial_post, Boolean, null: true
+    field :can_group, Boolean, null: true, method: :can_group?
 
     field :message, String, null: true
     def message
@@ -149,7 +150,7 @@ module Types
     def child_topics
       load_association(:child_topics).then do |child_topics|
         Loaders::AssociationLoader.for(DiscussionTopic, :context).load_many(child_topics).then do
-          child_topics = child_topics.select { |ct| ct.context.active? }
+          child_topics = child_topics.select { |ct| ct.active? && ct.context.active? }
           child_topics.sort_by { |ct| ct.context.name }
         end
       end

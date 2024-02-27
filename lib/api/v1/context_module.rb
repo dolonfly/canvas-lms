@@ -55,7 +55,7 @@ module Api::V1::ContextModule
     count = tags.count
     hash["items_count"] = count
     hash["items_url"] = polymorphic_url([:api_v1, context_module.context, context_module, :items])
-    if includes.include?("items") && count <= Setting.get("api_max_per_page", "50").to_i
+    if includes.include?("items") && count <= Api::MAX_PER_PAGE
       if opts[:search_term].present? && !context_module.matches_attribute?(:name, opts[:search_term])
         tags = ContentTag.search_by_attribute(tags, :title, opts[:search_term])
         return nil if tags.count == 0
@@ -119,7 +119,7 @@ module Api::V1::ContextModule
       api_url = polymorphic_url([:api_v1, context_module.context, content_tag.content])
     when "ContextExternalTool"
       if content_tag.content&.tool_id
-        api_url = sessionless_launch_url(context_module.context, id: content_tag.content.id, url: (content_tag.url || content_tag.content.url))
+        api_url = sessionless_launch_url(context_module.context, id: content_tag.content.id, url: content_tag.url || content_tag.content.url)
       elsif content_tag.content
         if content_tag.content_id
           options = {
@@ -128,7 +128,7 @@ module Api::V1::ContextModule
           }
           api_url = sessionless_launch_url(context_module.context, options)
         else
-          api_url = sessionless_launch_url(context_module.context, url: (content_tag.url || content_tag.content.url))
+          api_url = sessionless_launch_url(context_module.context, url: content_tag.url || content_tag.content.url)
         end
       else
         api_url = sessionless_launch_url(context_module.context, url: content_tag.url)

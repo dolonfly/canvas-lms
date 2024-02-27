@@ -19,9 +19,9 @@
 
 import {useScope as useI18nScope} from '@canvas/i18n'
 import $ from 'jquery'
-import htmlEscape from 'html-escape'
+import htmlEscape from '@instructure/html-escape'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/forms/jquery/jquery.instructure_forms' // validateForm, formErrors, errorBox
+import '@canvas/jquery/jquery.instructure_forms' // validateForm, formErrors, errorBox
 import replaceTags from '@canvas/util/replaceTags'
 import 'jquery-tinypubsub' // /\.publish/
 import 'jqueryui/button'

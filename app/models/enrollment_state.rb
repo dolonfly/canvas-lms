@@ -18,6 +18,7 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 
 class EnrollmentState < ActiveRecord::Base
+  PENDING_STATES = %w[pending_active pending_invited creation_pending].freeze
   # a 1-1 table with enrollments
   # that was really only a separate table because enrollments had a billion columns already
   # and the data here was going to have a lot of churn too
@@ -103,7 +104,7 @@ class EnrollmentState < ActiveRecord::Base
   end
 
   def pending?
-    %w[pending_active pending_invited creation_pending].include?(state)
+    PENDING_STATES.include?(state)
   end
 
   def recalculate_state
@@ -165,9 +166,20 @@ class EnrollmentState < ActiveRecord::Base
         # Not strictly within any range so no translation needed
         self.state = wf_state
       elsif global_start_at < now
-        # we've past the end date so no matter what the state was, we're "completed" now
+        if enrollment.temporary_enrollment?
+          ending_enrollment_state = enrollment.temporary_enrollment_pairing&.ending_enrollment_state
+
+          case ending_enrollment_state
+          when "completed", "inactive"
+            self.state = ending_enrollment_state
+          when "deleted", nil
+            enrollment.destroy
+          end
+        else
+          # we've past the end date so no matter what the state was, we're "completed" now
+          self.state = "completed"
+        end
         self.state_started_at = ranges.filter_map(&:last).min
-        self.state = "completed"
       elsif enrollment.fake_student? # rubocop:disable Lint/DuplicateBranch
         # Allow student view students to use the course before the term starts
         self.state = wf_state

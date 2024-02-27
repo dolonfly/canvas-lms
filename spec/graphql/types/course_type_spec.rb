@@ -264,6 +264,12 @@ describe Types::CourseType do
         ).to eq "Default Grading Scheme"
       end
 
+      it "returns grading standard id" do
+        expect(
+          course_type.resolve("gradingStandard { _id }", current_user: @student)
+        ).to eq course.grading_standard_or_default.id
+      end
+
       it "returns grading standard data" do
         expect(
           course_type.resolve("gradingStandard { data { letterGrade } }", current_user: @student)
@@ -922,6 +928,27 @@ describe Types::CourseType do
     it "returns the final grade override policy" do
       result = course_type.resolve("allowFinalGradeOverride")
       expect(result).to eq @course.allow_final_grade_override
+    end
+  end
+
+  describe "RubricsConnection" do
+    before(:once) do
+      rubric_for_course
+      rubric_association_model(context: course, rubric: @rubric, association_object: course, purpose: "bookmark")
+    end
+
+    it "returns rubrics" do
+      expect(
+        course_type.resolve("rubricsConnection { edges { node { _id } } }")
+      ).to eq [course.rubrics.first.to_param]
+
+      expect(
+        course_type.resolve("rubricsConnection { edges { node { criteriaCount } } }")
+      ).to eq [1]
+
+      expect(
+        course_type.resolve("rubricsConnection { edges { node { workflowState } } }")
+      ).to eq ["active"]
     end
   end
 end

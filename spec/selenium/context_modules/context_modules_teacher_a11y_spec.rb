@@ -64,6 +64,7 @@ describe "context modules" do
     end
 
     it "creates a new module using enter key", priority: "2" do
+      Account.site_admin.disable_feature! :differentiated_modules
       get "/courses/#{@course.id}/modules"
       add_form = new_module_form
       replace_content(add_form.find_element(:id, "context_module_name"), "module 1")
@@ -121,7 +122,7 @@ describe "context modules" do
 
     it "retains focus when deleting prerequisites with different modules" do
       skip("LF-960 Waiting for updates to a11y issues found for new tray")
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       modules = create_modules(3)
       go_to_modules
       manage_module_button(modules[2]).click
@@ -257,16 +258,6 @@ describe "context modules" do
         check_element_has_focus(context_modules[0])
       end
 
-      it "edits modules" do
-        @active_element.send_keys("e")
-        expect(f("#add_context_module_form")).to be_displayed
-      end
-
-      it "creates a module" do
-        @active_element.send_keys("n")
-        expect(f("#add_context_module_form")).to be_displayed
-      end
-
       it "indents / outdent" do
         @active_element.send_keys(:arrow_down)
         check_element_has_focus(context_module_items[0])
@@ -291,9 +282,40 @@ describe "context modules" do
       end
     end
 
+    context "Keyboard Accessibility only for non-differentiated modules modals", priority: "1" do
+      before :once do
+        Account.site_admin.disable_feature! :differentiated_modules
+        modules = create_modules(2, true)
+        modules[0].add_item({ id: @assignment.id, type: "assignment" })
+        modules[0].add_item({ id: @assignment2.id, type: "assignment" })
+        modules[1].add_item({ id: @assignment3.id, type: "assignment" })
+      end
+
+      before do
+        get "/courses/#{@course.id}/modules"
+
+        # focus the first item
+        f("html").send_keys("j")
+        @active_element = driver.execute_script("return document.activeElement")
+      end
+
+      let(:context_modules) { ff(".context_module .collapse_module_link") }
+      let(:context_module_items) { ff(".context_module_item a.title") }
+
+      it "edits modules" do
+        @active_element.send_keys("e")
+        expect(f("#add_context_module_form")).to be_displayed
+      end
+
+      it "creates a module" do
+        @active_element.send_keys("n")
+        expect(f("#add_context_module_form")).to be_displayed
+      end
+    end
+
     context "Specific Keyboard Accessibility with differentiated modules", priority: "1" do
       before :once do
-        Account.site_admin.enable_feature! :differentiated_modules
+        differentiated_modules_on
         modules = create_modules(2, true)
         modules[0].add_item({ id: @assignment.id, type: "assignment" })
         modules[0].add_item({ id: @assignment2.id, type: "assignment" })

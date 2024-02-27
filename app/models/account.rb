@@ -66,10 +66,12 @@ class Account < ActiveRecord::Base
   has_many :sis_batches
   has_many :abstract_courses, class_name: "AbstractCourse"
   has_many :root_abstract_courses, class_name: "AbstractCourse", foreign_key: "root_account_id"
+  has_many :user_account_associations
   has_many :all_users, -> { distinct }, through: :user_account_associations, source: :user
   has_many :users, through: :active_account_users
   has_many :user_past_lti_ids, as: :context, inverse_of: :context
   has_many :pseudonyms, -> { preload(:user) }, inverse_of: :account
+  has_many :deleted_users, -> { where(pseudonyms: { workflow_state: "deleted" }) }, through: :pseudonyms, source: :user
   has_many :role_overrides, as: :context, inverse_of: :context
   has_many :course_account_associations
   has_many :child_courses, -> { where(course_account_associations: { depth: 0 }) }, through: :course_account_associations, source: :course
@@ -151,7 +153,6 @@ class Account < ActiveRecord::Base
   has_many :error_reports
   has_many :announcements, class_name: "AccountNotification"
   has_many :alerts, -> { preload(:criteria) }, as: :context, inverse_of: :context
-  has_many :user_account_associations
   has_many :report_snapshots
   has_many :external_integration_keys, as: :context, inverse_of: :context, dependent: :destroy
   has_many :shared_brand_configs
@@ -398,12 +399,14 @@ class Account < ActiveRecord::Base
   # Allow enabling metrics like Heap for sandboxes and other accounts without Salesforce data
   add_setting :enable_usage_metrics, boolean: true, root_only: true, default: false
 
+  add_setting :allow_observers_in_appointment_groups, boolean: true, default: false, inheritable: true
+
   def settings=(hash)
     if hash.is_a?(Hash) || hash.is_a?(ActionController::Parameters)
       hash.each do |key, val|
         key = key.to_sym
         if account_settings_options && (opts = account_settings_options[key])
-          if (opts[:root_only] && !root_account?) || (opts[:condition] && !send("#{opts[:condition]}?".to_sym))
+          if (opts[:root_only] && !root_account?) || (opts[:condition] && !send(:"#{opts[:condition]}?"))
             settings.delete key
           elsif opts[:hash]
             new_hash = {}
@@ -494,6 +497,10 @@ class Account < ActiveRecord::Base
 
   def disable_rce_media_uploads?
     disable_rce_media_uploads[:value]
+  end
+
+  def allow_observers_in_appointment_groups?
+    allow_observers_in_appointment_groups[:value] && Account.site_admin.feature_enabled?(:observer_appointment_groups)
   end
 
   def allow_gradebook_show_first_last_names?
@@ -652,14 +659,11 @@ class Account < ActiveRecord::Base
 
   def clear_downstream_caches(*keys_to_clear, xlog_location: nil, is_retry: false)
     shard.activate do
-      if xlog_location
-        timeout = Setting.get("account_cache_clear_replication_timeout", "60").to_i.seconds
-        unless self.class.wait_for_replication(start: xlog_location, timeout:)
-          delay(run_at: Time.now + timeout, singleton: "Account#clear_downstream_caches/#{global_id}:#{keys_to_clear.join("/")}")
-            .clear_downstream_caches(*keys_to_clear, xlog_location:, is_retry: true)
-          # we still clear, but only the first time; after that we just keep waiting
-          return if is_retry
-        end
+      if xlog_location && !self.class.wait_for_replication(start: xlog_location, timeout: 1.minute)
+        delay(run_at: Time.now + timeout, singleton: "Account#clear_downstream_caches/#{global_id}:#{keys_to_clear.join("/")}")
+          .clear_downstream_caches(*keys_to_clear, xlog_location:, is_retry: true)
+        # we still clear, but only the first time; after that we just keep waiting
+        return if is_retry
       end
 
       Account.clear_cache_keys([id] + Account.sub_account_ids_recursive(id), *keys_to_clear)
@@ -780,33 +784,9 @@ class Account < ActiveRecord::Base
     user_account_associations.where(user_id: user).exists?
   end
 
-  def fast_course_base(opts = {})
-    opts[:order] ||= Course.best_unicode_collation_key("courses.name").asc
-    columns = "courses.id, courses.name, courses.workflow_state, courses.course_code, courses.sis_source_id, courses.enrollment_term_id"
-    associated_courses = self.associated_courses(
-      include_crosslisted_courses: opts[:include_crosslisted_courses]
-    )
-    associated_courses = associated_courses.active.order(opts[:order])
-    associated_courses = associated_courses.with_enrollments if opts[:hide_enrollmentless_courses]
-    associated_courses = associated_courses.master_courses if opts[:only_master_courses]
-    associated_courses = associated_courses.for_term(opts[:term]) if opts[:term].present?
-    associated_courses = yield associated_courses if block_given?
-    associated_courses.limit(opts[:limit]).active_first.select(columns).to_a
-  end
-
-  def fast_all_courses(opts = {})
-    @cached_fast_all_courses ||= {}
-    @cached_fast_all_courses[opts] ||= fast_course_base(opts)
-  end
-
-  def all_users(limit = 250)
-    @cached_all_users ||= {}
-    @cached_all_users[limit] ||= User.of_account(self).limit(limit)
-  end
-
   def fast_all_users(limit = nil)
     @cached_fast_all_users ||= {}
-    @cached_fast_all_users[limit] ||= all_users(limit).active.select("users.id, users.updated_at, users.name, users.sortable_name").order_by_sortable_name
+    @cached_fast_all_users[limit] ||= all_users.limit(limit).active.select("users.id, users.updated_at, users.name, users.sortable_name").order_by_sortable_name
   end
 
   def users_not_in_groups(groups, opts = {})
@@ -816,12 +796,6 @@ class Account < ActiveRecord::Base
                 .select("users.id, users.name")
     scope = scope.select(opts[:order]).order(opts[:order]) if opts[:order]
     scope
-  end
-
-  def courses_name_like(query = "", opts = {})
-    opts[:limit] ||= 200
-    @cached_courses_name_like ||= {}
-    @cached_courses_name_like[[query, opts]] ||= fast_course_base(opts) { |q| q.name_like(query) }
   end
 
   def self_enrollment_course_for(code)
@@ -915,13 +889,11 @@ class Account < ActiveRecord::Base
     end
   end
 
-  def self.default_storage_quota
-    Setting.get("account_default_quota", 500.megabytes.to_s).to_i
-  end
+  DEFAULT_STORAGE_QUOTA = 500.megabytes
 
   def quota
     return storage_quota if read_attribute(:storage_quote)
-    return self.class.default_storage_quota if root_account?
+    return DEFAULT_STORAGE_QUOTA if root_account?
 
     shard.activate do
       Rails.cache.fetch(["current_quota", global_id].cache_key) do
@@ -932,7 +904,7 @@ class Account < ActiveRecord::Base
 
   def default_storage_quota
     return super if read_attribute(:default_storage_quota)
-    return self.class.default_storage_quota if root_account?
+    return DEFAULT_STORAGE_QUOTA if root_account?
 
     shard.activate do
       @default_storage_quota ||= Rails.cache.fetch(["default_storage_quota", global_id].cache_key) do
@@ -1445,7 +1417,7 @@ class Account < ActiveRecord::Base
     can :create_tool_manually
     ##################### End legacy permission block ##########################
 
-    RoleOverride.permissions.each do |permission, _details|
+    RoleOverride.permissions.each_key do |permission|
       given do |user|
         results = cached_account_users_for(user).map do |au|
           res = au.permission_check(self, permission)
@@ -1589,8 +1561,12 @@ class Account < ActiveRecord::Base
     settings[:auth_discovery_url] = url
   end
 
-  def auth_discovery_url
+  def auth_discovery_url(_request = nil)
     settings[:auth_discovery_url]
+  end
+
+  def auth_discovery_url_options(_request)
+    {}
   end
 
   def login_handle_name=(handle_name)

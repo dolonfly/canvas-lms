@@ -19,14 +19,6 @@ microsoft_group_enrollments_syncing:
     If enabled, syncing course enrollments to Microsoft Groups will be
     available. Account admins may enable this in account settings.
   applies_to: RootAccount
-lti_platform_storage:
-  state: hidden
-  display_name: LTI Platform Storage
-  description: |-
-    Controls the final changes needed to fully conform to the LTI Platform Storage
-    spec, including receiving messages addressed to the correct OIDC Auth
-    URI origin, and the postMessage forwarding proxy frame.
-  applies_to: SiteAdmin
 lti_multiple_assignment_deep_linking:
   state: hidden
   display_name: LTI Multiple Assignment Deep Linking
@@ -66,12 +58,6 @@ api_auth_error_updates:
     the "status" field will not be localized; it will always be given in
     English.
   applies_to: SiteAdmin
-variable_substitution_numeric_to_string:
-  state: hidden
-  display_name: Returns string values instead of numeric values in variable substitutions
-  description: |-
-    If enabled, variable substitutions will return string values instead of numeric values
-  applies_to: RootAccount
 ags_scores_multiple_files:
   state: hidden
   display_name: Allow multiple file AGS submissions to count as only one submission
@@ -123,36 +109,11 @@ consistent_ags_ids_based_on_account_principal_domain:
     launch happens on or the API is accessed through. For schools with multiple
     domains, this ensures consistency in Line Item IDs.
   applies_to: RootAccount
-dev_key_oidc_alert:
-  state: hidden
-  display_name: OIDC Auth endpoint changes - show alert for upcoming changes
-  description: |-
-    If enabled, the user will see a warning Alert box near the top of the
-    Developer Keys page informing them of upcoming or completed OIDC Auth endpoint changes.
-  applies_to: SiteAdmin
-  environments:
-    development:
-      state: allowed_on
-    ci:
-      state: allowed_on
 lti_dynamic_registration:
   state: hidden
   display_name: LTI Dynamic Registration
   description: Enables administrators to register LTI tools with Dynamic Registration
   applies_to: RootAccount
-dynamic_lti_environment_overrides:
-  state: hidden
-  display_name: Dynamic LTI 1.1 Environment-specific override URLs
-  description: |-
-    Replaces the existing 'update_external_tools' beta refresh task (that overwrites
-    all URLs in a tool with beta-specific launch URLs) with a dynamic lookup of the
-    correct launch URL.
-  applies_to: SiteAdmin
-  environments:
-    development:
-      state: allowed_on
-    ci:
-      state: allowed_on
 disable_oembed_retrieve:
   state: hidden
   applies_to: RootAccount
@@ -161,6 +122,7 @@ disable_oembed_retrieve:
     If enabled, the deprecated oembed_retrieve endpoint will be unavailable.
     This is to ease transitioning any potential users off this endpoint before
     removing it altogether.
+  shadow: true
 include_oauth_consumer_key_in_lti_launch:
   state: hidden
   applies_to: SiteAdmin
@@ -239,3 +201,27 @@ lti_unique_tool_form_ids:
     When enabled, the hidden HTML forms that are used to trigger an LTI launch
     will each have a random number appended to their id. When disabled, each
     one has the same id of tool_form.
+lti_log_launches:
+  state: hidden
+  applies_to: RootAccount
+  display_name: Log LTI launches
+  description: |-
+    When enabled, sends data for all LTI launches to the PandataEvents system
+    for querying and visualization.
+  environments:
+    development:
+      state: allowed_on
+    ci:
+      state: allowed_on
+enhanced_developer_keys_tables:
+  state: hidden
+  applies_to: RootAccount
+  display_name: Sort and Filter Developer Keys Tables
+  description: |-
+    When enabled, allows the tables on the Developer Keys page to be
+    sorted and filtered.
+  environments:
+    development:
+      state: allowed_on
+    ci:
+      state: on

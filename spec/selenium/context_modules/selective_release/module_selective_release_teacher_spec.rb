@@ -36,7 +36,7 @@ describe "selective_release module set up" do
 
   context "using tray to update settings" do
     before(:once) do
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       course_with_teacher(active_all: true)
       module_setup
     end
@@ -46,11 +46,16 @@ describe "selective_release module set up" do
     end
 
     it_behaves_like "selective_release module tray", :context_modules
+    it_behaves_like "selective_release edit module lock until", :context_modules
+    it_behaves_like "selective_release edit module lock until", :course_homepage
+
+    it_behaves_like "selective_release add module lock until", :context_modules
+    it_behaves_like "selective_release add module lock until", :course_homepage
   end
 
   context "uses tray to update prerequisites" do
     before(:once) do
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       course_with_teacher(active_all: true)
       module_setup
       @module2 = @course.context_modules.create!(name: "module2")
@@ -108,7 +113,7 @@ describe "selective_release module set up" do
 
   context "uses tray to update module requirements" do
     before(:once) do
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       course_with_teacher(active_all: true)
       module_setup
       @module2 = @course.context_modules.create!(name: "module2")
@@ -235,7 +240,7 @@ describe "selective_release module set up" do
 
   context "uses tray to update assign to settings" do
     before(:once) do
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       course_with_teacher(active_all: true)
       @section1 = @course.course_sections.create!(name: "section1")
       @section2 = @course.course_sections.create!(name: "section2")
@@ -353,7 +358,7 @@ describe "selective_release module set up" do
 
   context "uses tray to create modules" do
     before(:once) do
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       course_with_teacher(active_all: true)
     end
 
@@ -414,13 +419,13 @@ describe "selective_release module set up" do
 
   context "Canvas for Elementary Modules Selective Release" do
     before :once do
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       teacher_setup
       module_setup(@subject_course)
       @section1 = @subject_course.course_sections.create!(name: "section1")
       @section2 = @subject_course.course_sections.create!(name: "section2")
       @student1 = student_in_course(course: @subject_course, active_all: true, name: "user1").user
-      @student2 = student_in_course(coure: @subject_course, active_all: true, name: "Student 4", section: @section2).user
+      @student2 = student_in_course(course: @subject_course, active_all: true, name: "Student 4", section: @section2).user
       @module2 = @subject_course.context_modules.create!(name: "module2")
       @module2.add_item type: "assignment", id: @assignment2.id
       @module3 = @subject_course.context_modules.create!(name: "module3")
@@ -434,11 +439,12 @@ describe "selective_release module set up" do
     it_behaves_like "selective_release module tray prerequisites", :canvas_for_elementary
     it_behaves_like "selective_release module tray assign to", :canvas_for_elementary
     it_behaves_like "selective release module tray requirements", :canvas_for_elementary
+    it_behaves_like "selective_release edit module lock until", :canvas_for_elementary
   end
 
   context "Canvas for Elementary Modules Selective Release Limited Set Up" do
     before :once do
-      Account.site_admin.enable_feature! :differentiated_modules
+      differentiated_modules_on
       teacher_setup
     end
 
@@ -447,5 +453,6 @@ describe "selective_release module set up" do
     end
 
     it_behaves_like "selective_release add module tray", :canvas_for_elementary
+    it_behaves_like "selective_release add module lock until", :canvas_for_elementary
   end
 end

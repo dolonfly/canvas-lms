@@ -67,11 +67,7 @@ import useCreateDiscussionEntry from '../../hooks/useCreateDiscussionEntry'
 const I18n = useI18nScope('discussion_topics_post')
 
 const defaultExpandedReplies = id => {
-  if (
-    (ENV.split_screen_view && ENV.DISCUSSION?.preferences?.discussions_splitscreen_view) ||
-    ENV.isolated_view
-  )
-    return false
+  if (ENV.DISCUSSION?.preferences?.discussions_splitscreen_view) return false
   if (id === ENV.discussions_deep_link?.entry_id) return false
   if (id === ENV.discussions_deep_link?.root_entry_id) return true
 
@@ -95,6 +91,18 @@ export const DiscussionThreadContainer = props => {
   const [showReportModal, setShowReportModal] = useState(false)
   const [reportModalIsLoading, setReportModalIsLoading] = useState(false)
   const [reportingError, setReportingError] = useState(false)
+  const [firstSubReply, setFirstSubReply] = useState(false)
+
+  const updateLoadedSubentry = updatedEntry => {
+    // if it's a subentry then we need to update the loadedSubentry.
+    if (props.setLoadedSubentries) {
+      props.setLoadedSubentries(loadedSubentries => {
+        return loadedSubentries.map(entry =>
+          !!updatedEntry.rootEntryId && entry.id === updatedEntry.id ? updatedEntry : entry
+        )
+      })
+    }
+  }
 
   const updateCache = (cache, result) => {
     const newDiscussionEntry = result.data.createDiscussionEntry.discussionEntry
@@ -106,12 +114,22 @@ export const DiscussionThreadContainer = props => {
     }
 
     updateDiscussionTopicEntryCounts(cache, props.discussionTopic.id, {repliesCountChange: 1})
-    if (props.removeDraftFromDiscussionCache) props.removeDraftFromDiscussionCache(cache, result)
     const foundParentEntryQuery = addReplyToDiscussionEntry(cache, variables, newDiscussionEntry)
     if (props.refetchDiscussionEntries && !foundParentEntryQuery) props.refetchDiscussionEntries()
     addReplyToAllRootEntries(cache, newDiscussionEntry)
     addSubentriesCountToParentEntry(cache, newDiscussionEntry)
     props.setHighlightEntryId(newDiscussionEntry._id)
+
+    // It is a known issue that the first reply of a sub reply has not initiated the sub query call,
+    // as a result we cannot add an entry to it. Before we had expand buttons for each sub-entry,
+    // now we must manually trigger the first one.
+    // See addReplyToDiscussionEntry definition for more details.
+    if (
+      result.data.createDiscussionEntry.discussionEntry.parentId === props.discussionEntry._id &&
+      !props.discussionEntry.subentriesCount
+    ) {
+      setFirstSubReply(true)
+    }
   }
 
   const onEntryCreationCompletion = data => {
@@ -124,6 +142,7 @@ export const DiscussionThreadContainer = props => {
   const [deleteDiscussionEntry] = useMutation(DELETE_DISCUSSION_ENTRY, {
     onCompleted: data => {
       if (!data.deleteDiscussionEntry.errors) {
+        updateLoadedSubentry(data.deleteDiscussionEntry.discussionEntry)
         setOnSuccess(I18n.t('The reply was successfully deleted.'))
       } else {
         setOnFailure(I18n.t('There was an unexpected error while deleting the reply.'))
@@ -137,6 +156,7 @@ export const DiscussionThreadContainer = props => {
   const [updateDiscussionEntry] = useMutation(UPDATE_DISCUSSION_ENTRY, {
     onCompleted: data => {
       if (!data.updateDiscussionEntry.errors) {
+        updateLoadedSubentry(data.updateDiscussionEntry.discussionEntry)
         setOnSuccess(I18n.t('The reply was successfully updated.'))
         setIsEditing(false)
       } else {
@@ -169,6 +189,7 @@ export const DiscussionThreadContainer = props => {
       if (!data || !data.updateDiscussionEntryParticipant) {
         return null
       }
+      updateLoadedSubentry(data.updateDiscussionEntryParticipant.discussionEntry)
       setOnSuccess(I18n.t('The reply was successfully updated.'))
     },
     onError: () => {
@@ -181,6 +202,7 @@ export const DiscussionThreadContainer = props => {
       if (!data || !data.updateDiscussionEntryParticipant) {
         return null
       }
+      updateLoadedSubentry(data.updateDiscussionEntryParticipant.discussionEntry)
       setReportModalIsLoading(false)
       setShowReportModal(false)
       setOnSuccess(I18n.t('You have reported this reply.'), false)
@@ -234,18 +256,6 @@ export const DiscussionThreadContainer = props => {
     return `calc(${theme.variables.spacing.xxLarge} * ${props.depth} + ${discussionEntryContainerLeftPadding} + ${discussionEditLeftPadding})`
   }
 
-  const findDraftMessage = () => {
-    let rootEntryDraftMessage = ''
-    props.discussionTopic?.discussionEntryDraftsConnection?.nodes.every(draftEntry => {
-      if (draftEntry.rootEntryId === props.discussionEntry._id && !draftEntry.discussionEntryId) {
-        rootEntryDraftMessage = draftEntry.message
-        return false
-      }
-      return true
-    })
-    return rootEntryDraftMessage
-  }
-
   const client = useApolloClient()
   const resetDiscussionCache = () => {
     client.resetStore()
@@ -256,7 +266,7 @@ export const DiscussionThreadContainer = props => {
   })
 
   // Condense SplitScreen to one variable & link with the SplitScreenButton
-  const splitScreenOn = ENV.split_screen_view && props.userSplitScreenPreference
+  const splitScreenOn = props.userSplitScreenPreference
 
   const threadActions = []
   if (props.discussionEntry.permissions.reply) {
@@ -266,17 +276,12 @@ export const DiscussionThreadContainer = props => {
         key={`reply-${props.discussionEntry._id}`}
         authorName={getDisplayName(props.discussionEntry)}
         delimiterKey={`reply-delimiter-${props.discussionEntry._id}`}
-        hasDraftEntry={!!findDraftMessage()}
         onClick={() => {
           const newEditorExpanded = !editorExpanded
           setEditorExpanded(newEditorExpanded)
 
-          if (ENV.isolated_view || splitScreenOn) {
-            props.onOpenIsolatedView(
-              props.discussionEntry._id,
-              props.discussionEntry.isolatedEntryId,
-              true
-            )
+          if (splitScreenOn) {
+            props.onOpenSplitView(props.discussionEntry._id, true)
           }
         }}
       />
@@ -312,12 +317,8 @@ export const DiscussionThreadContainer = props => {
           />
         }
         onClick={() => {
-          if (ENV.isolated_view || splitScreenOn) {
-            props.onOpenIsolatedView(
-              props.discussionEntry._id,
-              props.discussionEntry.isolatedEntryId,
-              false
-            )
+          if (splitScreenOn) {
+            props.onOpenSplitView(props.discussionEntry._id, false)
           } else {
             setExpandReplies(!expandReplies)
           }
@@ -468,7 +469,7 @@ export const DiscussionThreadContainer = props => {
                     discussionEntry={props.discussionEntry}
                     isTopic={false}
                     postUtilities={
-                      filter !== 'drafts' && !props.discussionEntry.deleted ? (
+                      !props.discussionEntry.deleted ? (
                         <ThreadActions
                           moreOptionsButtonRef={moreOptionsButtonRef}
                           id={props.discussionEntry._id}
@@ -504,22 +505,14 @@ export const DiscussionThreadContainer = props => {
                               : null
                           }
                           isReported={props.discussionEntry?.entryParticipant?.reportType != null}
-                          onQuoteReply={
-                            !ENV.isolated_view
-                              ? () => {
-                                  setReplyFromId(props.discussionEntry._id)
-                                  if (ENV.isolated_view || splitScreenOn) {
-                                    props.onOpenIsolatedView(
-                                      props.discussionEntry._id,
-                                      props.discussionEntry.isolatedEntryId,
-                                      true
-                                    )
-                                  } else {
-                                    setEditorExpanded(true)
-                                  }
-                                }
-                              : null
-                          }
+                          onQuoteReply={() => {
+                            setReplyFromId(props.discussionEntry._id)
+                            if (splitScreenOn) {
+                              props.onOpenSplitView(props.discussionEntry._id, true)
+                            } else {
+                              setEditorExpanded(true)
+                            }
+                          }}
                           onMarkThreadAsRead={readState =>
                             updateDiscussionThreadReadState({
                               variables: {
@@ -544,7 +537,7 @@ export const DiscussionThreadContainer = props => {
                         moreOptionsButtonRef?.current?.focus()
                       }, 0)
                     }}
-                    isIsolatedView={false}
+                    isSplitView={false}
                     editor={props.discussionEntry.editor}
                     isUnread={
                       !props.discussionEntry.entryParticipant?.read ||
@@ -565,7 +558,6 @@ export const DiscussionThreadContainer = props => {
                       props.discussionTopic.author,
                       props.discussionEntry.author
                     )}
-                    updateDraftCache={props.updateDraftCache}
                     attachment={props.discussionEntry.attachment}
                     quotedEntry={props.discussionEntry.quotedEntry}
                   >
@@ -574,8 +566,8 @@ export const DiscussionThreadContainer = props => {
                         <ThreadingToolbar
                           searchTerm={searchTerm}
                           discussionEntry={props.discussionEntry}
-                          onOpenIsolatedView={props.onOpenIsolatedView}
-                          isIsolatedView={false}
+                          onOpenSplitView={props.onOpenSplitView}
+                          isSplitView={false}
                           filter={filter}
                         >
                           {threadActions}
@@ -605,7 +597,7 @@ export const DiscussionThreadContainer = props => {
             </div>
           </Highlight>
           <div style={{marginLeft: getReplyLeftMargin(responsiveProps)}}>
-            {editorExpanded && !(ENV.isolated_view || splitScreenOn) && (
+            {editorExpanded && !splitScreenOn && (
               <View
                 display="block"
                 background="primary"
@@ -639,9 +631,9 @@ export const DiscussionThreadContainer = props => {
               </View>
             )}
           </div>
-          {((expandReplies && !searchTerm) || props.depth > 0) &&
-            !(ENV.isolated_view || splitScreenOn) &&
-            props.discussionEntry.subentriesCount > 0 && (
+          {((expandReplies && !searchTerm) || props.depth > 0 || firstSubReply) &&
+            !splitScreenOn &&
+            (props.discussionEntry.subentriesCount > 0 || firstSubReply) && (
               <DiscussionSubentries
                 discussionTopic={props.discussionTopic}
                 discussionEntryId={props.discussionEntry._id}
@@ -665,14 +657,13 @@ DiscussionThreadContainer.propTypes = {
   refetchDiscussionEntries: PropTypes.func,
   depth: PropTypes.number,
   markAsRead: PropTypes.func,
-  onOpenIsolatedView: PropTypes.func,
+  onOpenSplitView: PropTypes.func,
   goToTopic: PropTypes.func,
   highlightEntryId: PropTypes.string,
-  removeDraftFromDiscussionCache: PropTypes.func,
-  updateDraftCache: PropTypes.func,
   setHighlightEntryId: PropTypes.func,
   userSplitScreenPreference: PropTypes.bool,
   allRootEntries: PropTypes.array,
+  setLoadedSubentries: PropTypes.func,
 }
 
 DiscussionThreadContainer.defaultProps = {
@@ -702,13 +693,15 @@ const DiscussionSubentries = props => {
   useEffect(() => {
     const loadedSubentriesIds = loadedSubentries.map(entry => entry._id).join('')
 
+    // this means on all update mutations (including delete) we need to manually update loadedSubentries
     if (subentries.length > 0 && subentriesIds !== loadedSubentriesIds) {
       if (loadedSubentries.length < subentries.length) {
         setTimeout(() => {
-          const newLoadedSubentries = loadedSubentries.concat(
-            subentries.slice(loadedSubentries.length, loadedSubentries.length + 10)
+          setLoadedSubentries(previousloadedSubentries =>
+            previousloadedSubentries.concat(
+              subentries.slice(loadedSubentries.length, loadedSubentries.length + 10)
+            )
           )
-          setLoadedSubentries(newLoadedSubentries)
         }, 500)
       } else {
         // There is a mismatch of IDs, so we need to reset the loadedSubentries
@@ -734,11 +727,10 @@ const DiscussionSubentries = props => {
           discussionTopic={props.discussionTopic}
           markAsRead={props.markAsRead}
           parentRefCurrent={props.parentRefCurrent}
-          removeDraftFromDiscussionCache={props.removeDraftFromDiscussionCache}
-          updateDraftCache={props.updateDraftCache}
           highlightEntryId={props.highlightEntryId}
           setHighlightEntryId={props.setHighlightEntryId}
           allRootEntries={allRootEntries}
+          setLoadedSubentries={setLoadedSubentries}
         />
       ))}
       <LoadingReplies isLoading={isLoading} />
@@ -752,8 +744,6 @@ DiscussionSubentries.propTypes = {
   depth: PropTypes.number,
   markAsRead: PropTypes.func,
   parentRefCurrent: PropTypes.object,
-  removeDraftFromDiscussionCache: PropTypes.func,
-  updateDraftCache: PropTypes.func,
   highlightEntryId: PropTypes.string,
   setHighlightEntryId: PropTypes.func,
   allRootEntries: PropTypes.array,
@@ -768,11 +758,10 @@ const DiscussionSubentriesMemo = props => {
         discussionTopic={props.discussionTopic}
         markAsRead={props.markAsRead}
         parentRefCurrent={props.parentRefCurrent}
-        removeDraftFromDiscussionCache={props.removeDraftFromDiscussionCache}
-        updateDraftCache={props.updateDraftCache}
         highlightEntryId={props.highlightEntryId}
         setHighlightEntryId={props.setHighlightEntryId}
         allRootEntries={props.allRootEntries}
+        setLoadedSubentries={props.setLoadedSubentries}
       />
     )
   }, [
@@ -781,11 +770,10 @@ const DiscussionSubentriesMemo = props => {
     props.discussionTopic,
     props.markAsRead,
     props.parentRefCurrent,
-    props.removeDraftFromDiscussionCache,
-    props.updateDraftCache,
     props.highlightEntryId,
     props.setHighlightEntryId,
     props.allRootEntries,
+    props.setLoadedSubentries,
   ])
 }
 
@@ -794,8 +782,6 @@ DiscussionSubentries.propTypes = {
   depth: PropTypes.number,
   markAsRead: PropTypes.func,
   parentRefCurrent: PropTypes.object,
-  removeDraftFromDiscussionCache: PropTypes.func,
-  updateDraftCache: PropTypes.func,
   highlightEntryId: PropTypes.string,
   setHighlightEntryId: PropTypes.func,
   allRootEntries: PropTypes.array,

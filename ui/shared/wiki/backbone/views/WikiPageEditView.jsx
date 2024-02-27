@@ -25,7 +25,7 @@ import WikiPageDeleteDialog from './WikiPageDeleteDialog'
 import WikiPageReloadView from './WikiPageReloadView'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import DueDateCalendarPicker from '@canvas/due-dates/react/DueDateCalendarPicker'
-import '@canvas/datetime'
+import '@canvas/datetime/jquery'
 import renderWikiPageTitle from '../../react/renderWikiPageTitle'
 
 const I18n = useI18nScope('pages')
@@ -228,8 +228,14 @@ export default class WikiPageEditView extends ValidatedFormView {
   }
 
   destroyEditor() {
-    RichContentEditor.destroyRCE(this.$wikiPageBody)
-    return this.$el.remove()
+    // hack fix for LF-1134
+    try {
+      RichContentEditor.destroyRCE(this.$wikiPageBody)
+    } catch (e) {
+      console.warn(e)
+    } finally {
+      this.$el.remove()
+    }
   }
 
   switchViews(event) {

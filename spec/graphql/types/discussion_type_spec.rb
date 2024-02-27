@@ -77,9 +77,9 @@ RSpec.shared_context "DiscussionTypeContext" do
         allowed: lambda do |user|
           permission = !discussion.assignment.context.large_roster? && discussion.assignment_id && discussion.assignment.published?
           if discussion.assignment.context.concluded?
-            return permission && discussion.assignment.context.grants_right?(user, :read_as_admin)
+            permission && discussion.assignment.context.grants_right?(user, :read_as_admin)
           else
-            return permission && discussion.assignment.context.grants_any_right?(user, :manage_grades, :view_all_grades)
+            permission && discussion.assignment.context.grants_any_right?(user, :manage_grades, :view_all_grades)
           end
         end
       },
@@ -756,6 +756,14 @@ describe Types::DiscussionType do
         expect(discussion_type.resolve("mentionableUsersConnection { nodes { _id } }")).to eq(discussion.context.participating_users_in_context.map { |u| u.id.to_s })
       end
     end
+
+    it "returns can_group correctly" do
+      student_in_course(active_all: true)
+      expect(discussion_type.resolve("canGroup")).to be true
+
+      discussion.discussion_entries.create!(message: "other student entry", user: @student)
+      expect(discussion_type.resolve("canGroup")).to be false
+    end
   end
 
   context "group discussion with deleted group" do
@@ -764,6 +772,35 @@ describe Types::DiscussionType do
 
     it "doesn't show child topic associated to a deleted group" do
       expect(discussion_type.resolve("childTopics { contextName }")).to match_array(["group 1", "group 2"])
+    end
+  end
+
+  context "editing group category id" do
+    it "changing group category id returns only group new group child topics" do
+      course = @course || course_factory(active_all: true)
+
+      discussion = course.discussion_topics.build(title: "topic")
+      discussion.save!
+
+      group_category_a = course.group_categories.create(name: "category_a", context: course, context_type: "Course", account: course.account)
+      group_category_a.groups.create!(name: "group 1a", context: course, context_type: "Course", account: course.account)
+      group_category_a.groups.create!(name: "group 2a", context: course, context_type: "Course", account: course.account)
+
+      group_category_b = course.group_categories.create(name: "category_b", context: course, context_type: "Course", account: course.account)
+      group_category_b.groups.create!(name: "group 1b", context: course, context_type: "Course", account: course.account)
+      group_category_b.groups.create!(name: "group 2b", context: course, context_type: "Course", account: course.account)
+
+      discussion.group_category = group_category_a
+      discussion.save!
+
+      discussion_type = GraphQLTypeTester.new(discussion, current_user: @teacher)
+
+      expect(discussion_type.resolve("childTopics { contextName }")).to match_array(["group 1a", "group 2a"])
+
+      discussion.group_category = group_category_b
+      discussion.save!
+
+      expect(discussion_type.resolve("childTopics { contextName }")).to match_array(["group 1b", "group 2b"])
     end
   end
 

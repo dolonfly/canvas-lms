@@ -297,7 +297,7 @@ describe "gradebook - logged in as a student" do
         wait_for_ajaximations
 
         # Verify that the correct assignments are being dropped
-        dropped_assignments = ffj("tr[data-testid='assignment-row']::contains('Dropped')")
+        dropped_assignments = ffj("tr[data-testid='assignment-row']:contains('Dropped')")
         expect(dropped_assignments.length).to eq 2
         dropped_assignments_text = dropped_assignments.map(&:text)
         expect(dropped_assignments_text.any? { |str| str.include?(@assignment_3.title) }).to be true
@@ -338,7 +338,7 @@ describe "gradebook - logged in as a student" do
         wait_for_ajaximations
 
         # Verify that the correct assignments are being dropped
-        dropped_assignments = ffj("tr[data-testid='assignment-row']::contains('Dropped')")
+        dropped_assignments = ffj("tr[data-testid='assignment-row']:contains('Dropped')")
         expect(dropped_assignments.length).to eq 2
         dropped_assignments_text = dropped_assignments.map(&:text)
         expect(dropped_assignments_text.any? { |str| str.include?(@assignment_8.title) }).to be true
@@ -566,7 +566,7 @@ describe "gradebook - logged in as a student" do
       # the all the grades and grading period selected is based on current period
       expect(f("#grading_period_select_menu").attribute(:value)).to eq current_period_name
       expect(f("div.final_grade").text).to eq "Total: B−"
-      expect(fj(current_assignment_selector).text).to include "GRADED\nB−\nYour grade has been updated"
+      expect(fj(current_assignment_selector).text).to include "Graded\nB−\nYour grade has been updated"
       expect(f("tr[data-testid='agtotal-Assignments']").text).to eq "Assignments B−"
       expect(f("tr[data-testid='total_row']").text).to eq "Total B−"
       expect(f("body")).not_to contain_jqcss(future_assignment_selector)
@@ -577,7 +577,7 @@ describe "gradebook - logged in as a student" do
       fj("button:contains('Apply')").click
       wait_for_ajaximations
       expect(f("div.final_grade").text).to eq "Total: A"
-      expect(fj(future_assignment_selector).text).to include "GRADED\nA\nYour grade has been updated"
+      expect(fj(future_assignment_selector).text).to include "Graded\nA\nYour grade has been updated"
       expect(f("tr[data-testid='agtotal-Assignments']").text).to eq "Assignments A"
       expect(f("tr[data-testid='total_row']").text).to eq "Total A"
       expect(f("body")).not_to contain_jqcss(current_assignment_selector)
@@ -588,8 +588,8 @@ describe "gradebook - logged in as a student" do
       fj("button:contains('Apply')").click
       wait_for_ajaximations
 
-      expect(fj(future_assignment_selector).text).to include "GRADED\nA\nYour grade has been updated"
-      expect(fj(current_assignment_selector).text).to include "GRADED\nB−\nYour grade has been updated"
+      expect(fj(future_assignment_selector).text).to include "Graded\nA\nYour grade has been updated"
+      expect(fj(current_assignment_selector).text).to include "Graded\nB−\nYour grade has been updated"
 
       # Make sure the grading period totals show because display_totals_for_all_grading_periods is true
       expect(fj("tr[data-testid='gradingPeriod-#{future_period.id}']").text).to eq "Future Grading Period A"

@@ -23,12 +23,12 @@ import {Attachment} from './Attachment'
 export const CREATE_DISCUSSION_TOPIC = gql`
   mutation CreateDiscussionTopic(
     $contextId: ID!
-    $contextType: String!
+    $contextType: DiscussionTopicContextType!
     $title: String
     $message: String
     $published: Boolean
     $requireInitialPost: Boolean
-    $anonymousState: String
+    $anonymousState: DiscussionTopicAnonymousStateType
     $delayedPostAt: DateTime
     $lockAt: DateTime
     $isAnonymousAuthor: Boolean
@@ -41,7 +41,7 @@ export const CREATE_DISCUSSION_TOPIC = gql`
     $isAnnouncement: Boolean
     $specificSections: String
     $groupCategoryId: ID
-    $assignment: AssignmentCreateOrUpdate
+    $assignment: AssignmentCreate
     $fileId: ID
   ) {
     createDiscussionTopic(
@@ -140,7 +140,9 @@ export const UPDATE_DISCUSSION_TOPIC = gql`
     $locked: Boolean
     $specificSections: String
     $fileId: ID
+    $groupCategoryId: ID
     $removeAttachment: Boolean
+    $assignment: AssignmentUpdate
   ) {
     updateDiscussionTopic(
       input: {
@@ -158,8 +160,10 @@ export const UPDATE_DISCUSSION_TOPIC = gql`
         podcastHasStudentPosts: $podcastHasStudentPosts
         locked: $locked
         specificSections: $specificSections
+        groupCategoryId: $groupCategoryId
         fileId: $fileId
         removeAttachment: $removeAttachment
+        assignment: $assignment
       }
     ) {
       discussionTopic {
@@ -181,6 +185,30 @@ export const UPDATE_DISCUSSION_TOPIC = gql`
         isAnnouncement
         attachment {
           ...Attachment
+        }
+        assignment {
+          _id
+          name
+          pointsPossible
+          gradingType
+          assignmentGroupId
+          canDuplicate
+          canUnpublish
+          courseId
+          description
+          dueAt
+          groupCategoryId
+          id
+          published
+          restrictQuantitativeData
+          sisId
+          state
+          peerReviews {
+            automaticReviews
+            count
+            dueAt
+            enabled
+          }
         }
       }
       errors {

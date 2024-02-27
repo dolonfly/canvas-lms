@@ -19,15 +19,15 @@
 import 'jqueryui/dialog'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import $ from 'jquery'
-import htmlEscape from 'html-escape'
+import htmlEscape from '@instructure/html-escape'
 import RichContentEditor from '@canvas/rce/RichContentEditor'
 import axios from '@canvas/axios'
 import {setupCache} from 'axios-cache-adapter/src/index'
 import 'jqueryui/tabs'
 import globalAnnouncements from './global_announcements'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/datetime' // date_field, time_field, datetime_field, /\$\.datetime/
-import '@canvas/forms/jquery/jquery.instructure_forms' // formSubmit, getFormData, validateForm
+import '@canvas/datetime/jquery' // date_field, time_field, datetime_field, /\$\.datetime/
+import '@canvas/jquery/jquery.instructure_forms' // formSubmit, getFormData, validateForm
 import '@canvas/jquery/jquery.instructure_misc_helpers' // replaceTags
 import '@canvas/jquery/jquery.instructure_misc_plugins' // confirmDelete, showIf, /\.log/
 import '@canvas/loading-image'

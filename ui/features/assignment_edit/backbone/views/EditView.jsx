@@ -23,7 +23,7 @@ import React from 'react'
 import ReactDOM from 'react-dom'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import ValidatedFormView from '@canvas/forms/backbone/views/ValidatedFormView'
-import _ from 'underscore'
+import _, {each, find, keys, includes, forEach, filter} from 'lodash'
 import $, {param} from 'jquery'
 import pluralize from '@canvas/util/stringPluralize'
 import numberHelper from '@canvas/i18n/numberHelper'
@@ -52,13 +52,12 @@ import ExternalToolModalLauncher from '@canvas/external-tools/react/components/E
 import * as returnToHelper from '@canvas/util/validateReturnToURL'
 import setUsageRights from '@canvas/files/util/setUsageRights'
 import 'jqueryui/dialog'
-import '@canvas/util/toJSON'
+import '@canvas/jquery/jquery.toJSON'
 import '@canvas/rails-flash-notifications'
 import '../../../../boot/initializers/activateTooltips'
 import {AnnotatedDocumentSelector} from '../../react/EditAssignment'
 import {selectContentDialog} from '@canvas/select-content-dialog'
 import {addDeepLinkingListener} from '@canvas/deep-linking/DeepLinking'
-import {ResourceLinkContentItem} from '@canvas/deep-linking/models/ResourceLinkContentItem'
 
 const I18n = useI18nScope('assignment_editview')
 
@@ -198,6 +197,8 @@ function EditView() {
   this.handlePointsChange = this.handlePointsChange.bind(this)
   this.settingsToCache = this.settingsToCache.bind(this)
   this.handleCancel = this.handleCancel.bind(this)
+  this.handleMessageEvent = this.handleMessageEvent.bind(this)
+  window.addEventListener('message', this.handleMessageEvent.bind(this))
 
   return EditView.__super__.constructor.apply(this, arguments)
 }
@@ -205,10 +206,9 @@ EditView.prototype.template = EditViewTemplate
 
 EditView.prototype.dontRenableAfterSaveSuccess = true
 
-EditView.prototype.els = _.extend(
-  {},
-  EditView.prototype.els,
-  (function () {
+EditView.prototype.els = {
+  ...EditView.prototype.els,
+  ...(function () {
     const els = {}
     els['' + ASSIGNMENT_GROUP_SELECTOR] = '$assignmentGroupSelector'
     els['' + DESCRIPTION] = '$description'
@@ -256,13 +256,12 @@ EditView.prototype.els = _.extend(
     els['' + HIDE_ZERO_POINT_QUIZZES_OPTION] = '$hideZeroPointQuizzesOption'
     els['' + OMIT_FROM_FINAL_GRADE_BOX] = '$omitFromFinalGradeBox'
     return els
-  })()
-)
+  })(),
+}
 
-EditView.prototype.events = _.extend(
-  {},
-  EditView.prototype.events,
-  (function () {
+EditView.prototype.events = {
+  ...EditView.prototype.events,
+  ...(function () {
     const events = {}
     events['click .cancel_button'] = 'handleCancel'
     events['click .save_and_publish'] = 'saveAndPublish'
@@ -285,8 +284,8 @@ EditView.prototype.events = _.extend(
       events.change = 'onChange'
     }
     return events
-  })()
-)
+  })(),
+}
 
 EditView.child('assignmentGroupSelector', '' + ASSIGNMENT_GROUP_SELECTOR)
 
@@ -526,7 +525,7 @@ EditView.prototype.togglePeerReviewsAndGroupCategoryEnabled = function () {
 EditView.prototype.setDefaultsIfNew = function () {
   if (this.assignment.isNew()) {
     if (userSettings.contextGet('new_assignment_settings')) {
-      _.each(
+      each(
         this.settingsToCache(),
         (function (_this) {
           return function (setting) {
@@ -947,11 +946,37 @@ EditView.prototype.handleSubmissionTypeChange = function (_ev) {
   return this.$externalToolNewTabContainer.toggleAccessibly(subVal.includes('external_tool'))
 }
 
+EditView.prototype.validateGuidData = function (event) {
+  const data = event.data.data
+
+  // If data is a string, convert it to an array for consistent processing
+  const dataArray = Array.isArray(data) ? data : [data]
+  const regexPattern =
+    /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/
+
+  for (const str of dataArray) {
+    if (!regexPattern.test(str)) {
+      return false
+    }
+  }
+  return dataArray
+}
+
+EditView.prototype.handleMessageEvent = function (event) {
+  if (event?.data?.subject !== 'assignment.set_ab_guid') {
+    return
+  }
+  const abGuid = this.validateGuidData(event)
+  if (abGuid) {
+    this.assignment.set('ab_guid', abGuid)
+  }
+}
+
 EditView.prototype.handlePlacementExternalToolSelect = function (selection) {
   const toolId = selection.replace('external_tool_placement_', '')
   this.$externalToolsContentId.val(toolId)
   this.$externalToolsContentType.val('context_external_tool')
-  this.selectedTool = _.find(this.model.submissionTypeSelectionTools(), function (tool) {
+  this.selectedTool = find(this.model.submissionTypeSelectionTools(), function (tool) {
     return toolId === tool.id
   })
 
@@ -1142,7 +1167,7 @@ EditView.prototype.afterRender = function () {
 
 EditView.prototype.toJSON = function () {
   const data = this.assignment.toView()
-  return _.extend(data, {
+  return Object.assign(data, {
     assignment_attempts:
       typeof ENV !== 'undefined' && ENV !== null ? ENV.assignment_attempts_enabled : void 0,
     kalturaEnabled:
@@ -1168,10 +1193,8 @@ EditView.prototype.toJSON = function () {
       (typeof ENV !== 'undefined' && ENV !== null
         ? ENV.ANONYMOUS_INSTRUCTOR_ANNOTATIONS_ENABLED
         : void 0) || false,
-    anonymousGradingCheckboxDisabled:
-      !this.assignment.isNew() &&
-      this.assignment.isQuizLTIAssignment() &&
-      this.assignment.anonymousGrading(),
+        differentiatedModulesEnabled: ENV.FEATURES.differentiated_modules
+    
   })
 }
 
@@ -1223,6 +1246,7 @@ EditView.prototype.getFormData = function () {
   data = this._inferSubmissionTypes(data)
   data = this._filterAllowedExtensions(data)
   data = this._unsetGroupsIfExternalTool(data)
+  data.ab_guid = this.assignment.get('ab_guid')
   if (!(typeof ENV !== 'undefined' && ENV !== null ? ENV.IS_LARGE_ROSTER : void 0)) {
     data = this.groupCategorySelector.filterFormData(data)
   }
@@ -1356,7 +1380,7 @@ EditView.prototype._inferSubmissionTypes = function (assignmentData) {
   if (assignmentData.grading_type === 'not_graded') {
     assignmentData.submission_types = ['not_graded']
   } else if (assignmentData.submission_type === 'online') {
-    types = _.select(_.keys(assignmentData.online_submission_types), function (k) {
+    types = filter(keys(assignmentData.online_submission_types), function (k) {
       return assignmentData.online_submission_types[k] === '1'
     })
     assignmentData.submission_types = types
@@ -1372,7 +1396,7 @@ EditView.prototype._filterAllowedExtensions = function (data) {
   const restrictFileExtensions = data.restrict_file_extensions
   delete data.restrict_file_extensions
   if (restrictFileExtensions === '1') {
-    data.allowed_extensions = _.select(data.allowed_extensions.split(','), function (ext) {
+    data.allowed_extensions = filter(data.allowed_extensions.split(','), function (ext) {
       return $.trim(ext.toString()).length > 0
     })
   } else {
@@ -1389,7 +1413,7 @@ EditView.prototype._unsetGroupsIfExternalTool = function (data) {
 }
 
 // Pre-Save Validations
-EditView.prototype.fieldSelectors = _.extend(
+EditView.prototype.fieldSelectors = Object.assign(
   AssignmentGroupSelector.prototype.fieldSelectors,
   GroupCategorySelector.prototype.fieldSelectors,
   {
@@ -1488,7 +1512,7 @@ EditView.prototype.validateGraderCount = function (data) {
 
 EditView.prototype._validateTitle = function (data, errors) {
   let max_name_length
-  if (_.includes(this.model.frozenAttributes(), 'title')) {
+  if (includes(this.model.frozenAttributes(), 'title')) {
     return errors
   }
   const post_to_sis = data.post_to_sis === '1'
@@ -1537,11 +1561,11 @@ EditView.prototype._validateSubmissionTypes = function (data, errors) {
     ]
   } else if (data.submission_type === 'online' && data.vericite_enabled === '1') {
     allow_vericite = true
-    _.select(_.keys(data.submission_types), function (k) {
-      return (allow_vericite =
+    forEach(keys(data.submission_types), function (k) {
+      allow_vericite =
         allow_vericite &&
         (data.submission_types[k] === 'online_upload' ||
-          data.submission_types[k] === 'online_text_entry'))
+          data.submission_types[k] === 'online_text_entry')
     })
     if (!allow_vericite) {
       errors['online_submission_types[online_text_entry]'] = [
@@ -1582,7 +1606,7 @@ EditView.prototype._validateSubmissionTypes = function (data, errors) {
 EditView.prototype._validateAllowedExtensions = function (data, errors) {
   if (
     data.allowed_extensions &&
-    _.includes(data.submission_types, 'online_upload') &&
+    includes(data.submission_types, 'online_upload') &&
     data.allowed_extensions.length === 0
   ) {
     errors.allowed_extensions = [
@@ -1595,7 +1619,7 @@ EditView.prototype._validateAllowedExtensions = function (data, errors) {
 }
 
 EditView.prototype._validatePointsPossible = function (data, errors) {
-  if (_.includes(this.model.frozenAttributes(), 'points_possible')) {
+  if (includes(this.model.frozenAttributes(), 'points_possible')) {
     return errors
   }
   if (this.lockedItems.points) {

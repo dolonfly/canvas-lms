@@ -1317,6 +1317,18 @@ describe User do
       @fake_student = @course.student_view_student
       expect(@fake_student.can_masquerade?(@teacher, Account.default)).to be_truthy
     end
+
+    it "doesn't allow teacher to become student view of random student" do
+      course_with_teacher(active_all: true)
+      @fake_student = user_factory
+      expect(@fake_student.can_masquerade?(@teacher, Account.default)).to be_falsey
+    end
+
+    it "doesn't allow fake student to become teacher" do
+      course_with_teacher(active_all: true)
+      @fake_student = @course.student_view_student
+      expect(@teacher.can_masquerade?(@fake_student, Account.default)).to be_falsey
+    end
   end
 
   describe "#has_subset_of_account_permissions?" do
@@ -1662,7 +1674,7 @@ describe User do
       expect(tool.has_placement?(:user_navigation)).to be false
       user_model
       tabs = @user.profile.tabs_available(@user, root_account: Account.default)
-      expect(tabs.pluck(:id)).not_to be_include(tool.asset_string)
+      expect(tabs.pluck(:id)).not_to include(tool.asset_string)
     end
 
     it "includes configured external tools" do
@@ -1672,7 +1684,7 @@ describe User do
       expect(tool.has_placement?(:user_navigation)).to be true
       user_model
       tabs = @user.profile.tabs_available(@user, root_account: Account.default)
-      expect(tabs.pluck(:id)).to be_include(tool.asset_string)
+      expect(tabs.pluck(:id)).to include(tool.asset_string)
       tab = tabs.detect { |t| t[:id] == tool.asset_string }
       expect(tab[:href]).to eq :user_external_tool_path
       expect(tab[:args]).to eq [@user.id, tool.id]
@@ -3233,7 +3245,7 @@ describe User do
       specs_require_sharding
 
       it "checks for associated accounts on shards the user shares with the seeker" do
-        # create target user on defualt shard
+        # create target user on default shard
         target = user_factory
         # create account on another shard
         account = @shard1.activate { Account.create! }
@@ -3619,6 +3631,12 @@ describe User do
       expect(@user.roles(@account)).to eq %w[user admin root_admin]
     end
 
+    it "does not include 'root_admin' if the user's root account admin user record is deleted" do
+      au = @account.account_users.create!(user: @user, role: admin_role)
+      au.destroy
+      expect(@user.roles(@account)).to eq %w[user]
+    end
+
     it "caches results" do
       enable_cache do
         sub_account = @account.sub_accounts.create!
@@ -3660,6 +3678,12 @@ describe User do
     it "returns true if the user an admin in a root account" do
       @account.account_users.create!(user: @user, role: admin_role)
       expect(@user.root_admin_for?(@account)).to be true
+    end
+
+    it "returns false if the user *was* an admin in a root account" do
+      au = @account.account_users.create!(user: @user, role: admin_role)
+      au.destroy
+      expect(@user.root_admin_for?(@account)).to be false
     end
   end
 
@@ -3710,33 +3734,6 @@ describe User do
       f.submission_context_code = @course.asset_string
       f.save!
       expect(@user.submissions_folder(@course)).to eq f
-    end
-  end
-
-  describe "submittable_attachments" do
-    before(:once) do
-      student_in_course
-      group_model
-      @other_group = @group
-      group_model
-      @group.add_user @student
-      @a1 = attachment_with_context(@student)
-      @a2 = attachment_with_context(@group)
-      @a3 = attachment_with_context(@other_group)
-    end
-
-    it "matches non-deleted attachments in user or group context" do
-      expect(@student.submittable_attachments.pluck(:id)).to match_array [@a1, @a2].map(&:id)
-    end
-
-    it "excludes deleted files" do
-      @a1.destroy
-      expect(@student.submittable_attachments.pluck(:id)).to eq [@a2.id]
-    end
-
-    it "excludes deleted group memberships" do
-      @student.group_memberships.where(group_id: @group.id).take.destroy
-      expect(@student.submittable_attachments.pluck(:id)).to eq [@a1.id]
     end
   end
 

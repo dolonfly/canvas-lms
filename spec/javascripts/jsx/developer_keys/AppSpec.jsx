@@ -28,6 +28,16 @@ QUnit.module('DevelopersKeyApp', {
   teardown() {
     document.getElementById('fixtures').innerHTML = ''
   },
+  beforeEach: () => {
+    window.ENV = {
+      FEATURES: {
+        lti_dynamic_registration: true,
+      },
+    }
+  },
+  afterEach: () => {
+    window.ENV = {}
+  },
 })
 
 const listDeveloperKeyScopes = {
@@ -304,7 +314,7 @@ test('displays the developer key on click of show key button', () => {
   }
   const wrapper = mount(<DeveloperKeysApp {...props} />)
 
-  const btn = wrapper.find('table button').first()
+  const btn = wrapper.find({'data-testid': 'show-key'}).first()
   ok(btn.html().includes('Show Key'))
   btn.simulate('click')
   ok(btn.html().includes('Hide Key'))
@@ -344,42 +354,6 @@ test('renders the spinner', () => {
   const wrapper = mount(<DeveloperKeysApp {...props} />)
   const spinner = wrapper.find(Spinner)
   ok(spinner.exists())
-})
-
-test('opens the key selection menu when the create button is clicked', () => {
-  const applicationState = {
-    listDeveloperKeyScopes,
-    createOrEditDeveloperKey: {isLtiKey: false},
-    listDeveloperKeys: {
-      listDeveloperKeysPending: true,
-      listDeveloperKeysSuccessful: false,
-      list: [
-        {
-          id: '111',
-          api_key: 'abc12345678',
-          created_at: '2012-06-07T20:36:50Z',
-        },
-      ],
-    },
-  }
-
-  const props = {
-    applicationState,
-    actions: {developerKeysModalOpen: () => {}},
-    store: fakeStore(),
-    ctx: {
-      params: {
-        contextId: '',
-      },
-    },
-  }
-  const wrapper = mount(<DeveloperKeysApp {...props} />)
-
-  notOk(wrapper.find('Menu').first().find('Portal').exists())
-  wrapper.find('Button').first().simulate('click')
-  ok(wrapper.find('Menu').first().find('Portal').first().prop('open'))
-  wrapper.unmount()
-  window.ENV = {}
 })
 
 test('does not have the create button on inherited tab', () => {

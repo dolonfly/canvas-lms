@@ -16,6 +16,8 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'cross-fetch/polyfill'
+import {TextDecoder, TextEncoder} from 'util'
 import CoreTranslations from '../public/javascripts/translations/en.json'
 import Enzyme from 'enzyme'
 import Adapter from 'enzyme-adapter-react-16'
@@ -46,13 +48,13 @@ const ignoredErrors = [
   /Can't perform a React state update on an unmounted component/,
   /Function components cannot be given refs/,
   /Invalid prop `heading` of type `object` supplied to `Billboard`/, // https://instructure.atlassian.net/browse/QUIZ-8870
-  /Invariant Violation/,
+  /Invariant Violation/, // https://instructure.atlassian.net/browse/VICE-3968
   /Prop `children` should be supplied unless/, // https://instructure.atlassian.net/browse/FOO-3407
   /The above error occurred in the <.*> component/,
   /You seem to have overlapping act\(\) calls/,
 ]
 const globalWarn = global.console.warn
-const ignoredWarnings = [/value provided is not in a recognized RFC2822 or ISO format/]
+const ignoredWarnings = []
 global.console = {
   log: console.log,
   error: error => {
@@ -78,8 +80,6 @@ global.console = {
 }
 /* eslint-enable no-console */
 filterUselessConsoleMessages(global.console)
-
-require('jest-fetch-mock').enableFetchMocks()
 
 window.scroll = () => {}
 window.ENV = {
@@ -245,6 +245,9 @@ if (typeof window.URL.revokeObjectURL === 'undefined') {
   Object.defineProperty(window.URL, 'revokeObjectURL', {value: () => undefined})
 }
 
+global.fetch =
+  global.fetch || jest.fn().mockImplementation(() => Promise.resolve({json: () => ({})}))
+
 Document.prototype.createRange =
   Document.prototype.createRange ||
   function () {
@@ -263,3 +266,6 @@ Document.prototype.createRange =
       },
     }
   }
+
+global.TextEncoder = TextEncoder
+global.TextDecoder = TextDecoder

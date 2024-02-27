@@ -27,11 +27,11 @@ RSpec.describe SecurityController, type: :request do
   let(:future_key) { CanvasSecurity::KeyStorage.new_key }
 
   let(:fallback_proxy) do
-    DynamicSettings::FallbackProxy.new(
-      CanvasSecurity::KeyStorage::PAST => past_key,
-      CanvasSecurity::KeyStorage::PRESENT => present_key,
-      CanvasSecurity::KeyStorage::FUTURE => future_key
-    )
+    DynamicSettings::FallbackProxy.new({
+                                         CanvasSecurity::KeyStorage::PAST => past_key,
+                                         CanvasSecurity::KeyStorage::PRESENT => present_key,
+                                         CanvasSecurity::KeyStorage::FUTURE => future_key
+                                       })
   end
 
   around do |example|
@@ -84,6 +84,10 @@ RSpec.describe SecurityController, type: :request do
   end
 
   describe "openid_configuration" do
+    before do
+      allow(Lti::Oidc).to receive(:auth_domain).and_return("canvas.instructure.com")
+    end
+
     it "rejects timed-out tokens" do
       jwt = Canvas::Security.create_jwt({
                                           user_id: 1,
@@ -91,7 +95,7 @@ RSpec.describe SecurityController, type: :request do
                                         },
                                         5.minutes.ago)
 
-      get "/api/lti/security/openid-configuration", params: { registration_token: jwt }
+      get "/api/lti/security/openid-configuration", headers: { "Authorization" => "Bearer #{jwt}" }
       expect(response).to have_http_status :unauthorized
     end
 
@@ -105,11 +109,11 @@ RSpec.describe SecurityController, type: :request do
       messages = Lti::ResourcePlacement::PLACEMENTS_BY_MESSAGE_TYPE.keys.map(&:to_s).map do |message_type|
         {
           "type" => message_type,
-          "placements" => Lti::ResourcePlacement::PLACEMENTS_BY_MESSAGE_TYPE[message_type].map(&:to_s)
+          "placements" => Lti::ResourcePlacement::PLACEMENTS_BY_MESSAGE_TYPE[message_type].reject { |p| p == :resource_selection }.map(&:to_s)
         }
       end
 
-      get "/api/lti/security/openid-configuration", params: { registration_token: jwt }
+      get "/api/lti/security/openid-configuration?registration_token=#{jwt}"
       expect(response).to have_http_status :ok
       parsed_body = response.parsed_body
       expect(parsed_body["issuer"]).to eq "https://canvas.instructure.com"
@@ -124,6 +128,10 @@ RSpec.describe SecurityController, type: :request do
 
   context "sharding" do
     specs_require_sharding
+
+    before do
+      allow(Lti::Oidc).to receive(:auth_domain).and_return("canvas.instructure.com")
+    end
 
     describe "openid_configuration" do
       it "works cross-shard" do
@@ -141,7 +149,7 @@ RSpec.describe SecurityController, type: :request do
                                           },
                                           5.minutes.from_now)
 
-        get "/api/lti/security/openid-configuration", params: { registration_token: jwt }
+        get "/api/lti/security/openid-configuration?registration_token=#{jwt}"
         expect(response).to have_http_status :ok
         parsed_body = response.parsed_body
         expect(parsed_body["issuer"]).to eq "https://canvas.instructure.com"

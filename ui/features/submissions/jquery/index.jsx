@@ -25,8 +25,8 @@ import isNumber from 'lodash/isNumber'
 import GradeFormatHelper from '@canvas/grading/GradeFormatHelper'
 import {EmojiPicker, EmojiQuickPicker} from '@canvas/emoji'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/forms/jquery/jquery.instructure_forms' /* ajaxJSONFiles */
-import '@canvas/datetime' /* datetimeString */
+import '@canvas/jquery/jquery.instructure_forms' /* ajaxJSONFiles */
+import '@canvas/datetime/jquery' /* datetimeString */
 import '@canvas/jquery/jquery.instructure_misc_plugins' /* fragmentChange, showIf */
 import '@canvas/loading-image'
 import '@canvas/util/templateData'
@@ -111,7 +111,7 @@ function roundAndFormat(value) {
 }
 function formatGradeOptions() {
   if (ENV.GRADING_TYPE === 'letter_grade') {
-    return { gradingType: ENV.GRADING_TYPE }
+    return {gradingType: ENV.GRADING_TYPE}
   }
 
   return {}
@@ -121,11 +121,7 @@ function showGrade(submission) {
     $('.grading_box').val(submission.entered_grade)
   } else {
     $('.grading_box').val(
-      callIfSet(
-        submission.entered_grade,
-        GradeFormatHelper.formatGrade,
-        formatGradeOptions()
-      )
+      callIfSet(submission.entered_grade, GradeFormatHelper.formatGrade, formatGradeOptions())
     )
   }
   $('.late_penalty').text(callIfSet(-submission.points_deducted, roundAndFormat))
@@ -297,7 +293,10 @@ export function setup() {
           !formData['submission[comment]'] &&
           $("#add_comment_form input[type='file']").length > 0
         ) {
-          formData['submission[comment]'] = I18n.t('see_attached_files', 'Please see attached files')
+          formData['submission[comment]'] = I18n.t(
+            'see_attached_files',
+            'Please see attached files'
+          )
         }
       }
       if (!formData['submission[comment]'] && !formData['submission[media_comment_id]']) {

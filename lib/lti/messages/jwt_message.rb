@@ -74,6 +74,7 @@ module Lti::Messages
       add_lti11_legacy_user_id!
       add_lti1p1_claims! if include_lti1p1_claims?
       add_extension("placement", @opts[:resource_type])
+      add_extension("lti_student_id", @opts[:student_id].to_s) if @opts[:student_id].present?
 
       @expander.expand_variables!(@message.extensions)
       @message.validate! if validate_launch
@@ -90,7 +91,7 @@ module Lti::Messages
       @message.aud = @tool.developer_key.global_id.to_s
       @message.azp = @tool.developer_key.global_id.to_s
       @message.deployment_id = @tool.deployment_id
-      @message.exp = Setting.get("lti.oauth2.access_token.exp", 1.hour).to_i.seconds.from_now.to_i
+      @message.exp = 1.hour.from_now.to_i
       @message.iat = Time.zone.now.to_i
       @message.iss = Canvas::Security.config["lti_iss"]
       @message.nonce = SecureRandom.uuid

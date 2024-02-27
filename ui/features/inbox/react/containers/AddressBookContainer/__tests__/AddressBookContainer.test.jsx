@@ -23,6 +23,9 @@ import {mswClient} from '../../../../../../shared/msw/mswClient'
 import {mswServer} from '../../../../../../shared/msw/mswServer'
 import {AddressBookContainer} from '../AddressBookContainer'
 import {handlers} from '../../../../graphql/mswHandlers'
+import {enableFetchMocks} from 'jest-fetch-mock'
+
+enableFetchMocks()
 
 describe('Should load <AddressBookContainer> normally', () => {
   const server = mswServer(handlers)
@@ -58,7 +61,10 @@ describe('Should load <AddressBookContainer> normally', () => {
   }
 
   describe('With Context Selection enabled', () => {
-    const contextSelectionDefaultProps = {hasSelectAllFilterOption: true, includeCommonCourses: true}
+    const contextSelectionDefaultProps = {
+      hasSelectAllFilterOption: true,
+      includeCommonCourses: true,
+    }
 
     describe('Rendering', () => {
       it('Does not show context select in initial menu', async () => {

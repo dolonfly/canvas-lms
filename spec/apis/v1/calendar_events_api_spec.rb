@@ -1566,7 +1566,6 @@ describe CalendarEventsApiController, type: :request do
       end
 
       it "emits calendar.calendar_event.create with series tag when creating a new event series" do
-        Account.site_admin.enable_feature!(:calendar_series)
         start_at = Time.zone.now.utc.change(hour: 0, min: 1)
         end_at = Time.zone.now.utc.change(hour: 23)
         allow(InstStatsd::Statsd).to receive(:increment)
@@ -1620,10 +1619,6 @@ describe CalendarEventsApiController, type: :request do
     end
 
     context "event series" do
-      before :once do
-        Account.site_admin.enable_feature!(:calendar_series)
-      end
-
       describe "create" do
         it "creates an event series if an rrule has been specified" do
           start_at = Time.zone.now.utc.change(hour: 0, min: 1)
@@ -4678,6 +4673,24 @@ describe CalendarEventsApiController, type: :request do
         end
       end
       expect(context).not_to be_nil
+      expect(context["sections"][0]).to include({ "can_create_appointment_groups" => true })
+    end
+
+    it "includes can_create_appointment_groups flag" do
+      student = user_factory(active_all: true)
+      @course.enroll_student(student, enrollment_state: "active")
+
+      json = api_call_as_user(student, :get, "/api/v1/calendar_events/visible_contexts", {
+                                controller: "calendar_events_api",
+                                action: "visible_contexts",
+                                format: "json"
+                              })
+
+      student_enrollment_context = json["contexts"].find do |c|
+        c["id"] == @course.id.to_s
+      end
+
+      expect(student_enrollment_context).to include({ "can_create_appointment_groups" => false })
     end
 
     it "excludes concluded courses" do
@@ -4701,6 +4714,35 @@ describe CalendarEventsApiController, type: :request do
         c["id"] == @course.id.to_s
       end
       expect(context).not_to be_present
+    end
+
+    describe "allow_observers_in_appointment_groups" do
+      let :json do
+        api_call(:get, "/api/v1/calendar_events/visible_contexts", {
+                   controller: "calendar_events_api",
+                   action: "visible_contexts",
+                   format: "json"
+                 })
+      end
+
+      it "is false for contexts with the setting disabled" do
+        context = json["contexts"].find { |c| c["asset_string"] == "course_#{@course.id}" }
+        expect(context["allow_observers_in_appointment_groups"]).to be false
+      end
+
+      it "is false for user contexts" do
+        @user.account.settings[:allow_observers_in_appointment_groups] = { value: true }
+        @user.account.save!
+        context = json["contexts"].find { |c| c["asset_string"] == "user_#{@user.id}" }
+        expect(context["allow_observers_in_appointment_groups"]).to be false
+      end
+
+      it "is true for contexts with the setting enabled" do
+        @course.account.settings[:allow_observers_in_appointment_groups] = { value: true }
+        @course.account.save!
+        context = json["contexts"].find { |c| c["asset_string"] == "course_#{@course.id}" }
+        expect(context["allow_observers_in_appointment_groups"]).to be true
+      end
     end
   end
 

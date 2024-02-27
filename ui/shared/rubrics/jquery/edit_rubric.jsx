@@ -23,12 +23,12 @@ import RubricManagement from '../react/components/RubricManagement'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import changePointsPossibleToMatchRubricDialog from '../jst/changePointsPossibleToMatchRubricDialog.handlebars'
 import $ from 'jquery'
-import _ from 'underscore'
-import htmlEscape from 'html-escape'
+import {debounce} from 'lodash'
+import htmlEscape from '@instructure/html-escape'
 import numberHelper from '@canvas/i18n/numberHelper'
 import '@canvas/outcomes/find_outcome'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/forms/jquery/jquery.instructure_forms' /* formSubmit, fillFormData, getFormData */
+import '@canvas/jquery/jquery.instructure_forms' /* formSubmit, fillFormData, getFormData */
 import 'jqueryui/dialog'
 import '@canvas/jquery/jquery.instructure_misc_helpers' /* replaceTags */
 import '@canvas/jquery/jquery.instructure_misc_plugins' /* confirmDelete, showIf */
@@ -78,7 +78,7 @@ const rubricEditing = {
         document.getElementById('add_criterion_container')
       )
       if (focusTarget) {
-        $rubric.find(`"#add_criterion_container ${focusTarget}:visible`).focus()
+        $rubric.find(`#add_criterion_container ${focusTarget}:visible`).focus()
       }
     }, 0)
   },
@@ -702,7 +702,7 @@ const rubricEditing = {
     $rubric.find('.rubric_title .title').focus()
   },
 }
-rubricEditing.sizeRatings = _.debounce(rubricEditing.originalSizeRatings, 10)
+rubricEditing.sizeRatings = debounce(rubricEditing.originalSizeRatings, 10)
 
 const round = function (number, precision) {
   precision = Math.pow(10, precision || 0).toFixed(precision < 0 ? -precision : 0)
@@ -1224,7 +1224,8 @@ rubricEditing.init = function () {
         .getTemplateData({textValues: ['id']}).id
       data['rubric_association[purpose]'] = params.rubric_association_purpose
       $rubric_dialog.loadingImage()
-      const url = $rubric_dialog.find('.select_rubric_url').attr('href')
+      const url = window.ENV.context_rubric_associations_url
+      if (!url) throw new Error('Rubric Associations URL is undefined')
       $.ajaxJSON(
         url,
         'POST',
@@ -1291,7 +1292,12 @@ rubricEditing.init = function () {
       ) {
         skipPointsUpdate = true
       } else if (data['rubric_association[use_for_grading]'] === '1') {
-        const externalToolPoints = $('#tool_form #custom_canvas_assignment_points_possible').val()
+        const toolFormId = ENV.LTI_TOOL_FORM_ID
+          ? `#tool_form_${ENV.LTI_TOOL_FORM_ID}`
+          : '#tool_form'
+        const externalToolPoints = $(
+          `${toolFormId} #custom_canvas_assignment_points_possible`
+        ).val()
         let assignmentPoints
         if (externalToolPoints) {
           assignmentPoints = numberHelper.parse(externalToolPoints)
@@ -1308,6 +1314,13 @@ rubricEditing.init = function () {
           // the show screen used for other assignments.
           assignmentPoints = numberHelper.parse(
             $('#edit_assignment_header input[id="assignment_points_possible"]').val()
+          )
+        }
+
+        if (Number.isNaN(assignmentPoints) && ENV['ASSIGNMENT_POINTS_POSSIBLE']) {
+          // For 1.3 external tool assignments, we grab the points from an env variable
+          assignmentPoints = numberHelper.parse(
+            ENV['ASSIGNMENT_POINTS_POSSIBLE']
           )
         }
         const rubricPoints = parseFloat(data.points_possible)

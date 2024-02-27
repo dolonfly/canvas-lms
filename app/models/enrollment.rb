@@ -88,6 +88,7 @@ class Enrollment < ActiveRecord::Base
 
   after_commit :sync_microsoft_group
   scope :microsoft_sync_relevant, -> { active_or_pending.accepted.not_fake }
+  scope :microsoft_sync_irrelevant_but_not_fake, -> { not_fake.where("enrollments.workflow_state IN ('rejected', 'completed', 'inactive', 'invited')") }
 
   attr_accessor :already_enrolled, :need_touch_user, :skip_touch_user
 
@@ -169,8 +170,8 @@ class Enrollment < ActiveRecord::Base
   def active_student?(was = false)
     suffix = was ? "_before_last_save" : ""
 
-    %w[StudentEnrollment StudentViewEnrollment].include?(send("type#{suffix}")) &&
-      send("workflow_state#{suffix}") == "active"
+    %w[StudentEnrollment StudentViewEnrollment].include?(send(:"type#{suffix}")) &&
+      send(:"workflow_state#{suffix}") == "active"
   end
 
   def active_student_changed?
@@ -1337,7 +1338,7 @@ class Enrollment < ActiveRecord::Base
   scope :active_or_pending, -> { where("enrollments.workflow_state NOT IN ('rejected', 'completed', 'deleted', 'inactive')") }
   scope :all_active_or_pending, -> { where("enrollments.workflow_state NOT IN ('rejected', 'completed', 'deleted')") } # includes inactive
 
-  scope :active_by_date_or_completed, -> { joins(:enrollment_state).where("enrollment_states.state  IN ('active', 'completed')") }
+  scope :excluding_pending, -> { joins(:enrollment_state).where.not(enrollment_states: { state: EnrollmentState::PENDING_STATES }) }
   scope :active_by_date, -> { joins(:enrollment_state).where("enrollment_states.state = 'active'") }
   scope :invited_by_date, lambda {
                             joins(:enrollment_state).where(enrollment_states: { restricted_access: false })

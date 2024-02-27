@@ -16,7 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import _ from 'underscore'
+import {forEach, find, extend as lodashExtend} from 'lodash'
 import $ from 'jquery'
 import '@canvas/jquery/jquery.ajaxJSON'
 import '@canvas/jquery/jquery.instructure_misc_helpers' /* replaceTags */
@@ -29,13 +29,13 @@ import {camelizeProperties} from '@canvas/convert-case'
 import React from 'react'
 import ReactDOM from 'react-dom'
 import gradingPeriodSetsApi from '@canvas/grading/jquery/gradingPeriodSetsApi'
-import htmlEscape from 'html-escape'
+import htmlEscape from '@instructure/html-escape'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import round from '@canvas/round'
 import numberHelper from '@canvas/i18n/numberHelper'
 import CourseGradeCalculator from '@canvas/grading/CourseGradeCalculator'
 import {scopeToUser} from '@canvas/grading/EffectiveDueDates'
-import {scoreToGrade, scoreToLetterGrade} from '@instructure/grading-utils'
+import {scoreToLetterGrade} from '@instructure/grading-utils'
 import GradeFormatHelper from '@canvas/grading/GradeFormatHelper'
 import StatusPill from '@canvas/grading-status-pill'
 import GradeSummaryManager from '../react/GradeSummary/GradeSummaryManager'
@@ -392,11 +392,7 @@ function calculateSubtotals(byGradingPeriod, calculatedGrades, currentOrFinal) {
         grade = {score: 0, possible: 0}
       }
       let subtotal
-      if (
-        ENV.POINTS_BASED_GRADING_SCHEMES_ENABLED &&
-        ENV.course_active_grading_scheme &&
-        ENV.course_active_grading_scheme.points_based
-      ) {
+      if (ENV.course_active_grading_scheme && ENV.course_active_grading_scheme.points_based) {
         const scoreText = I18n.n(grade.score, {precision: round.DEFAULT})
         const possibleText = I18n.n(grade.possible, {precision: round.DEFAULT})
 
@@ -477,22 +473,14 @@ function calculateTotals(calculatedGrades, currentOrFinal, groupWeightingScheme)
       ? ENV.effective_final_score
       : calculatePercentGrade(finalScore, finalPossible)
 
-    let letterGrade
-    if (ENV.POINTS_BASED_GRADING_SCHEMES_ENABLED) {
-      letterGrade =
-        scoreToLetterGrade(scoreToUse, ENV.course_active_grading_scheme?.data) || I18n.t('N/A')
-    } else {
-      letterGrade = scoreToGrade(scoreToUse, ENV.grading_scheme) || I18n.t('N/A')
-    }
+    const grading_scheme = ENV.course_active_grading_scheme?.data
+    const letterGrade = scoreToLetterGrade(scoreToUse, grading_scheme) || I18n.t('N/A')
+
     $('.final_grade .letter_grade').text(GradeFormatHelper.replaceDashWithMinus(letterGrade))
   }
 
   if (!gradeChanged && overrideScorePresent()) {
-    if (
-      ENV.POINTS_BASED_GRADING_SCHEMES_ENABLED &&
-      gradingSchemeEnabled() &&
-      ENV.course_active_grading_scheme.points_based
-    ) {
+    if (gradingSchemeEnabled() && ENV.course_active_grading_scheme?.points_based) {
       const scaledPointsPossible = ENV.course_active_grading_scheme.scaling_factor
       const scaledPointsOverride = scoreToScaledPoints(
         (ENV.effective_final_score / 100.0) * finalPossible,
@@ -505,11 +493,7 @@ function calculateTotals(calculatedGrades, currentOrFinal, groupWeightingScheme)
       finalGrade = formatPercentGrade(ENV.effective_final_score)
       teaserText = scoreAsPoints
     }
-  } else if (
-    ENV.POINTS_BASED_GRADING_SCHEMES_ENABLED &&
-    gradingSchemeEnabled() &&
-    ENV.course_active_grading_scheme.points_based
-  ) {
+  } else if (gradingSchemeEnabled() && ENV.course_active_grading_scheme?.points_based) {
     const scaledPointsEarned = scoreToScaledPoints(
       finalScore,
       finalPossible,
@@ -530,13 +514,20 @@ function calculateTotals(calculatedGrades, currentOrFinal, groupWeightingScheme)
   $finalGradeRow.find('.grade').text(finalGrade)
   $finalGradeRow.find('.score_teaser').text(teaserText)
 
-  if (overrideScorePresent() && ENV?.final_override_custom_grade_status_id) {
+  if (ENV?.final_override_custom_grade_status_id) {
     $finalGradeRow
       .find('.status')
       .html('')
       .append(
         `<span class='submission-custom-grade-status-pill-${ENV.final_override_custom_grade_status_id}'></span>`
       )
+
+    const matchingCustomStatus = ENV?.custom_grade_statuses?.find(
+      status => status.id === ENV.final_override_custom_grade_status_id
+    )
+    if (matchingCustomStatus?.allow_final_grade_value === false) {
+      $finalGradeRow.find('.grade').text('-')
+    }
   }
 
   const pointsPossibleText = finalGradePointsPossibleText(groupWeightingScheme, scoreAsPoints)
@@ -560,14 +551,7 @@ function calculateTotals(calculatedGrades, currentOrFinal, groupWeightingScheme)
 // This element is only rendered by the erb if the course has enabled grading
 // schemes.
 function gradingSchemeEnabled() {
-  if (ENV.POINTS_BASED_GRADING_SCHEMES_ENABLED) {
-    return ENV.course_active_grading_scheme
-  } else {
-    // We can't rely on only checking for the presence of
-    // ENV.grading_scheme as that, in this case, always returns Canvas's default
-    // grading scheme even if grading schemes are not enabled.
-    return $('.final_grade .letter_grade').length > 0 && ENV.grading_scheme
-  }
+  return ENV.course_active_grading_scheme
 }
 
 function overrideScorePresent() {
@@ -591,8 +575,8 @@ function updateStudentGrades() {
   // mark dropped assignments
   $('.student_assignment').find('.points_possible').attr('aria-label', '')
 
-  _.forEach(calculatedGrades.assignmentGroups, grades => {
-    _.forEach(grades[currentOrFinal].submissions, submission => {
+  forEach(calculatedGrades.assignmentGroups, grades => {
+    forEach(grades[currentOrFinal].submissions, submission => {
       $(`#submission_${submission.submission.assignment_id}`).toggleClass(
         'dropped',
         !!submission.drop
@@ -609,7 +593,7 @@ function updateStudentGrades() {
 }
 
 function updateScoreForAssignment(assignmentId, score, workflowStateOverride) {
-  const submission = _.find(ENV.submissions, s => `${s.assignment_id}` === `${assignmentId}`)
+  const submission = find(ENV.submissions, s => `${s.assignment_id}` === `${assignmentId}`)
 
   if (submission) {
     submission.score = score
@@ -960,7 +944,7 @@ function setup() {
   })
 }
 
-export default _.extend(GradeSummary, {
+export default lodashExtend(GradeSummary, {
   setup,
   getGradingPeriodSet,
   canBeConvertedToGrade,

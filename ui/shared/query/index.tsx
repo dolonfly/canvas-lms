@@ -17,8 +17,18 @@
  */
 
 import React from 'react'
-import {useQuery as baseUseQuery, hashQueryKey, QueryClient} from '@tanstack/react-query'
-import type {UseQueryOptions, QueryKey, QueryFunction} from '@tanstack/react-query'
+import {
+  useMutation as baseUseMutation,
+  useQuery as baseUseQuery,
+  hashQueryKey,
+  QueryClient,
+} from '@tanstack/react-query'
+import type {
+  UseQueryOptions,
+  QueryKey,
+  QueryFunction,
+  UseMutationOptions,
+} from '@tanstack/react-query'
 import {PersistQueryClientProvider} from '@tanstack/react-query-persist-client'
 import {createSyncStoragePersister} from '@tanstack/query-sync-storage-persister'
 import wasPageReloaded from '@canvas/util/wasPageReloaded'
@@ -69,14 +79,22 @@ window.BroadcastChannel =
 
 const broadcastChannel = new BroadcastChannel(CHANNEL_KEY)
 
-interface CustomUseQueryOptions<TData, TError> extends UseQueryOptions<TData, TError> {
+interface CustomUseQueryOptions<
+  TQueryFnData = unknown,
+  TError = unknown,
+  TData = TQueryFnData,
+  TQueryKey extends QueryKey = QueryKey
+> extends UseQueryOptions<TQueryFnData, TError, TData, TQueryKey> {
   fetchAtLeastOnce?: boolean
   broadcast?: boolean
 }
 
-export function useQuery<TData = unknown, TError = unknown>(
-  options: CustomUseQueryOptions<TData, TError>
-) {
+export function useQuery<
+  TQueryFnData = unknown,
+  TError = unknown,
+  TData = TQueryFnData,
+  TQueryKey extends QueryKey = QueryKey
+>(options: CustomUseQueryOptions<TQueryFnData, TError, TData, TQueryKey>) {
   const ensureFetch = options.fetchAtLeastOnce || wasPageReloaded
   const hashedKey = hashQueryKey(options.queryKey || [])
   const wasAlreadyFetched = queriesFetched.has(hashedKey)
@@ -93,11 +111,11 @@ export function useQuery<TData = unknown, TError = unknown>(
     enabled: options.broadcast,
   })
 
-  const mergedOptions: CustomUseQueryOptions<TData, TError> = {
+  const mergedOptions: CustomUseQueryOptions<TQueryFnData, TError, TData, TQueryKey> = {
     ...options,
     refetchOnMount,
   }
-  const queryResult = baseUseQuery<TData, TError>(mergedOptions)
+  const queryResult = baseUseQuery<TQueryFnData, TError, TData, TQueryKey>(mergedOptions)
 
   useBroadcastWhenFetched({
     hashedKey,
@@ -107,6 +125,10 @@ export function useQuery<TData = unknown, TError = unknown>(
   })
 
   return queryResult
+}
+
+export function useMutation(options: UseMutationOptions) {
+  return baseUseMutation(options)
 }
 
 export function prefetchQuery(queryKey: QueryKey, queryFn: QueryFunction) {

@@ -22,6 +22,7 @@ import {render} from '@testing-library/react'
 import {mount} from 'enzyme'
 import PublishButton from '../PublishButton'
 import * as apiClient from '@canvas/courses/courseAPIClient'
+import fetchMock from 'fetch-mock'
 
 jest.mock('@canvas/courses/courseAPIClient')
 
@@ -39,7 +40,11 @@ function createMockProps(opts = {}) {
 }
 
 beforeEach(() => {
-  fetch.mockResponse(JSON.stringify({}), {status: 200})
+  fetchMock.mock('*', JSON.stringify({}), {status: 200})
+})
+
+afterEach(() => {
+  fetchMock.restore()
 })
 
 describe('DashboardCardHeaderHero', () => {

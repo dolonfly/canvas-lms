@@ -175,11 +175,11 @@ class ActiveRecord::Base
 
   # little helper to keep checks concise and avoid a db lookup
   def has_asset?(asset, field = :context)
-    asset&.id == send("#{field}_id") && asset.class.base_class.name == send("#{field}_type")
+    asset&.id == send(:"#{field}_id") && asset.class.polymorphic_name == send(:"#{field}_type")
   end
 
   def context_string(field = :context)
-    send("#{field}_type").underscore + "_" + send("#{field}_id").to_s if send("#{field}_type")
+    send(:"#{field}_type").underscore + "_" + send(:"#{field}_id").to_s if send(:"#{field}_type")
   end
 
   def self.asset_string_backcompat_module
@@ -191,7 +191,7 @@ class ActiveRecord::Base
     unless method
       # this is weird, but gets the instance methods defined so they can be chained
       begin
-        new.send("#{association_version_name}_id")
+        new.send(:"#{association_version_name}_id")
       rescue
         # the db doesn't exist yet; no need to bother with backcompat methods anyway
         return
@@ -314,7 +314,8 @@ class ActiveRecord::Base
     hash = serializable_hash(options)
 
     if options[:permissions]
-      obj_hash = options[:include_root] ? hash[self.class.base_class.model_name.element] : hash
+      obj_hash = options[:include_root] ? hash[self.class.serialization_root_key] : hash
+
       if respond_to?(:filter_attributes_for_user)
         filter_attributes_for_user(obj_hash, options[:permissions][:user], options[:permissions][:session])
       end
@@ -342,6 +343,14 @@ class ActiveRecord::Base
 
   def self.reflection_type_name
     base_class.name.underscore
+  end
+
+  def self.serialization_root_key
+    base_class.model_name.element
+  end
+
+  def self.url_context_class
+    base_class
   end
 
   ruby2_keywords def wildcard(*args)
@@ -577,6 +586,20 @@ class ActiveRecord::Base
     end
   end
 
+  # Returns the class for the provided +name+.
+  #
+  # It is used to find the class correspondent to the value stored in the polymorphic type column.
+  def self.polymorphic_class_for(name)
+    case name
+    when "Assignment"
+      # Let's be consistent with the way AR handles things by default for STI. If name is "Assignment"
+      # we'll fetch the Assignment or SubAssignment through its base class (AbstractAssignment).
+      super("AbstractAssignment")
+    else
+      super
+    end
+  end
+
   def self.unique_constraint_retry(retries = 1)
     # runs the block in a (possibly nested) transaction. if a unique constraint
     # violation occurs, it will run it "retries" more times. the nested
@@ -677,8 +700,6 @@ class ActiveRecord::Base
     end
   end
 
-  scope :non_shadow, ->(key = primary_key) { where("#{key}<=? AND #{key}>?", Shard::IDS_PER_SHARD, 0) }
-
   def self.create_and_ignore_on_duplicate(*args)
     # FIXME: handle array fields and setting of nulls where those are not the default
     model = new(*args)
@@ -726,11 +747,27 @@ class ActiveRecord::Base
     self.updated_at = Time.now.utc if touch
     if new_record?
       self.created_at = updated_at if touch
-      self.id = self.class._insert_record(
-        attributes_with_values(attribute_names_for_partial_inserts)
-          .transform_values { |attr| attr.is_a?(ActiveModel::Attribute) ? attr.value : attr }
-      )
+      if Rails.version < "7.1"
+        self.id = self.class._insert_record(
+          attributes_with_values(attribute_names_for_partial_inserts)
+            .transform_values { |attr| attr.is_a?(ActiveModel::Attribute) ? attr.value : attr }
+        )
+      else
+        returning_values = returning_columns = self.class._returning_columns_for_insert
+        self.class._insert_record(
+          attributes_with_values(attribute_names_for_partial_inserts)
+            .transform_values { |attr| attr.is_a?(ActiveModel::Attribute) ? attr.value : attr },
+          returning_columns
+        )
+
+        if returning_values
+          returning_columns.zip(returning_values).each do |column, value|
+            _write_attribute(column, value) unless _read_attribute(column)
+          end
+        end
+      end
       @new_record = false
+      @previously_new_record = true
     else
       update_columns(
         attributes_with_values(attribute_names_for_partial_updates)
@@ -802,7 +839,7 @@ module UsefulFindInBatches
 
     kwargs.delete(:error_on_ignore)
     activate do |r|
-      r.send("in_batches_with_#{strategy}", start:, finish:, order:, **kwargs, &block)
+      r.send(:"in_batches_with_#{strategy}", start:, finish:, order:, **kwargs, &block)
       nil
     end
   end
@@ -1261,14 +1298,7 @@ ActiveRecord::Relation.class_eval do
 
   def update_all_locked_in_order(lock_type: :no_key_update, **updates)
     locked_scope = lock(lock_type).order(primary_key.to_sym)
-    if Setting.get("update_all_locked_in_order_subquery", "true") == "true"
-      unscoped.where(primary_key => locked_scope).update_all(updates)
-    else
-      transaction do
-        ids = locked_scope.pluck(primary_key)
-        unscoped.where(primary_key => ids).update_all(updates) unless ids.empty?
-      end
-    end
+    unscoped.where(primary_key => locked_scope).update_all(updates)
   end
 
   def touch_all(*names, time: nil)
@@ -1278,12 +1308,8 @@ ActiveRecord::Relation.class_eval do
   end
 
   def touch_all_skip_locked(*names, time: nil)
-    if Setting.get("touch_all_skip_locked_enabled", "true") == "true"
-      activate do |relation|
-        relation.update_all_locked_in_order(**relation.klass.touch_attributes_with_time(*names, time:), lock_type: :no_key_update_skip_locked)
-      end
-    else
-      touch_all(*names, time:)
+    activate do |relation|
+      relation.update_all_locked_in_order(**relation.klass.touch_attributes_with_time(*names, time:), lock_type: :no_key_update_skip_locked)
     end
   end
 
@@ -1309,7 +1335,7 @@ ActiveRecord::Relation.class_eval do
   def union(*scopes, from: false)
     table = connection.quote_local_table_name(table_name)
     scopes.unshift(self)
-    scopes = scopes.reject { |s| s.is_a?(ActiveRecord::NullRelation) }
+    scopes = scopes.reject { |s| (Rails.version < "7.1") ? s.is_a?(ActiveRecord::NullRelation) : s.null_relation? }
     return scopes.first if scopes.length == 1
     return self if scopes.empty?
 
@@ -1462,12 +1488,12 @@ module UpdateAndDeleteWithJoins
     connection.delete(sql, "SQL", [])
   end
 end
-ActiveRecord::Relation.prepend(UpdateAndDeleteWithJoins)
+Switchman::ActiveRecord::Relation.include(UpdateAndDeleteWithJoins)
 
 module UpdateAndDeleteAllWithLimit
   def delete_all(*args)
     if limit_value || offset_value
-      scope = except(:select).select(primary_key)
+      scope = except(:select).select(primary_key).lock
       return unscoped.where(primary_key => scope).delete_all
     end
     super
@@ -1475,13 +1501,13 @@ module UpdateAndDeleteAllWithLimit
 
   def update_all(updates, *args)
     if limit_value || offset_value
-      scope = except(:select).select(primary_key)
+      scope = except(:select).select(primary_key).lock
       return unscoped.where(primary_key => scope).update_all(updates)
     end
     super
   end
 end
-ActiveRecord::Relation.prepend(UpdateAndDeleteAllWithLimit)
+Switchman::ActiveRecord::Relation.include(UpdateAndDeleteAllWithLimit)
 
 ActiveRecord::Associations::CollectionProxy.class_eval do
   def respond_to?(name, include_private = false)
@@ -1695,7 +1721,7 @@ ActiveRecord::ConnectionAdapters::SchemaStatements.class_eval do
     fks = foreign_keys(from_table).select { |fk| fk.defined_for?(**options) }
     # prefer a FK on a column named after the table
     if options[:to_table]
-      column = foreign_key_column_for(options[:to_table])
+      column = (Rails.version < "7.1") ? foreign_key_column_for(options[:to_table]) : foreign_key_column_for(options[:to_table], "id")
       return fks.find { |fk| fk.column == column } || fks.first
     end
     fks.first
@@ -1939,11 +1965,20 @@ ActiveRecord::Relation.prepend(ExplainAnalyze)
 module TableRename
   RENAMES = {}.freeze
 
-  def columns(table_name)
-    if (old_name = RENAMES[table_name]) && connection.table_exists?(old_name)
-      table_name = old_name
+  if Rails.version < "7.1"
+    def columns(table_name)
+      if (old_name = RENAMES[table_name]) && connection.table_exists?(old_name)
+        table_name = old_name
+      end
+      super
     end
-    super
+  else
+    def columns(connection, table_name)
+      if (old_name = RENAMES[table_name]) && connection.table_exists?(old_name)
+        table_name = old_name
+      end
+      super
+    end
   end
 end
 
@@ -2119,14 +2154,14 @@ module UserContentSerialization
       end
     end
     if options && options[:include_root]
-      result = { self.class.base_class.model_name.element => result }
+      result = { self.class.serialization_root_key => result }.with_indifferent_access
     end
     result
   end
 end
 ActiveRecord::Base.include(UserContentSerialization)
 
-if Rails.version >= "6.1"
+if Rails.version >= "6.1" && Rails.version < "7.1"
   # Hopefully this can be removed with https://github.com/rails/rails/commit/6beee45c3f071c6a17149be0fabb1697609edbe8
   # having made a released version of rails; if not bump the rails version in this comment and leave the comment to be revisited
   # on the next rails bump
@@ -2203,7 +2238,10 @@ module AdditionalIgnoredColumns
       cache_class = ActiveRecord::Base.singleton_class
       return super unless cache_class.columns_to_ignore_enabled
 
-      cache_class.columns_to_ignore_cache[table_name] ||= DynamicSettings.find("activerecord/ignored_columns", tree: :store)[table_name, failsafe: ""]&.split(",") || []
+      # Ensure table_name doesn't error out
+      set_base_class
+
+      cache_class.columns_to_ignore_cache[table_name] ||= DynamicSettings.find("activerecord/ignored_columns", tree: :store, ignore_fallback_overrides: true)[table_name, failsafe: ""]&.split(",") || []
       super + cache_class.columns_to_ignore_cache[table_name]
     end
   end
@@ -2213,7 +2251,7 @@ module AdditionalIgnoredColumns
 
     def reset_ignored_columns!
       @columns_to_ignore_cache = {}
-      @columns_to_ignore_enabled = !ActiveModel::Type::Boolean.new.cast(DynamicSettings.find("activerecord", tree: :store)["ignored_columns_disabled", failsafe: false])
+      @columns_to_ignore_enabled = !ActiveModel::Type::Boolean.new.cast(DynamicSettings.find("activerecord", tree: :store, ignore_fallback_overrides: true)["ignored_columns_disabled", failsafe: false])
     end
   end
 end

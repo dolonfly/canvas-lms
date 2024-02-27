@@ -89,6 +89,8 @@ module Types
                                 .then { object.email }
     end
 
+    field :uuid, String, null: true
+
     field :sis_id, String, null: true
     def sis_id
       domain_root_account = context[:domain_root_account]
@@ -502,7 +504,7 @@ module Loaders
 
       scope = scope.where.not(enrollments: { workflow_state: "completed" }) if exclude_concluded
 
-      scope = scope.active_by_date_or_completed if exclude_pending_enrollments
+      scope = scope.excluding_pending if exclude_pending_enrollments
 
       order_by.each { |o| scope = scope.order(o) }
 

@@ -35,6 +35,7 @@
   should log: underscore, jquery and the colors
 */
 import jQuery from 'jquery'
+import {captureException} from '@sentry/browser'
 
 if (!('require' in window)) {
   const getDefaultExport = m => m.default
@@ -69,10 +70,15 @@ if (!('require' in window)) {
         'things can change in any release and you are responsible for making sure your custom ' +
         'JavaScript that uses it continues to work.'
     )
+    if (deps.includes('underscore')) {
+      console.error("Support for require('underscore') is deprecated and will be removed.")
+      captureException(new Error('require("underscore")'))
+    }
     if (deps.includes('jquery')) {
       console.error(
         "You don't need to `require(['jquery...`, just use the global `$` variable directly."
       )
+      captureException(new Error('require("jquery")'))
     }
     Promise.all(deps.map(getModule)).then(modules => {
       if (callback) callback(...modules)

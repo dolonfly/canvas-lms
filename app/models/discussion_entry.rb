@@ -21,6 +21,9 @@
 require "atom"
 
 class DiscussionEntry < ActiveRecord::Base
+  # The maximum discussion entry threading depth that is allowed
+  MAX_DEPTH = 50
+
   include Workflow
   include SendToStream
   include TextHelper
@@ -51,7 +54,6 @@ class DiscussionEntry < ActiveRecord::Base
   has_one :external_feed_entry, as: :asset
 
   before_create :infer_root_entry_id
-  before_create :populate_legacy
   before_create :set_root_account_id
   after_save :update_discussion
   after_save :context_module_action_later
@@ -142,11 +144,6 @@ class DiscussionEntry < ActiveRecord::Base
     end
   end
 
-  # The maximum discussion entry threading depth that is allowed
-  def self.max_depth
-    Setting.get("discussion_entry_max_depth", "50").to_i
-  end
-
   def self.rating_sums(entry_ids)
     sums = where(id: entry_ids).where("COALESCE(rating_sum, 0) != 0")
     sums.to_h { |x| [x.id, x.rating_sum] }
@@ -157,7 +154,7 @@ class DiscussionEntry < ActiveRecord::Base
   end
 
   def validate_depth
-    if !self.depth || self.depth > self.class.max_depth
+    if !self.depth || self.depth > MAX_DEPTH
       errors.add(:base, "Maximum entry depth reached")
     end
   end
@@ -300,21 +297,6 @@ class DiscussionEntry < ActiveRecord::Base
 
   def user_name
     user.name rescue t :default_user_name, "User Name"
-  end
-
-  def populate_legacy
-    # TODO
-    # when this feature flag is removed, we should add a predeploy migration
-    # that changes the column default. Then just get rid of this method.
-    #
-    # class FlipLegacyDefaultOnDiscussionEntry < ActiveRecord::Migration[6.0]
-    #   tag :predeploy
-    #
-    #   def change
-    #     change_column_default :discussion_entries, :legacy, false
-    #   end
-    # end
-    self.legacy = !(context.feature_enabled?(:react_discussions_post) && Account.site_admin.feature_enabled?(:isolated_view))
   end
 
   def infer_root_entry_id

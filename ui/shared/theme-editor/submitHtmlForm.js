@@ -17,10 +17,10 @@
  */
 
 import $ from 'jquery'
-import htmlEscape from 'html-escape'
+import htmlEscape from '@instructure/html-escape'
 import 'jquery.cookie'
 
-export default function submitHtmlForm(action, method, md5) {
+export function submitHtmlForm(action, method, md5) {
   $(`
     <form hidden action="${htmlEscape(action)}" method="POST">
       <input name="_method" type="hidden" value="${htmlEscape(method)}" />

@@ -17,17 +17,17 @@
  */
 
 import {useScope as useI18nScope} from '@canvas/i18n'
-import _ from 'underscore'
-import pubsub from 'jquery-tinypubsub'
+import * as pubsub from 'jquery-tinypubsub'
 import $ from 'jquery'
 import fileSize from '@canvas/util/fileSize'
-import htmlEscape from 'html-escape'
+import htmlEscape from '@instructure/html-escape'
 import './mediaComment'
 import '@canvas/jquery/jquery.ajaxJSON'
 import 'jqueryui/dialog'
 import '@canvas/jquery/jquery.instructure_misc_helpers' /* /\$\.h/ */
 import '@canvas/jquery/jquery.instructure_misc_plugins' /* .dim, /\.log\(/ */
 import 'jqueryui/progressbar'
+import {each} from 'lodash'
 
 const I18n = useI18nScope('media_comments_publicjs')
 
@@ -288,11 +288,8 @@ $.mediaComment.upload_delegate = {
 let reset_selectors = false
 let lastInit = null
 $.mediaComment.init = function (mediaType, opts) {
-  require.ensure(
-    [],
-    () => {
-      const swfobject = require('swfobject')
-
+  import('swfobject')
+    .then(swfobject => {
       lastInit = lastInit || new Date()
       mediaType = mediaType || 'any'
       opts = opts || {}
@@ -677,9 +674,10 @@ $.mediaComment.init = function (mediaType, opts) {
         // only call mediaCommentReady if we are not doing js uploader
         mediaCommentReady()
       }
-    },
-    'mediaCommentRecordAsyncChunk'
-  )
+    })
+    .catch(() => {
+      throw new Error('Failed to load swfobject')
+    })
 } // End of init function
 
 $(document).ready(function () {
@@ -766,7 +764,7 @@ $(document).bind('media_recording_error', () => {
 })
 
 window.mediaCommentCallback = function (results) {
-  _.each(results, addEntry)
+  each(results, addEntry)
   $('#media_comment_create_dialog').empty().dialog('close')
 }
 

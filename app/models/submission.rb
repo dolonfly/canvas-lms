@@ -133,7 +133,7 @@ class Submission < ActiveRecord::Base
   attr_writer :versioned_originality_reports
 
   belongs_to :attachment # this refers to the screenshot of the submission if it is a url submission
-  belongs_to :assignment, inverse_of: :submissions
+  belongs_to :assignment, inverse_of: :submissions, class_name: "AbstractAssignment"
   belongs_to :course, inverse_of: :submissions
   belongs_to :custom_grade_status, inverse_of: :submissions
   has_many :observer_alerts, as: :context, inverse_of: :context, dependent: :destroy
@@ -360,10 +360,10 @@ class Submission < ActiveRecord::Base
   def needs_grading?(was = false)
     suffix = was ? "_before_last_save" : ""
 
-    !send("submission_type#{suffix}").nil? &&
-      (send("workflow_state#{suffix}") == "pending_review" ||
-       (["submitted", "graded"].include?(send("workflow_state#{suffix}")) &&
-        (send("score#{suffix}").nil? || !send("grade_matches_current_submission#{suffix}"))
+    !send(:"submission_type#{suffix}").nil? &&
+      (send(:"workflow_state#{suffix}") == "pending_review" ||
+       (["submitted", "graded"].include?(send(:"workflow_state#{suffix}")) &&
+        (send(:"score#{suffix}").nil? || !send(:"grade_matches_current_submission#{suffix}"))
        )
       )
   end
@@ -432,6 +432,7 @@ class Submission < ActiveRecord::Base
   after_save :update_attachment_associations
   after_save :submit_attachments_to_canvadocs
   after_save :queue_websnap
+  after_save :aggregate_checkpoint_submissions, if: :checkpoint_changes?
   after_save :update_final_score
   after_save :submit_to_plagiarism_later
   after_save :update_admins_if_just_submitted
@@ -446,8 +447,6 @@ class Submission < ActiveRecord::Base
   after_save :handle_posted_at_changed, if: :saved_change_to_posted_at?
   after_save :delete_submission_drafts!, if: :saved_change_to_attempt?
   after_save :send_timing_data_if_needed
-
-  after_commit :aggregate_checkpoint_submissions, if: :checkpoint_changes?
 
   def reset_regraded
     @regraded = false
@@ -681,10 +680,7 @@ class Submission < ActiveRecord::Base
   def update_final_score
     if saved_change_to_score? || saved_change_to_excused? ||
        (workflow_state_before_last_save == "pending_review" && workflow_state == "graded")
-      if skip_grade_calc
-        Rails.logger.debug "GRADES: NOT recomputing scores for submission #{global_id} because skip_grade_calc was set"
-      else
-        Rails.logger.debug "GRADES: submission #{global_id} score changed. recomputing grade for course #{context.global_id} user #{user_id}."
+      unless skip_grade_calc
         self.class.connection.after_transaction_commit do
           Enrollment.recompute_final_score_in_singleton(
             user_id,
@@ -2299,6 +2295,7 @@ class Submission < ActiveRecord::Base
     opts[:comment] = opts[:comment].try(:strip) || ""
     opts[:attachments] ||= opts[:comment_attachments]
     opts[:draft] = !!opts[:draft_comment]
+    opts[:attempt] = (!unsubmitted? && !opts.key?(:attempt)) ? self.attempt : opts[:attempt]
     if opts[:comment].empty?
       if opts[:media_comment_id]
         opts[:comment] = ""
@@ -2528,7 +2525,7 @@ class Submission < ActiveRecord::Base
     end
 
     def seconds_late
-      return (seconds_late_override || 0) if late_policy_status == "late"
+      return seconds_late_override || 0 if late_policy_status == "late"
       return 0 if cached_due_date.nil? || time_of_submission <= cached_due_date
 
       (time_of_submission - cached_due_date).to_i
@@ -2838,7 +2835,7 @@ class Submission < ActiveRecord::Base
   def eligible_for_showing_score_statistics?
     # This checks whether this submission meets the requirements in order
     # for the submitter to be able to see score statistics for the assignment
-    (score.present? && !hide_grade_from_student?)
+    score.present? && !hide_grade_from_student?
   end
 
   def posted?
@@ -3015,7 +3012,6 @@ class Submission < ActiveRecord::Base
     context.clear_todo_list_cache_later(:admins)
     user_ids = graded_user_ids.to_a
     if user_ids.any?
-      Rails.logger.debug "GRADES: recomputing scores in course #{context.id} for users #{user_ids} because of bulk submission update"
       context.recompute_student_scores(user_ids)
     end
   end
@@ -3078,7 +3074,7 @@ class Submission < ActiveRecord::Base
 
   def checkpoint_attributes_changed?
     tracked_attributes = Checkpoints::SubmissionAggregatorService::AggregateSubmission.members.map(&:to_s) - ["updated_at"]
-    relevant_changes = tracked_attributes & previous_changes.keys
+    relevant_changes = tracked_attributes & saved_changes.keys
     relevant_changes.any?
   end
 
@@ -3182,10 +3178,10 @@ class Submission < ActiveRecord::Base
     # posting/hiding on a separate copy of the assignment, then reload our copy
     # of the assignment to make sure we pick up any changes to the muted status.
     if posted? && !previously_posted
-      Assignment.find(assignment_id).post_submissions(submission_ids: [id], skip_updating_timestamp: true, skip_muted_changed: true)
+      AbstractAssignment.find(assignment_id).post_submissions(submission_ids: [id], skip_updating_timestamp: true, skip_muted_changed: true)
       assignment.reload
     elsif !posted? && previously_posted
-      Assignment.find(assignment_id).hide_submissions(submission_ids: [id], skip_updating_timestamp: true, skip_muted_changed: true)
+      AbstractAssignment.find(assignment_id).hide_submissions(submission_ids: [id], skip_updating_timestamp: true, skip_muted_changed: true)
       assignment.reload
     end
   end

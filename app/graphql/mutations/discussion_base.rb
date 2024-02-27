@@ -18,9 +18,52 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+class Types::DiscussionCheckpointDateType < Types::BaseEnum
+  graphql_name "DiscussionCheckpointDateType"
+  description "Types of dates that can be set for discussion checkpoints"
+  value "everyone"
+  value "override"
+end
+
+class Types::DiscussionCheckpointDateSetType < Types::BaseEnum
+  graphql_name "DiscussionCheckpointDateSetType"
+  description "Types of date set that can be set for discussion checkpoints"
+  value "CourseSection"
+  value "Group"
+  value "ADHOC"
+end
+
+class Mutations::DiscussionCheckpointDate < GraphQL::Schema::InputObject
+  argument :type, Types::DiscussionCheckpointDateType, required: true
+  argument :due_at, Types::DateTimeType, required: false
+  argument :lock_at, Types::DateTimeType, required: false
+  argument :unlock_at, Types::DateTimeType, required: false
+  argument :student_ids, [Integer], required: false
+  argument :set_type, Types::DiscussionCheckpointDateSetType, required: false
+  argument :set_id, Integer, required: false
+
+  def to_object
+    {
+      type: self[:type],
+      due_at: self[:due_at],
+      lock_at: self[:lock_at],
+      unlock_at: self[:unlock_at],
+      student_ids: self[:student_ids],
+      set_type: self[:set_type],
+      set_id: self[:set_id]
+    }
+  end
+end
+
+class Mutations::DiscussionCheckpoints < GraphQL::Schema::InputObject
+  argument :checkpoint_label, String, required: true
+  argument :dates, [Mutations::DiscussionCheckpointDate], required: true
+  argument :points_possible, Integer, required: true
+  argument :replies_required, Integer, required: false
+end
+
 class Mutations::DiscussionBase < Mutations::BaseMutation
   argument :allow_rating, Boolean, required: false
-  argument :assignment, Mutations::AssignmentCreateOrUpdate, required: false
   argument :delayed_post_at, Types::DateTimeType, required: false
   argument :group_category_id, ID, required: false
   argument :lock_at, Types::DateTimeType, required: false
@@ -36,25 +79,21 @@ class Mutations::DiscussionBase < Mutations::BaseMutation
   argument :specific_sections, String, required: false
   argument :file_id, ID, required: false, prepare: GraphQLHelpers.relay_or_legacy_id_prepare_func("Attachment")
 
-  field :discussion_topic, Types::DiscussionType, null: true
+  field :discussion_topic, Types::DiscussionType, null:
 
-  def process_common_inputs(input, is_announcement, discussion_topic, is_create = false)
-    discussion_topic.user = current_user if is_create
-    discussion_topic.title = input[:title] if input.key?(:title)
-    discussion_topic.message = input[:message] if input.key?(:message)
-    discussion_topic.workflow_state = (input[:published] || is_announcement) ? "active" : "unpublished" if is_create || input.key?(:published)
-    discussion_topic.require_initial_post = input[:require_initial_post] || false if is_create || input.key?(:require_initial_post)
+  # These are inputs that are allowed to be directly assigned from graphql to the model without additional processing or logic involved
+  ALLOWED_INPUTS = %i[title message require_initial_post allow_rating only_graders_can_rate podcast_enabled podcast_has_student_posts].freeze
 
-    discussion_topic.allow_rating = input[:allow_rating] || false if is_create || input.key?(:allow_rating)
-    discussion_topic.only_graders_can_rate = input[:only_graders_can_rate] || false if is_create || input.key?(:only_graders_can_rate)
+  def process_common_inputs(input, is_announcement, discussion_topic)
+    model_attrs = input.to_h.slice(*ALLOWED_INPUTS)
+    discussion_topic.assign_attributes(model_attrs)
+
+    discussion_topic.workflow_state = "active" if input.key?(:published) && (input[:published] || is_announcement)
 
     unless is_announcement
       discussion_topic.todo_date = input[:todo_date] if input.key?(:todo_date)
       discussion_topic.group_category_id = input[:group_category_id] if input.key?(:group_category_id)
     end
-
-    discussion_topic.podcast_enabled = input[:podcast_enabled] || false if is_create || input.key?(:podcast_enabled)
-    discussion_topic.podcast_has_student_posts = input[:podcast_has_student_posts] || false if is_create || input.key?(:podcast_has_student_posts)
 
     if input.key?(:file_id)
       attachment = Attachment.find(input[:file_id])

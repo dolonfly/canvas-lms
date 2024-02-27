@@ -17,7 +17,7 @@
  */
 
 import {sendMessageStudentsWho} from './shared/grading/messageStudentsWhoHelper'
-import {GlobalEnv} from '@canvas/global/env/GlobalEnv'
+import type {GlobalEnv} from '@canvas/global/env/GlobalEnv.d'
 import {GlobalInst} from '@canvas/global/inst/GlobalInst'
 
 declare global {
@@ -51,12 +51,11 @@ declare global {
     INST: GlobalInst
 
     webkitSpeechRecognition: any
-    jsonData: any
     messageStudents: (options: ReturnType<typeof sendMessageStudentsWho>) => void
     updateGrades: () => void
 
-    bundles: Array<() => void>
-    deferredBundles: Array<() => void>
+    bundles: string[]
+    deferredBundles: string[]
     canvasReadyState?: 'loading' | 'complete'
   }
 
@@ -96,16 +95,17 @@ declare global {
       scroll?: boolean,
       override_position?: string | number
     ) => JQuery<HTMLElement>
-    getFormData: () => Record<string, unknown>
+    getFormData: <T>(obj?: Record<string, unknown>) => T
     live: any
     loadDocPreview: (options: {
+      attachment_id: string
+      attachment_preview_processing: boolean
+      attachment_view_inline_ping_url: string | null
       height: string
       id: string
       mimeType: string
-      attachment_id: string
-      submission_id: any
-      attachment_view_inline_ping_url: string | undefined
-      attachment_preview_processing: boolean
+      submission_id: string
+      crocodoc_session_url?: string
     }) => void
     mediaComment: any
     mediaCommentThumbnail: (size?: 'normal' | 'small') => void
@@ -113,12 +113,18 @@ declare global {
     showIf: ShowIf
     underscore: (str: string) => string
     formSubmit: (options: {
-      formErrors: boolean
-      disableWhileLoading: boolean
+      object_name?: string
+      formErrors?: boolean
+      disableWhileLoading?: boolean
       required: string[]
       success: (data: any) => void
+      beforeSubmit?: (data: any) => void
       error: (response: JQuery.JQueryXHR) => void
     }) => void
+    formErrors: (errors: Record<string, string>) => void
+    getTemplateData: (options: {textValues: string[]}) => Record<string, unknown>
+    fancyPlaceholder: () => void
+    loadingImage: (str?: string) => void
   }
 
   declare interface JQueryStatic {

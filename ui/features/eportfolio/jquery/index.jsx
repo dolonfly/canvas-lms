@@ -34,9 +34,10 @@ import RichContentEditor from '@canvas/rce/RichContentEditor'
 import MoveToDialog from '../react/MoveToDialog'
 import {fetchContent} from './eportfolio_section'
 import sanitizeHtml from 'sanitize-html-with-tinymce'
+import {raw} from '@instructure/html-escape'
 import '@canvas/jquery/jquery.ajaxJSON'
 import '@canvas/jquery/jquery.tree' /* instTree */
-import '@canvas/forms/jquery/jquery.instructure_forms' /* formSubmit, getFormData, formErrors, errorBox */
+import '@canvas/jquery/jquery.instructure_forms' /* formSubmit, getFormData, formErrors, errorBox */
 import 'jqueryui/dialog'
 import '@canvas/util/jquery/fixDialogButtons'
 import '@canvas/rails-flash-notifications' /* $.screenReaderFlashMessageExclusive */
@@ -371,7 +372,7 @@ $(document).ready(function () {
           const $richText = $section.find('.edit_section')
           const editorContent = RichContentEditor.callOnRCE($richText, 'get_code')
           if (editorContent) {
-            $preview.html($.raw(editorContent))
+            $preview.html(raw(editorContent))
           }
           $section.find('.section_content').after($preview)
         }
@@ -410,12 +411,12 @@ $(document).ready(function () {
             const $richText = $section.find('.edit_section')
             const editorContent = RichContentEditor.callOnRCE($richText, 'get_code')
             if (editorContent) {
-              $section.find('.section_content').html($.raw(editorContent))
+              $section.find('.section_content').html(raw(editorContent))
             }
             RichContentEditor.destroyRCE($richText)
           } else {
             const code = sanitizeHtml($section.find('.edit_section').val())
-            $section.find('.section_content').html($.raw(code))
+            $section.find('.section_content').html(raw(code))
           }
         } else if (!$section.hasClass('read_only')) {
           $section.remove()
@@ -567,7 +568,7 @@ $(document).ready(function () {
       $sectionContent.append($frame)
       $section.addClass('read_only')
       $(this).focus()
-      $.screenReaderFlashMessageExclusive(I18n.t('submission added: %{title}', {title}))
+      $.screenReaderFlashMessage(I18n.t('submission added: %{title}', {title}))
     })
     .delegate('.upload_file_button', 'click', function (event) {
       event.preventDefault()

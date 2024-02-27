@@ -42,6 +42,10 @@ describe Types::RubricType do
       ).to eq(rubric.criteria.map { |c| c[:id].to_s })
     end
 
+    it "criteria_count" do
+      expect(rubric_type.resolve("criteriaCount")).to eq rubric.criteria.count
+    end
+
     it "free_form_criterion_comments" do
       expect(
         rubric_type.resolve("freeFormCriterionComments")
@@ -59,6 +63,11 @@ describe Types::RubricType do
 
     it "title" do
       expect(rubric_type.resolve("title")).to eq rubric.title
+    end
+
+    it "hide_points" do
+      rubric.update!(hide_points: true)
+      expect(rubric_type.resolve("hidePoints")).to eq rubric.hide_points
     end
   end
 end

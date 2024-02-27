@@ -76,19 +76,22 @@ describe CC::CCHelper do
       allow(@kaltura).to receive(:flavorAssetGetOriginalAsset).and_return(@kaltura.flavorAssetGetByEntryId("abcde").first)
     end
 
-    context "media_attachments_iframes" do
+    shared_examples "media_attachments_iframes examples" do
       it "are translated on export" do
         att = @course.attachments.first
         @exporter = CC::CCHelper::HtmlContentExporter.new(@course, @user)
 
         html = %(
-          <iframe style="width: 400px; height: 225px; display: inline-block;" title="this is a media comment" data-media-type="video" src="/media_attachments_iframe/#{att.id}?type=video&amp;embedded=true" allow="fullscreen" data-media-id="#{att.media_entry_id}"></iframe>
-          <iframe style="width: 400px; height: 225px; display: inline-block;" title="this is a media comment" data-media-type="video" src="/media_objects_iframe/#{att.media_entry_id}?type=video&amp;embedded=true" allow="fullscreen" data-media-id="#{att.media_entry_id}"></iframe>
+          <iframe style="width: 400px; height: 225px; display: inline-block;" title="this is a media comment" data-media-type="video" src="/media_attachments_iframe/#{att.id}?type=video&embedded=true" allow="fullscreen" data-media-id="#{att.media_entry_id}"></iframe>
+          <iframe style="width: 400px; height: 225px; display: inline-block;" title="this is a media comment" data-media-type="video" src="/media_objects_iframe/#{att.media_entry_id}?type=video&embedded=true" allow="fullscreen" data-media-id="#{att.media_entry_id}"></iframe>
           <a id="media_comment_abcde" class="instructure_inline_media_comment video_comment" data-media_comment_type="video" data-alt=""></a>
         )
-        translated = @exporter.html_content(html)
-        expect(translated).to include %(<source src="$IMS-CC-FILEBASE$/Uploaded%20Media/some_media.mp4?canvas_=1&amp;canvas_qs_amp=&amp;canvas_qs_embedded=true&amp;canvas_qs_type=video&amp;media_attachment=true" data-media-id="abcde" data-media-type="video">)
-        expect(translated).to include %(<source src="$IMS-CC-FILEBASE$/Uploaded Media/some_media.mp4" data-media-id="abcde" data-media-type="video">)
+        sources = Nokogiri::HTML5(@exporter.html_content(html)).css("source").pluck("src")
+        expect(sources.length).to eq 2
+        expect(sources).to eq([
+                                "$IMS-CC-FILEBASE$/Uploaded%20Media/some_media.mp4?canvas_=1&canvas_qs_embedded=true&canvas_qs_type=video&media_attachment=true",
+                                "$IMS-CC-FILEBASE$/Uploaded Media/some_media.mp4"
+                              ])
       end
 
       it "are not translated on export when pointing at user media" do
@@ -110,6 +113,20 @@ describe CC::CCHelper do
         translated = @exporter.html_content(orig)
         expect(translated).to include %(<source src="/media_attachments_iframe/#{att.id}?type=video" data-media-id="zzzz" data-media-type="video">)
         expect(@exporter.media_object_infos.count).to eq 0
+      end
+    end
+
+    context "media_attachments_iframes" do
+      context "with precise_link_replacements FF OFF" do
+        before { Account.site_admin.disable_feature! :precise_link_replacements }
+
+        include_examples "media_attachments_iframes examples"
+      end
+
+      context "with precise_link_replacements FF ON" do
+        before { Account.site_admin.enable_feature! :precise_link_replacements }
+
+        include_examples "media_attachments_iframes examples"
       end
     end
 
@@ -282,6 +299,43 @@ describe CC::CCHelper do
       urls = doc.css("a").pluck(:href)
       expect(urls[0]).to eq "$WIKI_REFERENCE$/wiki/front-page"
       expect(urls[1]).to eq "http://www.example.com:8080/courses/#{@othercourse.id}/wiki/front-page"
+    end
+
+    context "assessment_question file links" do
+      before do
+        attachment_model(uploaded_data: stub_png_data)
+        assessment_question_bank_model
+        question_data = {
+          "name" => "test question",
+          "points_possible" => 10,
+          "answers" => [{ "id" => 1 }, { "id" => 2 }],
+        }
+        @question = @bank.assessment_questions.create!(question_data:)
+        @question.question_data = question_data.merge("question_text" => %(<p><img src="/courses/#{@course.id}/files/#{@attachment.id}/download"></p>))
+        @question.save!
+        quiz_model(course: @course)
+        @quiz.add_assessment_questions([@question])
+      end
+
+      it "translates assessment_question links during export" do
+        @exporter = CC::CCHelper::HtmlContentExporter.new(@course, @user, for_course_copy: false)
+        question_text = @quiz.quiz_questions[0].question_data["question_text"]
+        matches = question_text.match %r{/assessment_questions/#{@question.id}/files/(?<file_id>\d+)}
+        expect(matches[:file_id]).not_to be_nil
+
+        translated = @exporter.html_content(question_text)
+        expect(translated).to match %r{\$IMS-CC-FILEBASE\$/assessment_questions/test%20my%20file\?%20hai!&amp;.png}
+      end
+
+      it "removes verifier query parameters on links" do
+        @exporter = CC::CCHelper::HtmlContentExporter.new(@course, @user, for_course_copy: false)
+        qb_attachment = @question.attachments.take
+        question_text = %(<p><img src="/assessment_questions/#{@question.id}/files/#{qb_attachment.id}/download?verifier=#{qb_attachment.uuid}&amp;verifier=random_other_att_verifier" alt="5e9toe-2.jpeg" /></p>)
+        @question.question_data = @question.question_data = question_data.merge("question_text" => question_text)
+        @question.save!
+        translated = @exporter.html_content(question_text)
+        expect(translated).to match %r{\$IMS-CC-FILEBASE\$/assessment_questions/test%20my%20file\?%20hai!&amp;.png}
+      end
     end
 
     it "copies the correct page when the url is an old slug" do

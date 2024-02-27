@@ -27,6 +27,8 @@ module Api::V1::Assignment
   include SubmittablesGradingPeriodProtection
   include Api::V1::PlannerOverride
 
+  ALL_DATES_LIMIT = 25
+
   PRELOADS = %i[external_tool_tag
                 duplicate_of
                 rubric
@@ -169,8 +171,8 @@ module Api::V1::Assignment
     hash["graded_submissions_exist"] = assignment.graded_submissions_exist?
 
     if opts[:include_checkpoints] && assignment.root_account.feature_enabled?(:discussion_checkpoints)
-      hash["checkpointed"] = assignment.checkpointed?
-      hash["checkpoints"] = assignment.checkpoint_assignments.map { |checkpoint| Checkpoint.new(checkpoint).as_json }
+      hash["has_sub_assignments"] = assignment.has_sub_assignments?
+      hash["checkpoints"] = assignment.sub_assignments.map { |sub_assignment| Checkpoint.new(sub_assignment).as_json }
     end
 
     if opts[:overrides].present?
@@ -357,7 +359,7 @@ module Api::V1::Assignment
                        else
                          assignment.assignment_overrides.active.count
                        end
-      if override_count < Setting.get("assignment_all_dates_too_many_threshold", "25").to_i
+      if override_count < ALL_DATES_LIMIT
         hash["all_dates"] = assignment.dates_hash_visible_to(user)
       else
         hash["all_dates_count"] = override_count
@@ -644,7 +646,7 @@ module Api::V1::Assignment
           initiated_source: :new_quizzes
         )
 
-        data.each do |key, _|
+        data.each_key do |key|
           import_object = Context.find_asset_by_url(key)
 
           next unless import_object.respond_to?(:context) && import_object.context.is_a?(Course)
@@ -925,6 +927,14 @@ module Api::V1::Assignment
       end
     end
 
+    if assignment_params.key?("alignment_cloned_successfully") && assignment.root_account.feature_enabled?(:course_copy_alignments)
+      if value_to_boolean(assignment_params[:alignment_cloned_successfully])
+        assignment.finish_alignment_cloning
+      else
+        assignment.fail_to_clone_alignment
+      end
+    end
+
     if assignment_params.key?("migrated_successfully")
       if value_to_boolean(assignment_params[:migrated_successfully])
         assignment.finish_migrating
@@ -1019,7 +1029,7 @@ module Api::V1::Assignment
   # the current user is an observer
   def current_user_and_observed(opts = { include_observed: false })
     user_and_observees = Array(@current_user)
-    if opts[:include_observed] && @current_user.enrollments.of_observer_type.active.where(course: @context).exists?
+    if opts[:include_observed] && (@context_enrollment&.observer? || @current_user.enrollments.of_observer_type.active.where(course: @context).exists?)
       user_and_observees.concat(ObserverEnrollment.observed_students(@context, @current_user).keys)
     end
     user_and_observees

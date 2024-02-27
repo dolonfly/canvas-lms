@@ -90,6 +90,12 @@ describe Types::UserType do
     end
   end
 
+  context "uuid" do
+    it "is displayed when requested" do
+      expect(user_type.resolve("uuid")).to eq @student.uuid.to_s
+    end
+  end
+
   context "avatarUrl" do
     before(:once) do
       @student.update! avatar_image_url: "not-a-fallback-avatar.png"
@@ -294,6 +300,18 @@ describe Types::UserType do
       expect(
         user_type.resolve(%|enrollments(courseId: "#{@course2.id}") { _id }|)
       ).to eq []
+    end
+
+    it "excludes deactivated enrollments when currentOnly is true" do
+      @student.enrollments.each(&:deactivate)
+      results = user_type.resolve("enrollments(currentOnly: true) { _id }")
+      expect(results).to be_empty
+    end
+
+    it "includes deactivated enrollments when currentOnly is false" do
+      @student.enrollments.each(&:deactivate)
+      results = user_type.resolve("enrollments(currentOnly: false) { _id }")
+      expect(results).not_to be_empty
     end
 
     it "excludes concluded enrollments when excludeConcluded is true" do

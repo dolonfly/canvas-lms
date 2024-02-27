@@ -721,7 +721,7 @@ describe Lti::Messages::JwtMessage do
 
     it "expands variable expansions" do
       Lti::Messages::JwtMessage.generate_id_token(jwt_message.generate_post_payload)
-      expect(message_custom["has_expansion"]).to eq user.id
+      expect(message_custom["has_expansion"]).to eq user.id.to_s
     end
 
     context "when custom parameters claim group disabled" do
@@ -1068,6 +1068,28 @@ describe Lti::Messages::JwtMessage do
       it "doesn't include the oauth_consumer_key related claims" do
         expect(subject).not_to include "oauth_consumer_key"
         expect(subject).not_to include "oauth_consumer_key_sign"
+      end
+    end
+  end
+
+  describe "inst-specific extension claims" do
+    subject { decoded_jwt["https://www.instructure.com/#{claim}"] }
+
+    context "placement claim" do
+      let(:claim) { "placement" }
+
+      it "matches the resource_type" do
+        expect(subject).to eq opts[:resource_type]
+      end
+    end
+
+    context "lti_student_id claim" do
+      let(:claim) { "lti_student_id" }
+      let(:student_id) { "123" }
+      let(:opts) { { student_id: } }
+
+      it "uses student_id from opts" do
+        expect(subject).to eq student_id
       end
     end
   end

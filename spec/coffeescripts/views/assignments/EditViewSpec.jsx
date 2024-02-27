@@ -1782,14 +1782,14 @@ QUnit.module('EditView: anonymous grading', hooks => {
     strictEqual(anonymousGradingCheckbox.prop('disabled'), true)
   })
 
-  test('is disabled when editing a quiz lti assignment with anonymous grading turned on', () => {
+  test('is still enabled when editing a quiz lti assignment with anonymous grading turned on', () => {
     ENV.NEW_QUIZZES_ANONYMOUS_GRADING_ENABLED = true
     ENV.ANONYMOUS_GRADING_ENABLED = true
     const view = editView({id: '1', is_quiz_lti_assignment: true, anonymous_grading: true})
     view.$el.appendTo($('#fixtures'))
     view.afterRender()
     const anonymousGradingCheckbox = view.$el.find('input#assignment_anonymous_grading')
-    strictEqual(anonymousGradingCheckbox.prop('disabled'), true)
+    strictEqual(anonymousGradingCheckbox.prop('disabled'), false)
   })
 
   test('is enabled when creating a quiz lti assignment with anonymous grading turned on', () => {
@@ -2203,6 +2203,88 @@ QUnit.module('EditView#handleModeratedGradingChanged', hooks => {
     view.handleModeratedGradingChanged(false)
     strictEqual(view.uncheckAndHideGraderAnonymousToGraders.callCount, 1)
     view.uncheckAndHideGraderAnonymousToGraders.restore()
+  })
+})
+
+QUnit.module('EditView#handleMessageEvent', hooks => {
+  let server
+  let view
+
+  hooks.beforeEach(() => {
+    fixtures.innerHTML = `
+      <span id="editor_tabs"></span>
+      <span data-component="ModeratedGradingFormFieldGroup"></span>
+    `
+    fakeENV.setup({
+      AVAILABLE_MODERATORS: [],
+      current_user_roles: ['teacher'],
+      HAS_GRADED_SUBMISSIONS: false,
+      LOCALE: 'en',
+      MODERATED_GRADING_ENABLED: true,
+      MODERATED_GRADING_MAX_GRADER_COUNT: 2,
+      VALID_DATE_RANGE: {},
+      COURSE_ID: 1,
+    })
+    server = sinon.fakeServer.create()
+    sandbox.fetch.mock('path:/api/v1/courses/1/lti_apps/launch_definitions', 200)
+    view = editView()
+  })
+
+  hooks.afterEach(() => {
+    server.restore()
+    fakeENV.teardown()
+    fixtures.innerHTML = ''
+  })
+
+  test('handleMessageEvent sets ab_guid when subject is assignment.set_ab_guid and the ab_guid is formatted correctly', () => {
+    const mockEvent = {
+      data: {
+        subject: 'assignment.set_ab_guid',
+        data: ['1E20776E-7053-11DF-8EBF-BE719DFF4B22', '1e20776e-7053-11df-8eBf-Be719dff4b22'],
+      },
+    }
+
+    view.handleMessageEvent(mockEvent)
+
+    deepEqual(
+      view.assignment.get('ab_guid'),
+      ['1E20776E-7053-11DF-8EBF-BE719DFF4B22', '1e20776e-7053-11df-8eBf-Be719dff4b22'],
+      'ab_guid should be set correctly'
+    )
+  })
+
+  test('handleMessageEvent does not set ab_guid when subject is not assignment.set_ab_guid', () => {
+    const mockEvent = {
+      data: {
+        subject: 'some.other.subject',
+        data: ['1E20776E-7053-11DF-8EBF-BE719DFF4B22', '1e20776e-7053-11df-8eBf-Be719dff4b22'],
+      },
+    }
+
+    view.handleMessageEvent(mockEvent)
+
+    notDeepEqual(
+      view.assignment.has('ab_guid'),
+      ['1E20776E-7053-11DF-8EBF-BE719DFF4B22', '1e20776e-7053-11df-8eBf-Be719dff4b22'],
+      'ab_guid should not be set'
+    )
+  })
+
+  test('handleMessageEvent does not set ab_guid when the ab_guid is not formatted correctly', function () {
+    const mockEvent = {
+      data: {
+        subject: 'assignment.set_ab_guid',
+        data: ['not_an_ab_guid', '1e20776e-7053-11df-8eBf-Be719dff4b22'],
+      },
+    }
+
+    view.handleMessageEvent(mockEvent)
+
+    notDeepEqual(
+      view.assignment.has('ab_guid'),
+      ['not_an_ab_guid', '1e20776e-7053-11df-8eBf-Be719dff4b22'],
+      'ab_guid should not be set'
+    )
   })
 })
 

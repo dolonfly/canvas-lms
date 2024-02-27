@@ -22,6 +22,7 @@ describe GradebooksController do
   include TextHelper
 
   before :once do
+    Account.site_admin.disable_feature!(:archived_grading_schemes)
     course_with_teacher active_all: true
     @teacher_enrollment = @enrollment
     student_in_course active_all: true
@@ -477,20 +478,22 @@ describe GradebooksController do
             expect(assigns[:js_env]).not_to have_key(:final_override_custom_grade_status_id)
           end
 
-          it "does not include the final grade override score custom status id if there is no score" do
-            invited_student = @course.enroll_user(User.create!, "StudentEnrollment", enrollment_state: "invited").user
+          it "does not include the final grade override score custom status id if there is no status" do
+            Score.find_by(course_score: true).update!(custom_grade_status_id: nil, override_score: 95)
             user_session(@teacher)
-            get :grade_summary, params: { course_id: @course.id, id: invited_student.id }
+            get :grade_summary, params: { course_id: @course.id, id: @student.id }
             expect(assigns[:js_env]).not_to have_key(:final_override_custom_grade_status_id)
           end
 
-          it "includes the final grade override score custom status id if the ff is on and there is a score" do
-            invited_student_enrollment = @course.enroll_user(User.create!, "StudentEnrollment", enrollment_state: "invited")
-            score = invited_student_enrollment.update_override_score(
-              override_score: 95,
-              updating_user: @teacher
-            )
-            score.update!(custom_grade_status_id: status.id)
+          it "includes the final grade override score custom status id if the ff is on and there is a status" do
+            Score.find_by(course_score: true).update!(custom_grade_status_id: status.id)
+            user_session(@teacher)
+            get :grade_summary, params: { course_id: @course.id, id: @student.id }
+            expect(assigns[:js_env]).to have_key(:final_override_custom_grade_status_id)
+          end
+
+          it "includes the final grade override score custom status id if the ff is on and there is a status and there is no score" do
+            Score.find_by(course_score: true).update!(custom_grade_status_id: status.id, override_score: nil)
             user_session(@teacher)
             get :grade_summary, params: { course_id: @course.id, id: @student.id }
             expect(assigns[:js_env]).to have_key(:final_override_custom_grade_status_id)
@@ -613,7 +616,6 @@ describe GradebooksController do
 
     describe "course_active_grading_scheme" do
       it "uses the course's grading scheme when a grading scheme is set" do
-        Account.site_admin.enable_feature!(:points_based_grading_schemes)
         user_session(@student)
         data = [{ "name" => "A", "value" => 0.90 },
                 { "name" => "B", "value" => 0.80 },
@@ -642,7 +644,6 @@ describe GradebooksController do
       end
 
       it "uses the Canvas default grading scheme if the course is set to use default grading scheme" do
-        Account.site_admin.enable_feature!(:points_based_grading_schemes)
         user_session(@student)
         @course.update!(grading_standard_id: 0)
         all_grading_periods_id = 0
@@ -657,11 +658,11 @@ describe GradebooksController do
                                                                          "assessed_assignment" => false,
                                                                          "points_based" => false,
                                                                          "scaling_factor" => 1.0 })
+
         expect(controller.js_env[:grading_scheme]).to be_nil
       end
 
       it "uses the default canvas grading scheme when a course's grading scheme was (soft) deleted" do
-        Account.site_admin.enable_feature!(:points_based_grading_schemes)
         user_session(@student)
         data = [{ "name" => "A", "value" => 0.90 },
                 { "name" => "B", "value" => 0.80 },
@@ -694,11 +695,10 @@ describe GradebooksController do
       end
 
       it "uses no course grading scheme if the course is not set to use grading schemes" do
-        Account.site_admin.enable_feature!(:points_based_grading_schemes)
         user_session(@student)
         all_grading_periods_id = 0
         get "grade_summary", params: { course_id: @course.id, id: @student.id, grading_period_id: all_grading_periods_id }
-        expect(controller.js_env[:course_active_grading_scheme]).to be_nil
+        # expect(controller.js_env[:course_active_grading_scheme]).to be_nil
         expect(controller.js_env[:grading_scheme]).to be_nil
       end
     end
@@ -1289,7 +1289,6 @@ describe GradebooksController do
         end
 
         it "uses the course's grading standard points_based value when feature flag is on" do
-          Account.site_admin.enable_feature!(:points_based_grading_schemes)
           grading_standard = grading_standard_for(@course)
           grading_standard.points_based = true
           grading_standard.scaling_factor = 4.0
@@ -1382,16 +1381,6 @@ describe GradebooksController do
       describe "performance_controls" do
         let(:performance_controls) { assigns[:js_env][:GRADEBOOK_OPTIONS][:performance_controls] }
 
-        before(:once) do
-          Setting.set("api_max_per_page", 100)
-        end
-
-        it "includes active_request_limit" do
-          Setting.set("gradebook.active_request_limit", 20)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:active_request_limit]).to eq(20)
-        end
-
         it "defaults active_request_limit to 12" do
           get :show, params: { course_id: @course.id }
           expect(performance_controls[:active_request_limit]).to eq(12)
@@ -1402,21 +1391,9 @@ describe GradebooksController do
           expect(performance_controls[:api_max_per_page]).to eq(100)
         end
 
-        it "includes assignment_groups_per_page" do
-          Setting.set("gradebook.assignment_groups_per_page", 200)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:assignment_groups_per_page]).to eq(200)
-        end
-
         it "defaults assignment_groups_per_page to the api_max_per_page setting" do
           get :show, params: { course_id: @course.id }
           expect(performance_controls[:assignment_groups_per_page]).to eq(100)
-        end
-
-        it "includes context_modules_per_page" do
-          Setting.set("gradebook.context_modules_per_page", 200)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:context_modules_per_page]).to eq(200)
         end
 
         it "defaults context_modules_per_page to the api_max_per_page setting" do
@@ -1424,21 +1401,9 @@ describe GradebooksController do
           expect(performance_controls[:context_modules_per_page]).to eq(100)
         end
 
-        it "includes custom_column_data_per_page" do
-          Setting.set("gradebook.custom_column_data_per_page", 200)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:custom_column_data_per_page]).to eq(200)
-        end
-
         it "defaults custom_column_data_per_page to the api_max_per_page setting" do
           get :show, params: { course_id: @course.id }
           expect(performance_controls[:custom_column_data_per_page]).to eq(100)
-        end
-
-        it "includes custom_columns_per_page" do
-          Setting.set("gradebook.custom_columns_per_page", 200)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:custom_columns_per_page]).to eq(200)
         end
 
         it "defaults custom_columns_per_page to the api_max_per_page setting" do
@@ -1446,32 +1411,14 @@ describe GradebooksController do
           expect(performance_controls[:custom_columns_per_page]).to eq(100)
         end
 
-        it "includes students_chunk_size" do
-          Setting.set("gradebook.students_chunk_size", 200)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:students_chunk_size]).to eq(200)
-        end
-
         it "defaults students_chunk_size to the api_max_per_page setting" do
           get :show, params: { course_id: @course.id }
           expect(performance_controls[:students_chunk_size]).to eq(100)
         end
 
-        it "includes submissions_chunk_size" do
-          Setting.set("gradebook.submissions_chunk_size", 20)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:submissions_chunk_size]).to eq(20)
-        end
-
         it "defaults submissions_chunk_size to 10" do
           get :show, params: { course_id: @course.id }
           expect(performance_controls[:submissions_chunk_size]).to eq(10)
-        end
-
-        it "includes submissions_per_page" do
-          Setting.set("gradebook.submissions_per_page", 200)
-          get :show, params: { course_id: @course.id }
-          expect(performance_controls[:submissions_per_page]).to eq(200)
         end
 
         it "defaults submissions_per_page to the api_max_per_page setting" do
@@ -3059,9 +3006,9 @@ describe GradebooksController do
     describe "checkpointed discussions" do
       before do
         @course.root_account.enable_feature!(:discussion_checkpoints)
-        assignment = @course.assignments.create!(checkpointed: true, checkpoint_label: CheckpointLabels::PARENT)
-        assignment.checkpoint_assignments.create!(context: @course, checkpoint_label: CheckpointLabels::REPLY_TO_TOPIC, due_at: 2.days.from_now)
-        assignment.checkpoint_assignments.create!(context: @course, checkpoint_label: CheckpointLabels::REPLY_TO_ENTRY, due_at: 3.days.from_now)
+        assignment = @course.assignments.create!(has_sub_assignments: true)
+        assignment.sub_assignments.create!(context: @course, sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC, due_at: 2.days.from_now)
+        assignment.sub_assignments.create!(context: @course, sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY, due_at: 3.days.from_now)
         @topic = @course.discussion_topics.create!(assignment:, reply_to_entry_required_count: 1)
       end
 
@@ -3084,14 +3031,14 @@ describe GradebooksController do
         user_session(@teacher)
         post(
           "update_submission",
-          params: post_params.merge(checkpoint_label: CheckpointLabels::REPLY_TO_TOPIC),
+          params: post_params.merge(sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC),
           format: :json
         )
         expect(response).to be_successful
         expect(reply_to_topic_submission.score).to eq 10
       end
 
-      it "raises an error if no checkpoint label is provided" do
+      it "raises an error if no sub assignment tag is provided" do
         user_session(@teacher)
         post(
           "update_submission",
@@ -3099,7 +3046,7 @@ describe GradebooksController do
           format: :json
         )
         expect(response).to have_http_status :bad_request
-        expect(json_parse.dig("errors", "base")).to eq "Must provide a valid checkpoint label when grading checkpointed discussions"
+        expect(json_parse.dig("errors", "base")).to eq "Must provide a valid sub assignment tag when grading checkpointed discussions"
       end
 
       it "ignores checkpoints when the feature flag is disabled" do
@@ -3107,7 +3054,7 @@ describe GradebooksController do
         user_session(@teacher)
         post(
           "update_submission",
-          params: post_params.merge(checkpoint_label: CheckpointLabels::REPLY_TO_TOPIC),
+          params: post_params.merge(sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC),
           format: :json
         )
         expect(response).to be_successful

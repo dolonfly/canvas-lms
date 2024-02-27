@@ -196,7 +196,7 @@ describe Course do
       # files
       expect(@course.attachments.length).to eq(4)
       @course.attachments.each do |f|
-        expect(File).to be_exist(f.full_filename)
+        expect(File).to exist(f.full_filename)
       end
       file = @course.attachments.where(migration_id: "1865116044002").first
       expect(file).not_to be_nil
@@ -418,6 +418,21 @@ describe Course do
         import_data = { course: { enable_course_paces: "false" } }.with_indifferent_access
         Importers::CourseContentImporter.import_content(@course, import_data, nil, migration)
         expect(@course.enable_course_paces).to be false
+      end
+    end
+
+    describe "import_blueprint_settings" do
+      it "runs blueprint importer if set to do so" do
+        migration = ContentMigration.create!(context: @course, user: account_admin_user, source_course: @course, migration_settings: { import_blueprint_settings: true })
+        expect(Importers::BlueprintSettingsImporter).to receive(:process_migration).once
+        Importers::CourseContentImporter.import_content(@course, {}, nil, migration)
+      end
+
+      it "skips the blueprint importer if the user lacks proper permission" do
+        usr = account_admin_user_with_role_changes(role_changes: { manage_master_courses: false })
+        migration = ContentMigration.create!(context: @course, user: usr, source_course: @course, migration_settings: { import_blueprint_settings: true })
+        expect(Importers::BlueprintSettingsImporter).not_to receive(:process_migration)
+        Importers::CourseContentImporter.import_content(@course, {}, nil, migration)
       end
     end
   end

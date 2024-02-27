@@ -36,8 +36,6 @@ describe('CanvasInbox App Container', () => {
   const server = mswServer(handlers)
 
   beforeAll(() => {
-    // eslint-disable-next-line no-undef
-    fetchMock.dontMock()
     server.listen()
     window.matchMedia = jest.fn().mockImplementation(() => {
       return {
@@ -61,8 +59,6 @@ describe('CanvasInbox App Container', () => {
 
   afterAll(() => {
     server.close()
-    // eslint-disable-next-line no-undef
-    fetchMock.enableMocks()
     window.ENV = {}
   })
 

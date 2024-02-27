@@ -19,6 +19,20 @@
 
 module ActiveRecord
   describe Base do
+    describe ".serializable_hash" do
+      let(:account) { Account.create! }
+
+      it "returns a hash with indifferent access when the root is included" do
+        hash = account.serializable_hash(include_root: true)
+        expect(hash).to be_a ActiveSupport::HashWithIndifferentAccess
+      end
+
+      it "returns a hash with indifferent access when the root is excluded" do
+        hash = account.serializable_hash(include_root: false)
+        expect(hash).to be_a ActiveSupport::HashWithIndifferentAccess
+      end
+    end
+
     describe ".wildcard" do
       it "produces a useful wildcard sql string" do
         sql = Base.wildcard("users.name", "users.short_name", "Sinatra, Frank", delimiter: ",")
@@ -271,6 +285,27 @@ module ActiveRecord
           end.to_not raise_error
         end
       end
+
+      describe "update_all" do
+        context "with shard_value" do
+          specs_require_sharding
+
+          it "iterates all shards" do
+            u1 = u2 = nil
+            @shard1.activate do
+              u1 = User.create!(name: "u1")
+              u1.communication_channels.create!(path: "email@domain.com")
+            end
+            @shard2.activate do
+              u2 = User.create!(name: "u2")
+              u2.communication_channels.create!(path: "email@domain.com")
+            end
+            User.joins(:communication_channel).shard([@shard1, @shard2]).update_all(name: "changed")
+            expect(u1.reload.name).to eql "changed"
+            expect(u2.reload.name).to eql "changed"
+          end
+        end
+      end
     end
 
     describe "update_all with limit" do
@@ -282,6 +317,18 @@ module ActiveRecord
         Eportfolio.joins(:user).order(:id).limit(1).update_all(name: "changed")
         expect(e1.reload.name).to eq "changed"
         expect(e2.reload.name).not_to eq "changed"
+      end
+
+      context "with shard_value" do
+        specs_require_sharding
+
+        it "iterates all shards" do
+          u1 = @shard1.activate { User.create!(name: "u1") }
+          u2 = @shard2.activate { User.create!(name: "u2") }
+          User.shard([@shard1, @shard2]).limit(10).update_all(name: "changed")
+          expect(u1.reload.name).to eql "changed"
+          expect(u2.reload.name).to eql "changed"
+        end
       end
     end
 
@@ -351,8 +398,8 @@ module ActiveRecord
       end
 
       after do
-        allow(DynamicSettings).to receive(:find).with("activerecord/ignored_columns", tree: :store).and_call_original
-        allow(DynamicSettings).to receive(:find).with("activerecord/ignored_columns_disabled", tree: :store).and_call_original
+        allow(DynamicSettings).to receive(:find).with("activerecord/ignored_columns", tree: :store, ignore_fallback_overrides: true).and_call_original
+        allow(DynamicSettings).to receive(:find).with("activerecord/ignored_columns_disabled", tree: :store, ignore_fallback_overrides: true).and_call_original
 
         reset_cache!
         User.create!(name: "user u2")
@@ -364,12 +411,12 @@ module ActiveRecord
       end
 
       def set_ignored_columns_state!(columns, enabled)
-        allow(DynamicSettings).to receive(:find).with("activerecord", tree: :store).and_return(
-          DynamicSettings::FallbackProxy.new({ "ignored_columns_disabled" => !enabled })
+        allow(DynamicSettings).to receive(:find).with("activerecord", tree: :store, ignore_fallback_overrides: true).and_return(
+          DynamicSettings::FallbackProxy.new({ "ignored_columns_disabled" => !enabled }, ignore_fallback_overrides: true)
         )
 
-        allow(DynamicSettings).to receive(:find).with("activerecord/ignored_columns", tree: :store).and_return(
-          DynamicSettings::FallbackProxy.new({ "users" => columns })
+        allow(DynamicSettings).to receive(:find).with("activerecord/ignored_columns", tree: :store, ignore_fallback_overrides: true).and_return(
+          DynamicSettings::FallbackProxy.new({ "users" => columns }, ignore_fallback_overrides: true)
         )
 
         reset_cache!
@@ -801,7 +848,7 @@ describe ActiveRecord::Migration::CommandRecorder do
     recorder.revert do
       r.add_column :accounts, :course_template_id, :integer, limit: 8, if_not_exists: true
       r.add_foreign_key :accounts, :courses, column: :course_template_id, if_not_exists: true
-      r.add_index :accounts, :course_template_id, algorithm: :concurrently, if_not_exists: true
+      r.add_index :accounts, :course_template_id, algorithm: :concurrently, if_not_exists: true # rubocop:disable Migration/NonTransactional
 
       r.remove_column :courses, :id, :integer, limit: 8, if_exists: true
       r.remove_foreign_key :enrollments, :users, if_exists: true
