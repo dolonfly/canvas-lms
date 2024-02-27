@@ -2,7 +2,7 @@ name: Docker build and push
 
 on:
   push:
-    branches: [ "main", "zut*" ]
+    branches: [ "main", "zut*", "canvas-self-*" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
