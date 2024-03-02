@@ -109,7 +109,7 @@ class AbstractAssignment < ActiveRecord::Base
   attribute :lti_resource_link_custom_params, :string, default: nil
   # Serializing this as JSON vs a Hash allows us to distinguish between nil (no changes need to be made)
   # and an actual Hash to set custom params to, which could be an empty hash.
-  serialize :lti_resource_link_custom_params, JSON
+  serialize :lti_resource_link_custom_params, coder: JSON
   attribute :lti_resource_link_lookup_uuid, :string, default: nil
   attribute :lti_resource_link_url, :string, default: nil
   attribute :line_item_resource_id, :string, default: nil
@@ -636,11 +636,11 @@ class AbstractAssignment < ActiveRecord::Base
     self.title = val
   end
 
-  serialize :integration_data, Hash
+  serialize :integration_data, type: Hash
 
-  serialize :turnitin_settings, Hash
+  serialize :turnitin_settings, type: Hash
   # file extensions allowed for online_upload submission
-  serialize :allowed_extensions, Array
+  serialize :allowed_extensions, type: Array
 
   def allowed_extensions=(new_value)
     # allow both comma and whitespace as separator
@@ -1317,46 +1317,46 @@ class AbstractAssignment < ActiveRecord::Base
     # ContentTag on the currently bound tool. Presumably you always want correct data in the LineItem, regardless of
     # which Tool it's bound to.
     GuardRail.activate(:primary) do
-      if lti_1_3_external_tool_tag?(lti_1_3_tool) && line_items.empty?
-        rl = Lti::ResourceLink.create!(
-          context: self,
-          custom: validate_resource_link_custom_params,
-          resource_link_uuid: lti_context_id,
-          context_external_tool: lti_1_3_tool || tool_from_external_tool_tag,
-          url: lti_resource_link_url,
-          lti_1_1_id:
-        )
+      transaction do
+        if lti_1_3_external_tool_tag?(lti_1_3_tool) && line_items.empty?
+          rl = Lti::ResourceLink.create!(
+            context: self,
+            custom: validate_resource_link_custom_params,
+            resource_link_uuid: lti_context_id,
+            context_external_tool: lti_1_3_tool || tool_from_external_tool_tag,
+            url: lti_resource_link_url,
+            lti_1_1_id:
+          )
 
-        li = line_items.create!(label: title, score_maximum: points_possible, resource_link: rl, coupled: true, resource_id: line_item_resource_id, tag: line_item_tag, end_date_time: due_at)
-        create_results_from_prior_grades(li)
-      elsif saved_change_to_title? || saved_change_to_points_possible? || saved_change_to_due_at?
-        if (li = line_items.find(&:assignment_line_item?))
-          li.label = title
-          li.score_maximum = points_possible || 0
-          li.tag = line_item_tag if line_item_tag
-          li.resource_id = line_item_resource_id if line_item_resource_id
-          li.end_date_time = due_at
-          li.save!
-        end
-      end
-
-      if lti_1_3_external_tool_tag?(lti_1_3_tool) && !lti_resource_links.empty?
-        options = {}
-        validated_params = validate_resource_link_custom_params
-        # Check if they actually passed something that isn't just our default value of nil, such as an
-        # empty string to signify they really want to set the custom params to nil, then format
-        # it for storage.
-        if !lti_resource_link_custom_params.nil? && validated_params != primary_resource_link.custom
-          options[:custom] = validated_params
+          li = line_items.create!(label: title, score_maximum: points_possible, resource_link: rl, coupled: true, resource_id: line_item_resource_id, tag: line_item_tag, end_date_time: due_at)
+          create_results_from_prior_grades(li)
+        elsif saved_change_to_title? || saved_change_to_points_possible? || saved_change_to_due_at?
+          if (li = line_items.find(&:assignment_line_item?))
+            li.label = title
+            li.score_maximum = points_possible || 0
+            li.tag = line_item_tag if line_item_tag
+            li.resource_id = line_item_resource_id if line_item_resource_id
+            li.end_date_time = due_at
+            li.save!
+          end
         end
 
-        options[:lookup_uuid] = lti_resource_link_lookup_uuid unless lti_resource_link_lookup_uuid.nil?
-        options[:url] = lti_resource_link_url if lti_resource_link_url
-        options[:lti_1_1_id] = lti_1_1_id if lti_1_1_id.present?
+        if lti_1_3_external_tool_tag?(lti_1_3_tool) && !lti_resource_links.empty?
+          options = {}
+          validated_params = validate_resource_link_custom_params
+          # Check if they actually passed something that isn't just our default value of nil, such as an
+          # empty string to signify they really want to set the custom params to nil, then format
+          # it for storage.
+          if !lti_resource_link_custom_params.nil? && validated_params != primary_resource_link.custom
+            options[:custom] = validated_params
+          end
 
-        return if options.empty?
+          options[:lookup_uuid] = lti_resource_link_lookup_uuid unless lti_resource_link_lookup_uuid.nil?
+          options[:url] = lti_resource_link_url if lti_resource_link_url
+          options[:lti_1_1_id] = lti_1_1_id if lti_1_1_id.present?
 
-        primary_resource_link.update!(options)
+          primary_resource_link.update!(options) unless options.empty?
+        end
       end
     end
   end
