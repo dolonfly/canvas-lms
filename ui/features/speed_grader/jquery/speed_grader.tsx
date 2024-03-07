@@ -2835,6 +2835,9 @@ EG = {
         attachment.workflow_state === 'pending_upload' ||
         attachment.workflow_state === 'processing',
     }
+    console.log('-----renderAttachment--->')
+    console.log(previewOptions)
+    console.log(attachment)
 
     if (
       !attachment.hijack_crocodoc_session &&
@@ -2884,6 +2887,7 @@ EG = {
       )
     } else if (!INST?.disableSelfHostPreviews && isPreviewable(attachment.content_type)) {
         $no_annotation_warning.show()
+        console.log('======!INST?.disableSelfHostPreviews && isPreviewable(attachment.content_type)===>')
 
         const currentStudentIDAsOfAjaxCall = this.currentStudent[anonymizableId]
         previewOptions = $.extend(previewOptions, {
