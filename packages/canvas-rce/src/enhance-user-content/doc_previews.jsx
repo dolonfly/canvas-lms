@@ -173,6 +173,72 @@ export function loadDocPreview($container, options) {
     iframe.id = opts.id
     canvadocWrapper.appendChild(iframe)
   } else if (
+    (!opts.disableSelfHostPreviews &&
+      (!opts.mimetype || isPreviewable(opts.mimetype)) &&
+      opts.attachment_id) ||
+    opts.public_url
+  ) {
+    // else if it's something google docs preview can handle and we can get a public url to this document.
+    const loadSelfHostPreview = function () {
+      // this handles both ssl and plain http.
+      // const googleDocPreviewUrl = `//docs.google.com/viewer?${new URLSearchParams({
+      //   embedded: true,
+      //   url: opts.public_url,
+      // }).toString()}`
+      const  selfHostDocPreviewUrl = opts.preview_full_url
+      if (!opts.ajax_valid || opts.ajax_valid()) {
+        const iframe = document.createElement('iframe')
+        iframe.addEventListener('load', () => {
+          tellAppIViewedThisInline('selfhost')
+          if (typeof opts.ready === 'function') {
+            opts.ready()
+          }
+        })
+        iframe.setAttribute('src', selfHostDocPreviewUrl)
+        iframe.setAttribute('height', opts.height)
+        iframe.setAttribute('width', '100%')
+        $container.appendChild(iframe)
+      }
+    }
+    if (opts.public_url) {
+      loadSelfHostPreview()
+    } else if (opts.attachment_id) {
+      let url = `/api/v1/files/${opts.attachment_id}/public_url.json`
+      if (opts.submission_id) {
+        url += '?' + new URLSearchParams({submission_id: opts.submission_id}).toString()
+      }
+      if (opts.verifier) {
+        url += `${opts.submission_id ? '&' : '?'}verifier=${opts.verifier}`
+      } else {
+        const match = window.location.search.match(/verifier=([^&]+)(?:&|$)/)
+        const ver = match && match[1]
+        if (ver) {
+          url += `${opts.submission_id ? '&' : '?'}verifier=${ver}`
+        }
+      }
+      showLoadingImage($container, 'centered')
+      // eslint-disable-next-line promise/catch-or-return
+      fetch(url)
+        .then(response => {
+          if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`)
+          return response
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.public_url) {
+            opts = {...opts, ...data}
+            loadSelfHostPreview()
+          }
+        })
+        .catch(ex => {
+          // eslint-disable-next-line no-console
+          console.error(ex)
+        })
+        .finally(() => {
+          removeLoadingImage($container)
+        })
+    }
+  } else if (
     (!opts.disableGooglePreviews &&
       (!opts.mimetype || isPreviewable(opts.mimetype)) &&
       opts.attachment_id) ||

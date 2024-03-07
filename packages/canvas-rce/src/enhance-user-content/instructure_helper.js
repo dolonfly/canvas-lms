@@ -59,7 +59,7 @@ export function isExternalLink(element, canvasOrigin = window.location.origin) {
 export function showFilePreview(event, opts = {}) {
   event.stopPropagation()
 
-  const {canvasOrigin, disableGooglePreviews} = {...opts}
+  const {canvasOrigin, disableGooglePreviews, disableSelfHostPreviews} = {...opts}
   let target = null
   if (event.target?.href) {
     target = event.target
@@ -78,7 +78,7 @@ export function showFilePreview(event, opts = {}) {
   ) {
     showFilePreviewInOverlay(event, canvasOrigin)
   } else {
-    showFilePreviewInline(event, canvasOrigin, disableGooglePreviews)
+    showFilePreviewInline(event, canvasOrigin, disableGooglePreviews, disableSelfHostPreviews)
   }
 }
 
@@ -107,7 +107,7 @@ export function showFilePreviewInOverlay(event, canvasOrigin) {
   }
 }
 
-export function showFilePreviewInline(event, canvasOrigin, disableGooglePreviews) {
+export function showFilePreviewInline(event, canvasOrigin, disableGooglePreviews, disableSelfHostPreviews) {
   if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
     // if any modifier keys are pressed, do the browser default thing
     return
@@ -146,7 +146,7 @@ export function showFilePreviewInline(event, canvasOrigin, disableGooglePreviews
 
       if (
         attachment &&
-        ((!disableGooglePreviews && isPreviewable(attachment.content_type)) || canvadoc_session_url)
+        (((!disableGooglePreviews || !disableSelfHostPreviews )&& isPreviewable(attachment.content_type)) || canvadoc_session_url)
       ) {
         $link.setAttribute('aria-expanded', 'true')
 
@@ -164,6 +164,7 @@ export function showFilePreviewInline(event, canvasOrigin, disableGooglePreviews
             attachment.workflow_state === 'pending_upload' ||
             attachment.workflow_state === 'processing',
           disableGooglePreviews,
+          disableSelfHostPreviews,
         })
         const $minimizeLink = document.createElement('a')
         $minimizeLink.setAttribute('href', '#')

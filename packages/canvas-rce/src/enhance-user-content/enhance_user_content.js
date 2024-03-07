@@ -128,6 +128,7 @@ export function enhanceUserContent(container = document, opts = {}) {
     canvasOrigin,
     kalturaSettings,
     disableGooglePreviews,
+    disableSelfHostPreviews,
     canvasLinksTarget,
 
     /**
@@ -148,7 +149,7 @@ export function enhanceUserContent(container = document, opts = {}) {
     document.getElementById('content') ||
     document
 
-  const showFilePreviewEx = event => showFilePreview(event, {canvasOrigin, disableGooglePreviews})
+  const showFilePreviewEx = event => showFilePreview(event, {canvasOrigin, disableGooglePreviews,disableSelfHostPreviews})
 
   content.querySelectorAll('.user_content:not(.enhanced)').forEach(elem => {
     elem.classList.add('unenhanced')

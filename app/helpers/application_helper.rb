@@ -505,6 +505,7 @@ module ApplicationHelper
     {
       equellaEnabled: !!equella_enabled?,
       disableGooglePreviews: !service_enabled?(:google_docs_previews),
+      disableSelfHostPreviews: !service_enabled?(:self_host_docs_previews),
       logPageViews: !@body_class_no_headers,
       editorButtons: editor_buttons,
       pandaPubSettings: CanvasPandaPub::Client.config.try(:slice, "push_url", "application_id")

@@ -2882,6 +2882,15 @@ EG = {
           iframe_min_height: 0,
         })
       )
+    } else if (!INST?.disableSelfHostPreviews && isPreviewable(attachment.content_type)) {
+        $no_annotation_warning.show()
+
+        const currentStudentIDAsOfAjaxCall = this.currentStudent[anonymizableId]
+        previewOptions = $.extend(previewOptions, {
+            ajax_valid: () => currentStudentIDAsOfAjaxCall === this.currentStudent[anonymizableId],
+        })
+        $iframe_holder.show()
+        loadDocPreview($iframe_holder[0], previewOptions)
     } else if (!INST?.disableGooglePreviews && isPreviewable(attachment.content_type)) {
       $no_annotation_warning.show()
 
