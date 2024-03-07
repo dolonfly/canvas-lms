@@ -125,6 +125,10 @@ export function loadDocPreview($container, options) {
     ...options,
   }
 
+  console.log('----loadDocPreview---->')
+  console.log(opts)
+  console.log(options)
+
   if (!$container) return // an issue in specs
 
   if (!($container instanceof HTMLElement)) {
