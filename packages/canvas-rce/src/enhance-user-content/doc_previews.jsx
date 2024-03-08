@@ -196,7 +196,6 @@ export function loadDocPreview($container, options) {
             opts.ready()
           }
         })
-        Buffer.from(opts.public_url).toString('base64')
         iframe.setAttribute('src', selfHostDocPreviewUrl)
         iframe.setAttribute('height', opts.height)
         iframe.setAttribute('width', '100%')
