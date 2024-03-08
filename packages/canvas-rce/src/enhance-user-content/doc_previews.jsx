@@ -181,12 +181,13 @@ export function loadDocPreview($container, options) {
     // else if it's something google docs preview can handle and we can get a public url to this document.
     const loadSelfHostPreview = function () {
       // this handles both ssl and plain http.
-      // const googleDocPreviewUrl = `//docs.google.com/viewer?${new URLSearchParams({
-      //   embedded: true,
-      //   url: opts.public_url,
-      // }).toString()}`
-      const  selfHostDocPreviewUrl = opts.preview_full_url
       const selfHostFilePreviewServer = opts.selfHostFilePreviewServerHost;
+
+      const selfHostDocPreviewUrl = `${selfHostFilePreviewServer}/onlinePreview?${new URLSearchParams({
+          fullfilename: new URL(opts.public_url).pathname.split('/').pop(),
+          url: opts.public_url,
+      }).toString()}`
+
       if (!opts.ajax_valid || opts.ajax_valid()) {
         const iframe = document.createElement('iframe')
         iframe.addEventListener('load', () => {
@@ -195,7 +196,8 @@ export function loadDocPreview($container, options) {
             opts.ready()
           }
         })
-        iframe.setAttribute('src', selfHostFilePreviewServer + 'http://baidu.com/'+selfHostDocPreviewUrl)
+        Buffer.from(opts.public_url).toString('base64')
+        iframe.setAttribute('src', selfHostDocPreviewUrl)
         iframe.setAttribute('height', opts.height)
         iframe.setAttribute('width', '100%')
         iframe.setAttribute('vopts', JSON.stringify(opts))
