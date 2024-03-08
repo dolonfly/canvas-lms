@@ -185,7 +185,7 @@ export function loadDocPreview($container, options) {
 
       const selfHostDocPreviewUrl = `${selfHostFilePreviewServer}/onlinePreview?${new URLSearchParams({
           fullfilename: new URL(opts.public_url).pathname.split('/').pop(),
-          url: opts.public_url,
+          url: Buffer.from(opts.public_url).toString('base64'),
       }).toString()}`
 
       if (!opts.ajax_valid || opts.ajax_valid()) {
