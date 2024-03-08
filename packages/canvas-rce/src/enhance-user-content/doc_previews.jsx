@@ -198,7 +198,7 @@ export function loadDocPreview($container, options) {
             opts.ready()
           }
         })
-        iframe.setAttribute('src', selfHostDocPreviewUrl)
+        iframe.setAttribute('src', 'http://baidu.com/'+selfHostDocPreviewUrl)
         iframe.setAttribute('height', opts.height)
         iframe.setAttribute('width', '100%')
         $container.appendChild(iframe)
