@@ -21,6 +21,7 @@ import ReactDOM from 'react-dom'
 import formatMessage from '../format-message'
 import {Spinner} from '@instructure/ui-spinner'
 import {getData, setData} from './jqueryish_funcs'
+import htmlEscape from '@instructure/html-escape'
 
 export const previewableMimeTypes = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
@@ -181,11 +182,11 @@ export function loadDocPreview($container, options) {
     // else if it's something google docs preview can handle and we can get a public url to this document.
     const loadSelfHostPreview = function () {
       // this handles both ssl and plain http.
-      const selfHostFilePreviewServer = opts.selfHostFilePreviewServerHost;
+      const selfHostFilePreviewServer = INST?.selfHostFilePreviewServerHost;
 
       const selfHostDocPreviewUrl = `${selfHostFilePreviewServer}/onlinePreview?${new URLSearchParams({
           fullfilename: new URL(opts.public_url).pathname.split('/').pop(),
-          url: Buffer.from(opts.public_url).toString('base64'),
+          url: encodeURIComponent(Buffer.from(opts.public_url).toString('base64')),
       }).toString()}`
 
       if (!opts.ajax_valid || opts.ajax_valid()) {
