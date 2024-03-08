@@ -2891,6 +2891,7 @@ EG = {
         const currentStudentIDAsOfAjaxCall = this.currentStudent[anonymizableId]
         previewOptions = $.extend(previewOptions, {
             ajax_valid: () => currentStudentIDAsOfAjaxCall === this.currentStudent[anonymizableId],
+            selfHostFilePreviewServerHost: INST?.selfHostFilePreviewServerHost,
         })
         $iframe_holder.show()
         loadDocPreview($iframe_holder[0], previewOptions)
