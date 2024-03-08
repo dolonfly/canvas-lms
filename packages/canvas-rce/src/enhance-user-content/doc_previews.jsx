@@ -189,6 +189,9 @@ export function loadDocPreview($container, options) {
           url: encodeURIComponent(Buffer.from(opts.public_url).toString('base64')),
       }).toString()}`
 
+      console.log(selfHostDocPreviewUrl)
+      console.log(opts.public_url)
+
       if (!opts.ajax_valid || opts.ajax_valid()) {
         const iframe = document.createElement('iframe')
         iframe.addEventListener('load', () => {
@@ -201,6 +204,7 @@ export function loadDocPreview($container, options) {
         iframe.setAttribute('height', opts.height)
         iframe.setAttribute('width', '100%')
         iframe.setAttribute('vopts', JSON.stringify(opts))
+        iframe.setAttribute('vopts2', opts.public_url)
         $container.appendChild(iframe)
       }
     }
