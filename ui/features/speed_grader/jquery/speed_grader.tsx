@@ -2887,7 +2887,6 @@ EG = {
       )
     } else if (!INST?.disableSelfHostPreviews && isPreviewable(attachment.content_type)) {
         $no_annotation_warning.show()
-        console.log('======!INST?.disableSelfHostPreviews && isPreviewable(attachment.content_type)===>')
 
         const currentStudentIDAsOfAjaxCall = this.currentStudent[anonymizableId]
         previewOptions = $.extend(previewOptions, {

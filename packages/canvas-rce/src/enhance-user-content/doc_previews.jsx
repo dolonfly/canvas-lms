@@ -125,10 +125,6 @@ export function loadDocPreview($container, options) {
     ...options,
   }
 
-  console.log('----loadDocPreview---->')
-  console.log(opts)
-  console.log(options)
-
   if (!$container) return // an issue in specs
 
   if (!($container instanceof HTMLElement)) {
@@ -190,6 +186,7 @@ export function loadDocPreview($container, options) {
       //   url: opts.public_url,
       // }).toString()}`
       const  selfHostDocPreviewUrl = opts.preview_full_url
+      const selfHostFilePreviewServer = opts.selfHostFilePreviewServerHost;
       if (!opts.ajax_valid || opts.ajax_valid()) {
         const iframe = document.createElement('iframe')
         iframe.addEventListener('load', () => {
@@ -198,7 +195,7 @@ export function loadDocPreview($container, options) {
             opts.ready()
           }
         })
-        iframe.setAttribute('src', 'http://baidu.com/'+selfHostDocPreviewUrl)
+        iframe.setAttribute('src', selfHostFilePreviewServer + 'http://baidu.com/'+selfHostDocPreviewUrl)
         iframe.setAttribute('height', opts.height)
         iframe.setAttribute('width', '100%')
         iframe.setAttribute('vopts', JSON.stringify(opts))

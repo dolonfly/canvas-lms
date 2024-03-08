@@ -506,6 +506,7 @@ module ApplicationHelper
       equellaEnabled: !!equella_enabled?,
       disableGooglePreviews: !service_enabled?(:google_docs_previews),
       disableSelfHostPreviews: !service_enabled?(:self_host_docs_previews),
+      selfHostFilePreviewServerHost: Rails.application.config_for(:self_host_file_preview_server)[:host],
       logPageViews: !@body_class_no_headers,
       editorButtons: editor_buttons,
       pandaPubSettings: CanvasPandaPub::Client.config.try(:slice, "push_url", "application_id")
