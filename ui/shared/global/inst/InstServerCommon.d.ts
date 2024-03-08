@@ -28,6 +28,7 @@ export type InstServerCommonBasic = {
   equellaEnabled?: boolean
   disableGooglePreviews?: boolean
   disableSelfHostPreviews?: boolean
+  selfHostFilePreviewServerHost?: string
   logPageViews?: boolean
   editorButtons?: EditorToolInfo[]
   pandaPubSettings?: Partial<{

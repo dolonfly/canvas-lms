@@ -333,6 +333,7 @@ function enhanceUserContentWhenAsked() {
         kalturaSettings: INST.kalturaSettings,
         disableGooglePreviews: !!INST.disableGooglePreviews,
         disableSelfHostPreviews: !!INST.disableSelfHostPreviews,
+        selfHostFilePreviewServerHost: !!INST.selfHostFilePreviewServerHost,
         new_math_equation_handling: !!ENV?.FEATURES?.new_math_equation_handling,
         explicit_latex_typesetting: !!ENV?.FEATURES?.explicit_latex_typesetting,
         locale: ENV?.LOCALE ?? 'en',
