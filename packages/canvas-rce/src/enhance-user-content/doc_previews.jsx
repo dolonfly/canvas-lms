@@ -184,10 +184,13 @@ export function loadDocPreview($container, options) {
       // this handles both ssl and plain http.
       const selfHostFilePreviewServer = INST?.selfHostFilePreviewServerHost;
 
-      const selfHostDocPreviewUrl = `${selfHostFilePreviewServer}/onlinePreview?${new URLSearchParams({
-          fullfilename: new URL(opts.public_url).pathname.split('/').pop(),
-          url: encodeURIComponent(Buffer.from(opts.public_url).toString('base64')),
-      }).toString()}`
+      // const selfHostDocPreviewUrl = `${selfHostFilePreviewServer}/onlinePreview?${new URLSearchParams({
+      //     fullfilename: new URL(opts.public_url).pathname.split('/').pop(),
+      //     url: encodeURIComponent(Buffer.from(opts.public_url).toString('base64')),
+      // }).toString()}`
+
+      const selfHostDocPreviewUrl = `${selfHostFilePreviewServer}/onlinePreview?fullfilename=${new URL(opts.public_url).pathname.split('/').pop()}&url=${encodeURIComponent(Buffer.from(opts.public_url).toString('base64'))}`
+
 
       console.log(selfHostDocPreviewUrl)
       console.log(opts.public_url)
