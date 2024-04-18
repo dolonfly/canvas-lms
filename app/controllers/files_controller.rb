@@ -348,7 +348,7 @@ class FilesController < ApplicationController
                        else
                          Attachment.display_name_order_by_clause("attachments")
                        end
-        order_clause += " DESC" if params[:order] == "desc"
+        order_clause = "#{order_clause} DESC" if params[:order] == "desc"
         scope = scope.order(Arel.sql(order_clause)).order(id: (params[:order] == "desc") ? :desc : :asc)
 
         if params[:content_types].present?
@@ -954,12 +954,23 @@ class FilesController < ApplicationController
     @asset = Context.find_asset_by_asset_string(params[:attachment][:asset_string], @context) if params[:attachment][:asset_string]
     intent = params[:attachment][:intent]
 
+    # Discussions Redesign is now using this endpoint and this is how we make it work for them.
+    # We need to find the asset if it's a discussion topic and the asset_string is provided.
+    # This only applies when the intent is "submit" and the asset.submission_types is a "discussion_topic".
+    if params[:attachment][:asset_string] && @asset.nil? && intent == "submit"
+      asset = Context.find_asset_by_asset_string(params[:attachment][:asset_string])
+
+      if asset.is_a?(Assignment) && asset.submission_types == "discussion_topic"
+        @asset = asset
+      end
+    end
+
     # correct context for assignment-related attachments
     if @asset.is_a?(Assignment) && intent == "comment"
       # attachments that are comments on an assignment "belong" to the
       # assignment, even if another context was nominally provided
       @context = @asset
-    elsif @asset.is_a?(Assignment) && intent == "submit"
+    elsif @asset.is_a?(Assignment) && intent == "submit" && @asset.submission_types != "discussion_topic"
       # assignment submissions belong to either the group (if it's a group
       # assignment) or the user, even if another context was nominally provided
       group = @asset.group_category.group_for(@current_user) if @asset.has_group_category?
@@ -1106,7 +1117,9 @@ class FilesController < ApplicationController
 
     # apply duplicate handling
     if overwritten_instfs_uuid
-      InstFS.delay_if_production.delete_file(overwritten_instfs_uuid)
+      # FIXME: this instfs uuid may be in use by other files;
+      # add a check and reinstate when we know it's safe
+      # InstFS.delay_if_production.delete_file(overwritten_instfs_uuid)
     else
       @attachment.handle_duplicates(params[:on_duplicate])
     end

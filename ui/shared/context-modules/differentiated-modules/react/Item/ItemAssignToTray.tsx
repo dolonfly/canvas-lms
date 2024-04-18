@@ -16,7 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, {useCallback, useEffect, useMemo, useState} from 'react'
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {Button, CloseButton} from '@instructure/ui-buttons'
 import {ApplyLocale} from '@instructure/ui-i18n'
 import {Flex} from '@instructure/ui-flex'
@@ -34,11 +34,14 @@ import {
   IconQuestionLine,
 } from '@instructure/ui-icons'
 import {showFlashAlert, showFlashError} from '@canvas/alerts/react/FlashAlert'
+import getLiveRegion from '@canvas/instui-bindings/react/liveRegion'
+import {lockLabels} from '@canvas/blueprint-courses/react/labels'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import doFetchApi from '@canvas/do-fetch-api-effect'
 import type {
   BaseDateDetails,
   DateDetails,
+  DateLockTypes,
   exportedOverride,
   FetchDueDatesResponse,
   ItemAssignToCardSpec,
@@ -48,6 +51,8 @@ import TrayFooter from '../Footer'
 import type {AssigneeOption} from '../AssigneeSelector'
 import useFetchAssignees from '../../utils/hooks/useFetchAssignees'
 import {generateDateDetailsPayload, getOverriddenAssignees} from '../../utils/assignToHelper'
+import {Text} from '@instructure/ui-text'
+import {Alert} from '@instructure/ui-alerts'
 
 const I18n = useI18nScope('differentiated_modules')
 
@@ -139,6 +144,7 @@ export interface ItemAssignToTrayProps {
   defaultCards?: ItemAssignToCardSpec[]
   defaultDisabledOptionIds?: string[]
   defaultSectionId?: string
+  useApplyButton?: boolean
   onAddCard?: () => void
   onAssigneesChange?: (
     cardId: string,
@@ -169,10 +175,18 @@ export default function ItemAssignToTray({
   onDatesChange,
   onCardRemove,
   defaultSectionId,
+  useApplyButton = false,
 }: ItemAssignToTrayProps) {
   const [assignToCards, setAssignToCards] = useState<ItemAssignToCardSpec[]>(defaultCards ?? [])
+  const [initialCards, setInitialCards] = useState<ItemAssignToCardSpec[]>([])
   const [fetchInFlight, setFetchInFlight] = useState(false)
   const [disabledOptionIds, setDisabledOptionIds] = useState<string[]>(defaultDisabledOptionIds)
+  const [shouldFocusCard, setShouldFocusCard] = useState<boolean>(false)
+  const [blueprintDateLocks, setBlueprintDateLocks] = useState<DateLockTypes[] | undefined>(
+    undefined
+  )
+  const [shouldFocusDeleteButton, setShouldFocusDeleteButton] = useState<boolean>(false)
+  const addCardButtonRef = useRef<Element | null>(null)
   const everyoneOption = useMemo(() => {
     const hasOverrides =
       (disabledOptionIds.length === 1 && !disabledOptionIds.includes('everyone')) ||
@@ -191,9 +205,14 @@ export default function ItemAssignToTray({
   const {allOptions, isLoading, setSearchTerm} = useFetchAssignees({
     courseId,
     everyoneOption,
+    checkMasteryPaths: true,
     defaultValues: [],
     onError: handleDismiss,
   })
+
+  useEffect(() => {
+    if (shouldFocusCard) setShouldFocusCard(false)
+  }, [shouldFocusCard])
 
   useEffect(() => {
     if (defaultCards !== undefined) {
@@ -222,7 +241,7 @@ export default function ItemAssignToTray({
         const overriddenTargets = getOverriddenAssignees(overrides)
         delete dateDetailsApiResponse.overrides
         const baseDates: BaseDateDetails = dateDetailsApiResponse
-        const onlyOverrides = dateDetailsApiResponse.only_visible_to_overrides
+        const onlyOverrides = !dateDetailsApiResponse.visible_to_everyone
 
         const cards: ItemAssignToCardSpec[] = []
         const selectedOptionIds: string[] = []
@@ -254,6 +273,9 @@ export default function ItemAssignToTray({
             const studentOverrides =
               filteredStudents?.map(studentId => `student-${studentId}`) ?? []
             const defaultOptions = studentOverrides
+            if (override.noop_id) {
+              defaultOptions.push('mastery_paths')
+            }
             if (override.course_section_id) {
               defaultOptions.push(`section-${override.course_section_id}`)
             }
@@ -282,7 +304,9 @@ export default function ItemAssignToTray({
             selectedOptionIds.push(...defaultOptions)
           })
         }
+        setBlueprintDateLocks(dateDetailsApiResponse.blueprint_date_locks)
         setDisabledOptionIds(selectedOptionIds)
+        setInitialCards(cards)
         setAssignToCards(cards)
       })
       .catch(() => {
@@ -296,6 +320,7 @@ export default function ItemAssignToTray({
   }, [courseId, itemContentId, itemType, JSON.stringify(defaultCards)])
 
   const handleAddCard = () => {
+    setShouldFocusDeleteButton(true)
     if (onAddCard) {
       onAddCard()
       return
@@ -319,6 +344,13 @@ export default function ItemAssignToTray({
   }
 
   const handleUpdate = useCallback(() => {
+    const hasErrors = assignToCards.some(card => !card.isValid)
+    // If a card has errors it should not save and the respective card should be focused
+    if (hasErrors) {
+      setShouldFocusCard(true)
+      return
+    }
+
     if (onSave !== undefined) {
       onSave(assignToCards)
       return
@@ -348,6 +380,10 @@ export default function ItemAssignToTray({
       setAssignToCards(cards)
       setDisabledOptionIds(newDisabled)
       onCardRemove?.(cardId)
+      if (addCardButtonRef?.current instanceof HTMLButtonElement) {
+        addCardButtonRef.current.disabled = false // so it can be focused
+        addCardButtonRef.current.focus()
+      }
     },
     [assignToCards, disabledOptionIds, onCardRemove]
   )
@@ -366,9 +402,17 @@ export default function ItemAssignToTray({
     deletedAssignees: string[]
   ) => {
     const selectedAssigneeIds = assignees.map(({id}) => id)
+    const initialCard = initialCards.find(card => card.key === cardId)
+    const areEquals =
+      JSON.stringify(initialCard?.selectedAssigneeIds) === JSON.stringify(selectedAssigneeIds)
     const cards = assignToCards.map(card =>
       card.key === cardId
-        ? {...card, selectedAssigneeIds, hasAssignees: assignees.length > 0}
+        ? {
+            ...card,
+            selectedAssigneeIds,
+            highlightCard: !areEquals,
+            hasAssignees: assignees.length > 0,
+          }
         : card
     )
     if (onAssigneesChange) {
@@ -402,18 +446,22 @@ export default function ItemAssignToTray({
             id: isEveryoneOption ? defaultSectionId : idData[1],
             name: newSelectedOption.value,
           } as exportedOverride)
+
     if (newSelectedOption?.id === everyoneOption.id) {
       parsedCard.course_section_id = defaultSectionId
     } else if (parsedCard.id && idData[0] === 'section') {
       parsedCard.course_section_id = idData[1]
     } else if (parsedCard.id && idData[0] === 'student') {
       parsedCard.short_name = newSelectedOption.value
+    } else if (idData && idData[0] === 'mastery_paths') {
+      parsedCard.noop_id = '1'
     }
 
     const parsedDeletedCard = deletedAssignees.map(id => {
       const card = allOptions.find(a => a.id === id)
       const data = card?.id?.split('-')
       const deleted = {name: card?.value, type: data?.[0]} as exportedOverride
+
       if (id === everyoneOption.id) {
         deleted.course_section_id = defaultSectionId
       } else if (data?.[0] === 'section') {
@@ -421,6 +469,8 @@ export default function ItemAssignToTray({
       } else if (data?.[0] === 'student') {
         deleted.short_name = card?.value
         deleted.student_id = data[1]
+      } else if (data?.[0] === 'mastery_paths') {
+        deleted.noop_id = '1'
       }
       return deleted
     })
@@ -429,13 +479,20 @@ export default function ItemAssignToTray({
 
   const handleDatesChange = useCallback(
     (cardId: string, dateAttribute: string, dateValue: string | null) => {
-      const cards = assignToCards.map(card =>
-        card.key === cardId ? {...card, [dateAttribute]: dateValue, isEdited: true} : card
-      )
+      const newDate = dateValue === null ? undefined : dateValue
+      const initialCard = initialCards.find(card => card.key === cardId)
+      const {highlightCard, isEdited, ...currentCardProps} = assignToCards.find(
+        card => card.key === cardId
+      ) as ItemAssignToCardSpec
+      const currentCard = {...currentCardProps, [dateAttribute]: newDate}
+      const areEquals = JSON.stringify(initialCard) === JSON.stringify(currentCard)
+
+      const newCard = {...currentCard, highlightCard: !areEquals, isEdited: true}
+      const cards = assignToCards.map(card => (card.key === cardId ? newCard : card))
       setAssignToCards(cards)
-      onDatesChange?.(cardId, dateAttribute, dateValue ?? '')
+      onDatesChange?.(cardId, dateAttribute, newDate ?? '')
     },
-    [assignToCards, onDatesChange]
+    [assignToCards, initialCards, onDatesChange]
   )
 
   const allCardsValid = useCallback(() => {
@@ -452,9 +509,9 @@ export default function ItemAssignToTray({
   function Header() {
     const icon = itemTypeToIcon(iconType)
     return (
-      <Flex.Item margin="medium 0" padding="0 medium" width="100%">
+      <Flex.Item margin="medium 0 small" padding="0 medium" width="100%">
         <CloseButton
-          onClick={handleDismiss}
+          onClick={onClose}
           screenReaderLabel={I18n.t('Close')}
           placement="end"
           offset="small"
@@ -465,6 +522,14 @@ export default function ItemAssignToTray({
         <View data-testid="item-type-text" as="div" margin="medium 0 0 0">
           {renderItemType()} {pointsPossible != null && `| ${renderPointsPossible()}`}
         </View>
+        {blueprintDateLocks?.length > 0 ? (
+          <Alert liveRegion={getLiveRegion} variant="info" margin="small 0 0">
+            <Text weight="bold" size="small">
+              {I18n.t('Locked: ')}
+            </Text>
+            <Text size="small">{blueprintDateLocks.map(i => lockLabels[i]).join(' & ')}</Text>
+          </Alert>
+        ) : null}
       </Flex.Item>
     )
   }
@@ -484,7 +549,8 @@ export default function ItemAssignToTray({
 
   function renderCards(isOpen?: boolean) {
     const cardCount = assignToCards.length
-    return assignToCards.map(card => {
+    const firstCardWithError = assignToCards.find(card => !card.isValid)
+    return assignToCards.map((card, i) => {
       return (
         <View key={card.key} as="div" margin="small 0 0 0">
           <ItemAssignToCard
@@ -506,6 +572,10 @@ export default function ItemAssignToTray({
             customAllOptions={allOptions}
             customIsLoading={isLoading}
             customSetSearchTerm={setSearchTerm}
+            highlightCard={card.highlightCard}
+            focus={shouldFocusCard && firstCardWithError?.key === card.key}
+            blueprintDateLocks={blueprintDateLocks}
+            shouldFocusDeleteButton={shouldFocusDeleteButton && i === assignToCards.length - 1}
           />
         </View>
       )
@@ -529,7 +599,8 @@ export default function ItemAssignToTray({
           data-testid="add-card"
           margin="small 0 0 0"
           renderIcon={IconAddLine}
-          disabled={!allCardsAssigned()}
+          interaction={!allCardsAssigned() || !!blueprintDateLocks?.length ? 'disabled' : 'enabled'}
+          elementRef={el => (addCardButtonRef.current = el)}
         >
           {I18n.t('Add')}
         </Button>
@@ -539,12 +610,12 @@ export default function ItemAssignToTray({
 
   function Footer() {
     return (
-      <Flex.Item width="100%">
+      <Flex.Item data-testid="module-item-edit-tray-footer" width="100%">
         <TrayFooter
-          updateInteraction={allCardsValid() ? 'enabled' : 'inerror'}
-          saveButtonLabel={I18n.t('Save')}
+          saveButtonLabel={useApplyButton ? I18n.t('Apply') : I18n.t('Save')}
           onDismiss={handleDismiss}
           onUpdate={handleUpdate}
+          hasErrors={!allCardsValid()}
         />
       </Flex.Item>
     )

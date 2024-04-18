@@ -214,6 +214,14 @@ describe "discussions" do
           confirm(:on)
         end
 
+        it "preserves query parameters in the URL when you CANCEL", :ignore_js_errors do
+          get "/courses/#{course.id}/discussion_topics/#{topic.id}/edit?embed=true"
+          force_click("button:contains('Cancel')")
+          wait_for_ajaximations
+          expect(driver.current_url).not_to include("edit")
+          expect(driver.current_url).to include("?embed=true")
+        end
+
         it "shows correct date when saving" do
           Timecop.freeze do
             topic.lock_at = 5.days.ago
@@ -231,7 +239,7 @@ describe "discussions" do
           get url
 
           expect(is_checked("input[type=checkbox][name=threaded]")).not_to be_truthy
-          force_click("input#threaded")
+          force_click_native("input#threaded")
           expect(is_checked("input[type=checkbox][name=threaded]")).to be_truthy
         end
 
@@ -518,15 +526,15 @@ describe "discussions" do
           # we cannot change anonymity on edit, so we just verify its disabled
           expect(ffj("fieldset:contains('Anonymous Discussion') input[disabled]").count).to eq 3
 
-          force_click("input[value='must-respond-before-viewing-replies']")
+          force_click_native("input[value='must-respond-before-viewing-replies']")
 
-          force_click("input[value='enable-podcast-feed']")
+          force_click_native("input[value='enable-podcast-feed']")
           expect(f("body")).not_to contain_jqcss("input[value='include-student-replies-in-podcast-feed']")
 
-          force_click("input[value='allow-liking']")
+          force_click_native("input[value='allow-liking']")
           expect(f("body")).not_to contain_jqcss("input[value='only-graders-can-like']")
 
-          force_click("input[value='add-to-student-to-do']")
+          force_click_native("input[value='add-to-student-to-do']")
 
           fj("button:contains('Save')").click
 
@@ -540,6 +548,15 @@ describe "discussions" do
           expect(@topic_all_options.allow_rating).to be_falsey
           expect(@topic_all_options.only_graders_can_rate).to be_falsey
           expect(@topic_all_options.todo_date).to be_nil
+        end
+
+        # ignore js errors in unrelated discussion show page
+        it "preserves URL query parameters on CANCEL", :ignore_js_errors do
+          get "/courses/#{course.id}/discussion_topics/#{@topic_all_options.id}/edit?embed=true"
+          fj("button:contains('Cancel')").click
+          wait_for_ajaximations
+          expect(driver.current_url).not_to include("edit")
+          expect(driver.current_url).to include("?embed=true")
         end
       end
 
@@ -682,7 +699,7 @@ describe "discussions" do
         it "allows editing the assignment group for the graded discussion" do
           assign_group_2 = course.assignment_groups.create!(name: "Group 2")
           get "/courses/#{course.id}/discussion_topics/#{assignment_topic.id}/edit"
-          force_click("input[title='assignment group']")
+          force_click_native("input[title='assignment group']")
           wait_for(method: nil, timeout: 3) { fj("li:contains('Group 2')").present? }
           fj("li:contains('Group 2')").click
           fj("button:contains('Save')").click
@@ -699,13 +716,13 @@ describe "discussions" do
           pp_string.each_char { f("input[data-testid='points-possible-input']").send_keys(:backspace) }
           f("input[data-testid='points-possible-input']").send_keys(pp_string)
 
-          force_click("input[value='Points']")
+          force_click_native("input[value='Points']")
           fj("li:contains('Letter Grade')").click
 
-          force_click("input[data-testid='peer_review_manual']")
+          force_click_native("input[data-testid='peer_review_manual']")
 
-          force_click("input[data-testid='group-discussion-checkbox']")
-          force_click("input[placeholder='Select a group category']")
+          force_click_native("input[data-testid='group-discussion-checkbox']")
+          force_click_native("input[placeholder='Select a group category']")
           fj("li:contains('#{group_cat.name}')").click
 
           fj("button:contains('Save')").click

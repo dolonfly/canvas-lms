@@ -159,7 +159,7 @@ $(document).ready(function () {
         )
       )
       if (!result) {
-        $('#account_settings_suppress_notifications').attr('checked', false)
+        $('#account_settings_suppress_notifications').prop('checked', false)
       }
     }
   })
@@ -172,11 +172,12 @@ $(document).ready(function () {
 
   $('#account_settings_tabs').on('tabsactivate', (event, ui) => {
     try {
-      const hash = new URL(ui.newTab.context.href).hash
+      const $tabLink = ui.newTab.children('a:first-child')
+      const hash = new URL($tabLink.prop('href')).hash
       if (window.location.hash !== hash) {
         window.history.pushState(null, null, hash)
       }
-      ui.newTab.focus(0)
+      $tabLink.focus()
     } catch (_ignore) {
       // get here if `new URL` throws, but it shouldn't, and
       // there's really nothing we need to do about it
@@ -188,7 +189,7 @@ $(document).ready(function () {
       const tabId =
         event.type === 'tabscreate'
           ? window.location.hash.replace('#', '') + '-link'
-          : ui.newTab.context.id
+          : $(ui.newTab.get(0)).children('a').get(0).id
 
       if (tabId === 'tab-reports-link' && !reportsTabHasLoaded) {
         reportsTabHasLoaded = true
@@ -311,10 +312,10 @@ $(document).ready(function () {
   $('#account_settings_restrict_quantitative_data_value').click(event => {
     const lockbox = $('#account_settings_restrict_quantitative_data_locked')
     if (event.target.checked) {
-      lockbox.attr('disabled', false)
+      lockbox.prop('disabled', false)
     } else {
-      lockbox.attr('checked', false)
-      lockbox.attr('disabled', true)
+      lockbox.prop('checked', false)
+      lockbox.prop('disabled', true)
     }
   })
   $('.add_ip_filter_link').click(event => {
@@ -427,7 +428,7 @@ $(document).ready(function () {
     .change(function () {
       const attr_id = $(this).attr('id')
       const $myFieldset = $('#' + attr_id + '_settings')
-      const iAmChecked = $(this).attr('checked')
+      const iAmChecked = $(this).prop('checked')
       $myFieldset.showIf(iAmChecked)
     })
     .change()
@@ -520,10 +521,10 @@ $(document).ready(function () {
   $('.notification_from_name_option').on('change', () => {
     const $useCustom = $('#account_settings_outgoing_email_default_name_option_custom')
     const $customName = $('#account_settings_outgoing_email_default_name')
-    if ($useCustom.attr('checked')) {
+    if ($useCustom.prop('checked')) {
       $customName.removeAttr('disabled')
     } else {
-      $customName.attr('disabled', 'disabled')
+      $customName.prop('disabled', true)
     }
   })
   $('#account_settings_outgoing_email_default_name').on('keyup', () => {

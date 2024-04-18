@@ -17,6 +17,7 @@
  */
 
 import $ from 'jquery'
+import 'jquery-migrate'
 import '@canvas/util/jquery/fixDialogButtons'
 import '@canvas/jquery/jquery.disableWhileLoading'
 import '@canvas/jquery/jquery.simulate'
@@ -48,7 +49,10 @@ test('handles buttons', function () {
 </form>
 `)
     .appendTo('#fixtures')
-    .dialog()
+    .dialog({
+      modal: true,
+      zIndex: 1000,
+    })
     .fixDialogButtons()
   ok($dialog.is(':ui-dialog:visible'), 'pops up dialog')
   equal($dialog.dialog('option', 'buttons').length, 2, 'converts both buttons in .button-pane only')
@@ -76,6 +80,8 @@ test('handles buttons', function () {
   this.clock.tick(14)
   equal($submitButton.text(), 'while loading', 'copies over text-while-loading on buttons')
   deferred.resolve()
+  // wait for the resolve to do its thing
+  this.clock.tick(14)
   equal($submitButton.text(), originalButtonText, 'restores text-while-loading')
   msg = 'make sure clicking on the .dialog_closer causes dialog to close'
   const $closer = $dialog

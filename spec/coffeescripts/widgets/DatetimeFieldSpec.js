@@ -23,6 +23,7 @@ import DatetimeField, {
 } from '@canvas/datetime/jquery/DatetimeField'
 import '@canvas/datetime/jquery'
 import $ from 'jquery'
+import 'jquery-migrate'
 import * as tz from '@canvas/datetime'
 import tzInTest from '@canvas/datetime/specHelpers'
 import timezone from 'timezone'
@@ -204,7 +205,7 @@ test('should place suggest next to field when not adding datepicker', function (
 
 test('should set the button to disabled when given the option to do so', function () {
   new DatetimeField(this.$field, {disableButton: true})
-  ok(this.$field.next().attr('disabled'))
+  ok(this.$field.next().prop('disabled'))
 })
 
 test('should not add hidden input by default', function () {
@@ -608,7 +609,7 @@ test('returns time only if @showDate false', function () {
 
 test('localizes formatting of dates and times', function () {
   ENV.LOCALE = 'pt-BR'
-  equal(this.field.formatSuggest(), 'dom., 20 de jul. de 1969 21:56')
+  equal(this.field.formatSuggest(), 'dom., 20 de jul. de 1969, 21:56')
 })
 
 QUnit.module('formatSuggestContext', {

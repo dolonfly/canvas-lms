@@ -739,6 +739,7 @@ describe "recurring events" do
     end
 
     it "updates the event calendar correctly" do
+      skip("editing the event calendar works in UI but not in selenium FOO-4336")
       get "/calendar"
 
       wait_for_ajaximations

@@ -217,6 +217,9 @@ class ExternalToolsController < ApplicationController
       [tool, provided_url]
     elsif resource_link.url
       tool = resource_link.current_external_tool context
+      unless tool
+        invalid_settings_error
+      end
       [tool, resource_link.url]
     else
       invalid_settings_error
@@ -583,10 +586,8 @@ class ExternalToolsController < ApplicationController
     message_type = tool.extension_setting(selection_type, "message_type") if selection_type
     log_asset_access(@tool, "external_tools", "external_tools") if post_live_event
 
-    if tool.root_account.feature_enabled?(:lti_unique_tool_form_ids)
-      @tool_form_id = random_lti_tool_form_id
-      js_env(LTI_TOOL_FORM_ID: @tool_form_id)
-    end
+    @tool_form_id = random_lti_tool_form_id
+    js_env(LTI_TOOL_FORM_ID: @tool_form_id)
 
     case message_type
     when "ContentItemSelectionResponse", "ContentItemSelection"
@@ -734,8 +735,7 @@ class ExternalToolsController < ApplicationController
                   expander:,
                   include_storage_target: !in_lti_mobile_webview?,
                   opts: opts.merge(
-                    resource_link: lookup_resource_link(tool),
-                    lti_launch_debug_logger: make_lti_launch_debug_logger(tool)
+                    resource_link: lookup_resource_link(tool)
                   )
                 )
 
@@ -1144,7 +1144,7 @@ class ExternalToolsController < ApplicationController
     else
       external_tool_params = (params[:external_tool] || params).to_unsafe_h
       @tool = @context.context_external_tools.new
-      if request.content_type == "application/x-www-form-urlencoded"
+      if request.media_type == "application/x-www-form-urlencoded"
         custom_fields = Lti::AppUtil.custom_params(request.raw_post)
         external_tool_params[:custom_fields] = custom_fields if custom_fields.present?
       end

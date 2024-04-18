@@ -235,6 +235,21 @@ describe "selective_release module set up" do
       expect(f("#{module_item_selector(assignment_tag.ids[0])} .requirement_type")).to have_class "must_submit_requirement"
     end
 
+    it "switches between requirement count radios with arrow keys" do
+      go_to_modules
+
+      scroll_to_the_top_of_modules_page
+      manage_module_button(@module).click
+      module_index_menu_tool_link("Edit").click
+      click_add_requirement_button
+      click_complete_one_radio
+      expect(is_checked(complete_one_radio_checked)).to be true
+      driver.action.send_keys(:arrow_up).perform
+      expect(is_checked(complete_all_radio_checked)).to be true
+      driver.action.send_keys(:arrow_down).perform
+      expect(is_checked(complete_one_radio_checked)).to be true
+    end
+
     it_behaves_like "selective release module tray requirements", :context_modules
   end
 
@@ -410,7 +425,8 @@ describe "selective_release module set up" do
       go_to_modules
       click_new_module_link
       click_add_tray_add_module_button
-      expect(add_module_tray.text).to include("Module Name is required.")
+      expect(add_module_tray.text).to include("Module name can’t be blank")
+      check_element_has_focus(module_name_input)
     end
 
     it_behaves_like "selective_release add module tray", :context_modules

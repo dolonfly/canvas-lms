@@ -60,6 +60,8 @@ class Rubric < ActiveRecord::Base
   validates :context_id, :context_type, :workflow_state, presence: true
   validates :description, length: { maximum: maximum_text_length, allow_blank: true }
   validates :title, length: { maximum: maximum_string_length, allow_blank: false }
+  validates :button_display, inclusion: { in: %w[numeric emoji letter] }
+  validates :rating_order, inclusion: { in: %w[ascending descending] }
 
   validates_with RubricUniqueAlignments
   validates_with RubricAssessedAlignments
@@ -76,7 +78,7 @@ class Rubric < ActiveRecord::Base
   scope :publicly_reusable, -> { where(reusable: true).order(best_unicode_collation_key("title")) }
   scope :matching, ->(search) { where(wildcard("rubrics.title", search)).order("rubrics.association_count DESC") }
   scope :before, ->(date) { where("rubrics.created_at<?", date) }
-  scope :active, -> { where.not(workflow_state: "deleted") }
+  scope :active, -> { where.not(workflow_state: ["deleted", "draft"]) }
 
   set_policy do
     given { |user, session| context.grants_right?(user, session, :manage_rubrics) }
@@ -115,6 +117,7 @@ class Rubric < ActiveRecord::Base
     state :archived do
       event :unarchive, transitions_to: :active
     end
+    state :draft
     state :deleted
   end
 
@@ -125,6 +128,10 @@ class Rubric < ActiveRecord::Base
   end
 
   def unarchive
+    super if enhanced_rubrics_enabled?
+  end
+
+  def draft
     super if enhanced_rubrics_enabled?
   end
 
@@ -329,9 +336,12 @@ class Rubric < ActiveRecord::Base
     data = generate_criteria(params)
     self.hide_score_total = params[:hide_score_total] if hide_score_total.nil? || (association_count || 0) < 2
     self.data = data.criteria
+    self.button_display = params[:button_display] if params.key?(:button_display)
     self.title = data.title
     self.points_possible = data.points_possible
     self.hide_points = params[:hide_points]
+    self.rating_order = params[:rating_order] if params.key?(:rating_order)
+    self.workflow_state = params[:workflow_state] if params[:workflow_state]
     save
     self
   end
@@ -543,5 +553,9 @@ class Rubric < ActiveRecord::Base
 
   def learning_outcome_ids_from_results
     learning_outcome_results.select(:learning_outcome_id).distinct.pluck(:learning_outcome_id)
+  end
+
+  def rubric_assignment_associations?
+    rubric_associations.where(association_type: "Assignment", workflow_state: "active").any?
   end
 end

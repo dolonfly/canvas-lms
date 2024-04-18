@@ -188,7 +188,7 @@ import 'jqueryui/tooltip'
 import '@canvas/jquery/jquery.instructure_misc_helpers'
 import '@canvas/jquery/jquery.instructure_misc_plugins'
 import 'jquery-tinypubsub'
-import 'jqueryui-unpatched/position'
+import 'jqueryui/position'
 import '@canvas/util/jquery/fixDialogButtons'
 
 import {
@@ -2623,6 +2623,9 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
     const fieldName = `assignment_${assignment.id}`
     if (this.gradebookColumnSizeSettings && this.gradebookColumnSizeSettings[fieldName]) {
       assignmentWidth = parseInt(this.gradebookColumnSizeSettings[fieldName], 10)
+      if (Number.isNaN(assignmentWidth)) {
+        assignmentWidth = testWidth(assignment.name, minWidth, columnWidths.assignment.default_max)
+      }
     } else {
       assignmentWidth = testWidth(assignment.name, minWidth, columnWidths.assignment.default_max)
     }
@@ -4350,9 +4353,16 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
 
   setStudentGroups = (studentGroupCategories: StudentGroupCategory[]) => {
     this.studentGroupCategoriesById = keyBy(studentGroupCategories, 'id')
-    const studentGroupList: StudentGroup[] = flatten(map(studentGroupCategories, 'groups')).map(
-      htmlEscape
-    )
+    const studentGroupList: StudentGroup[] = flatten(map(studentGroupCategories, 'groups'))
+
+    studentGroupList.forEach(studentGroup => {
+      for (const key in studentGroup) {
+        if (Object.prototype.hasOwnProperty.call(studentGroup, key)) {
+          studentGroup[key as keyof StudentGroup] = htmlEscape(studentGroup[key])
+        }
+      }
+    })
+
     this.studentGroups = keyBy(studentGroupList, 'id')
     this.studentGroupsEnabled = studentGroupList.length > 0
   }
@@ -4422,7 +4432,7 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
       let ref2
       const assignment = this.assignments[submission.assignment_id]
       const student = this.student(submission.user_id)
-      if (student != null ? student.isConcluded : undefined) {
+      if (!assignment || student?.isConcluded) {
         return
       }
       if (

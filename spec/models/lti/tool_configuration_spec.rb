@@ -48,18 +48,22 @@ module Lti
 
         it { is_expected.to be true }
 
-        context "with a valid submission_type_selection_launch_points" do
+        context "with a description property at the submission_type_selection placement" do
           let(:settings) do
-            super().tap do |c|
-              c["extensions"].first["settings"]["submission_type_selection_launch_points"] = [
-                {
-                  "target_link_uri" => "http://example.com/launch?placement=submission_type_selection",
-                  "title" => "Test Title",
-                  "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
-                  "description" => "Test Description"
-                }
-              ]
-            end
+            res = super()
+
+            res["extensions"].first["settings"]["placements"].push(
+              {
+                "target_link_uri" => "http://example.com/launch?placement=submission_type_selection",
+                "text" => "Test Title",
+                "message_type" => "LtiResourceLinkRequest",
+                "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
+                "description" => "Test Description",
+                "placement" => "submission_type_selection",
+              }
+            )
+
+            res
           end
 
           it { is_expected.to be true }
@@ -67,50 +71,44 @@ module Lti
       end
 
       context "with non-matching schema" do
-        let(:settings) do
-          s = super()
-          s.delete("target_link_uri")
-          s
-        end
-
         before do
           tool_configuration.developer_key = developer_key
         end
 
-        it { is_expected.to be false }
+        context "a missing target_link_uri" do
+          let(:settings) do
+            s = super()
+            s.delete("target_link_uri")
+            s
+          end
 
-        it "is contains a message about missing target_link_uri" do
-          tool_configuration.valid?
-          expect(tool_configuration.errors[:configuration].first.message).to include("target_link_uri,")
-        end
-      end
+          it { is_expected.to be false }
 
-      context "with an invalid submission_type_selection_launch_points" do
-        let(:settings) do
-          s = super()
-          s["extensions"].first["settings"]["placements"] << {
-            "placement" => "submission_type_selection",
-            "message_type" => "LtiResourceLinkRequest",
-            "submission_type_selection_launch_points" => [{
-              # Invalid target_link_uri
-              "target_link_uri" => "",
-              "title" => 4,
-              "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
-              "description" => "Test Description"
-            }]
-          }
-          s
+          it "contains a message about a missing target_link_uri" do
+            tool_configuration.valid?
+            expect(tool_configuration.errors[:configuration].first.message).to include("target_link_uri,")
+          end
         end
 
-        before do
-          tool_configuration.developer_key = developer_key
-        end
+        context "when the submission_type_selection description is longer than 255 characters" do
+          let(:settings) do
+            s = super()
 
-        it { is_expected.to be false }
+            s["extensions"].first["settings"]["placements"].push(
+              {
+                "target_link_uri" => "http://example.com/launch?placement=submission_type_selection",
+                "text" => "Test Title",
+                "message_type" => "LtiResourceLinkRequest",
+                "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
+                "description" => "a" * 256,
+                "placement" => "submission_type_selection",
+              }
+            )
 
-        it "contains a message about invalid submission_type_selection placement" do
-          tool_configuration.valid?
-          expect(tool_configuration.errors[:configuration].first.message).to include("submission_type_selection")
+            s
+          end
+
+          it { is_expected.to be false }
         end
       end
 
@@ -648,6 +646,81 @@ module Lti
 
       it "returns the appropriate placements" do
         expect(subject).to eq(settings["extensions"].first["settings"]["placements"])
+      end
+    end
+
+    describe "domain" do
+      subject { tool_configuration.domain }
+
+      it { is_expected.to eq(settings["extensions"].first["domain"]) }
+    end
+
+    describe "verify_placements" do
+      subject { tool_configuration.verify_placements }
+
+      before do
+        tool_configuration.developer_key = developer_key
+        tool_configuration.save!
+      end
+
+      context "when the lti_placement_restrictions feature flag is disabled" do
+        before do
+          Account.site_admin.disable_feature!(:lti_placement_restrictions)
+        end
+
+        it { is_expected.to be_nil }
+      end
+
+      context "when the lti_placement_restrictions feature flag is enabled" do
+        before do
+          Account.site_admin.enable_feature!(:lti_placement_restrictions)
+        end
+
+        it "returns nil when there are no submission_type_selection placements" do
+          expect(subject).to be_nil
+        end
+
+        context "when the configuration has a submission_type_selection placement" do
+          let(:tool_configuration) do
+            tc = super()
+
+            tc.settings["extensions"].first["settings"]["placements"] << {
+              "placement" => "submission_type_selection",
+              "message_type" => "LtiResourceLinkRequest",
+              "target_link_uri" => "http://example.com/launch?placement=submission_type_selection"
+            }
+
+            tc
+          end
+
+          it { is_expected.to include("Warning").and include("submission_type_selection") }
+
+          context "when the tool is allowed to use the submission_type_selection placement through it's dev key" do
+            before do
+              Setting.set("submission_type_selection_allowed_dev_keys", tool_configuration.developer_key.global_id.to_s)
+            end
+
+            it { is_expected.to be_nil }
+          end
+
+          context "when the tool is allowed to use the submission_type_selection placement through it's domain" do
+            before do
+              Setting.set("submission_type_selection_allowed_launch_domains", tool_configuration.domain)
+            end
+
+            it { is_expected.to be_nil }
+          end
+
+          context "when the tool has no domain and domain list is containing an empty space" do
+            before do
+              allow(tool_configuration).to receive_messages(domain: "", developer_key_id: nil)
+              Setting.set("submission_type_selection_allowed_launch_domains", ", ,,")
+              Setting.set("submission_type_selection_allowed_dev_keys", ", ,,")
+            end
+
+            it { is_expected.to include("Warning").and include("submission_type_selection") }
+          end
+        end
       end
     end
 

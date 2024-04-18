@@ -45,11 +45,11 @@ import htmlEscape from '@instructure/html-escape'
 import calendarEventFilter from '../CalendarEventFilter'
 import schedulerActions from '../react/scheduler/actions'
 import 'fullcalendar'
-import '../ext/patches-to-fullcalendar'
+// import '../ext/patches-to-fullcalendar'
 import '@canvas/jquery/jquery.instructure_misc_helpers'
 import '@canvas/jquery/jquery.instructure_misc_plugins'
 import 'jquery-tinypubsub'
-import 'jqueryui-unpatched/button'
+import 'jqueryui/button'
 import 'jqueryui/tooltip'
 
 const I18n = useI18nScope('calendar')
@@ -212,7 +212,6 @@ export default class Calendar {
     this.header.on('agenda', () => this.loadView('agenda'))
     this.header.on('createNewEvent', this.addEventClick)
     this.header.on('refreshCalendar', this.reloadClick)
-    this.header.on('done', this.schedulerSingleDoneClick)
   }
 
   connectSchedulerNavigatorEvents() {
@@ -807,7 +806,7 @@ export default class Calendar {
   filterEventsWithSeriesIdAndWhich = (selectedEvent, which) => {
     const seriesId = selectedEvent.calendarEvent.series_uuid
     const eventSeries = this.calendar
-      .fullCalendar('getEventCache')
+      .fullCalendar('clientEvents')
       .filter(c => c.eventType === 'calendar_event' && c.calendarEvent.series_uuid === seriesId)
 
     let candidateEvents
@@ -966,7 +965,7 @@ export default class Calendar {
   // When we delete an event + all following from a series
   // the remaining events get updated with a new rrule
   eventsUpdatedFromSeries = ({updatedEvents}) => {
-    const candidateEventsInCalendar = this.calendar.fullCalendar('getEventCache').filter(c => {
+    const candidateEventsInCalendar = this.calendar.fullCalendar('clientEvents').filter(c => {
       if (c.eventType === 'calendar_event') {
         const updatedEventIndex = updatedEvents.findIndex(e => c.calendarEvent.id === e.id)
         if (updatedEventIndex >= 0) {
@@ -985,7 +984,7 @@ export default class Calendar {
     // if you change the start time of an event+following, it will create a new
     // series for those events plus update those to the left with a new rrule
     const updatedEventIds = candidateEventsInCalendar.map(e => e.calendarEvent.id)
-    const otherEventsInSeries = this.calendar.fullCalendar('getEventCache').filter(c => {
+    const otherEventsInSeries = this.calendar.fullCalendar('clientEvents').filter(c => {
       return (
         c.calendarEvent?.series_uuid === updatedEvents[0].series_uuid &&
         !updatedEventIds.includes(c.calendarEvent.id)
@@ -1206,18 +1205,6 @@ export default class Calendar {
         })
       )
     }, 500)
-  }
-
-  showSchedulerSingle(group) {
-    this.agenda.viewingGroup = group
-    this.loadAgendaView()
-    return this.header.showDoneButton()
-  }
-
-  schedulerSingleDoneClick = () => {
-    this.agenda.viewingGroup = null
-    this.header.showSchedulerTitle()
-    return this.schedulerNavigator.hide()
   }
 
   syncNewContexts = additionalContexts => {

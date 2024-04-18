@@ -32,10 +32,14 @@ describe Lti::IMS::DynamicRegistrationController do
   openapi_location = File.join(File.dirname(__FILE__), "openapi", "dynamic_registration.yml")
   openapi_spec = YAML.load_file(openapi_location)
 
-  include OpenApiSpecHelper
+  verifier = OpenApiSpecHelper::SchemaVerifier.new(openapi_spec)
 
   before do
     Account.default.root_account.enable_feature! :lti_dynamic_registration
+  end
+
+  after do
+    verifier.verify(request, response) if response.sent?
   end
 
   it "has openapi documentation for each of our controller routes" do
@@ -84,6 +88,9 @@ describe Lti::IMS::DynamicRegistrationController do
             ],
             "icon_uri" => "https://example.com/icon.jpg"
           }],
+          "custom_parameters" => {
+            "global_foo" => "global_bar"
+          },
           "claims" => ["iss", "sub"],
           "target_link_uri" => "https://example.com/launch",
           "https://canvas.instructure.com/lti/privacy_level" => "email_only",
@@ -132,6 +139,7 @@ describe Lti::IMS::DynamicRegistrationController do
           expect(created_registration.privacy_level).to eq("email_only")
           expect(created_registration).not_to be_nil
           expect(parsed_body["https://purl.imsglobal.org/spec/lti-tool-configuration"]["https://canvas.instructure.com/lti/registration_config_url"]).to eq "http://test.host/api/lti/registrations/#{created_registration.global_id}/view"
+          expect(created_registration.canvas_configuration["custom_fields"]).to eq({ "global_foo" => "global_bar" })
         end
 
         it "fills in values on the developer key" do

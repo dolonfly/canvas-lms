@@ -17,6 +17,7 @@
 /* eslint-disable no-throw-literal */
 /* eslint-disable linebreak-style */
 /* eslint-disable vars-on-top */
+/* eslint-disable  no-constant-condition */
 /*
  * Copyright (c) 2010 Michael Leibman, http://github.com/mleibman/slickgrid
  *
@@ -515,8 +516,8 @@ if (typeof Slick === 'undefined') {
         $headerScroller_1
           .bind('contextmenu', handleHeaderContextMenu)
           .bind('click', handleHeaderClick)
-          .delegate('.slick-header-column', 'mouseenter', handleHeaderMouseEnter)
-          .delegate('.slick-header-column', 'mouseleave', handleHeaderMouseLeave)
+          .on('mouseenter', '.slick-header-column', handleHeaderMouseEnter)
+          .on('mouseleave', '.slick-header-column', handleHeaderMouseLeave)
         $headerRowScroller_1.bind('scroll', handleHeaderRowScroll)
         $focusSink.add($focusSink2).bind('keydown', handleKeyDown)
         $canvas_1
@@ -528,8 +529,8 @@ if (typeof Slick === 'undefined') {
           .bind('dragstart', {distance: 3}, handleDragStart)
           .bind('drag', handleDrag)
           .bind('dragend', handleDragEnd)
-          .delegate('.slick-cell', 'mouseenter', handleMouseEnter)
-          .delegate('.slick-cell', 'mouseleave', handleMouseLeave)
+          .on('mouseenter', '.slick-cell', handleMouseEnter)
+          .on('mouseleave', '.slick-cell', handleMouseLeave)
 
         if (options.numberOfColumnsToFreeze > 0) {
           $container_0.bind('resize.slickgrid', resizeCanvas)
@@ -544,8 +545,8 @@ if (typeof Slick === 'undefined') {
           $headerScroller_0
             .bind('contextmenu', handleHeaderContextMenu)
             .bind('click', handleHeaderClick)
-            .delegate('.slick-header-column', 'mouseenter', handleHeaderMouseEnter)
-            .delegate('.slick-header-column', 'mouseleave', handleHeaderMouseLeave)
+            .on('mouseenter', '.slick-header-column', handleHeaderMouseEnter)
+            .on('mouseleave', '.slick-header-column', handleHeaderMouseLeave)
           $headerRowScroller_0.bind('scroll', handleHeaderRowScroll)
           $canvas_0
             .bind('keydown', handleKeyDown)
@@ -556,8 +557,8 @@ if (typeof Slick === 'undefined') {
             .bind('dragstart', {distance: 3}, handleDragStart)
             .bind('drag', handleDrag)
             .bind('dragend', handleDragEnd)
-            .delegate('.slick-cell', 'mouseenter', handleMouseEnter)
-            .delegate('.slick-cell', 'mouseleave', handleMouseLeave)
+            .on('mouseenter', '.slick-cell', handleMouseEnter)
+            .on('mouseleave', '.slick-cell', handleMouseLeave)
         }
       }
     }
@@ -1094,7 +1095,8 @@ if (typeof Slick === 'undefined') {
           $col = $(e)
           $("<div class='slick-resizable-handle' />")
             .appendTo(e)
-            .bind('dragstart', function (e, dd) {
+            .on('dragstart', function (e, dd) {
+              setTimeout(() => {
               isFrozenColumn = isPartOfAFrozenColumn(this)
               columnElements = getColumnElements(this)
               if (!getEditorLock().commitCurrentEdit()) {
@@ -1167,66 +1169,21 @@ if (typeof Slick === 'undefined') {
                 maxPageX = pageX + Math.min(shrinkLeewayOnFront, stretchLeewayOnRear)
                 minPageX = pageX - Math.min(shrinkLeewayOnRear, stretchLeewayOnFront)
               }
+              }, 0)
             })
-            .bind('drag', function (e, dd) {
-              isFrozenColumn = isPartOfAFrozenColumn(this)
-              columnElements = getColumnElements(this)
-              var actualMinWidth, d, x
-              d = rtl
-                ? Math.max(maxPageX, Math.min(minPageX, e.pageX)) - pageX
-                : Math.min(maxPageX, Math.max(minPageX, e.pageX)) - pageX
-              var isShrink = (d < 0 && !rtl) || (d > 0 && rtl)
-              if (isShrink) {
-                // shrink column
-                x = d * (rtl ? -1 : 1)
-                for (j = i; j >= 0; j--) {
-                  c = columns[getIndexOffset(isFrozenColumn, j)]
-                  if (c.resizable) {
-                    actualMinWidth = Math.max(c.minWidth || 0, absoluteColumnMinWidth)
-                    if (x && c.previousWidth + x < actualMinWidth) {
-                      x += c.previousWidth - actualMinWidth
-                      c.width = actualMinWidth
-                    } else {
-                      c.width = c.previousWidth + x
-                      x = 0
-                    }
-                  }
-                }
-
-                if (options.forceFitColumns) {
-                  x = -d * (rtl ? -1 : 1)
-                  for (j = i + 1; j < columnElements.length; j++) {
-                    c = columns[getIndexOffset(isFrozenColumn, j)]
-                    if (c.resizable) {
-                      if (x && c.maxWidth && c.maxWidth - c.previousWidth < x) {
-                        x -= c.maxWidth - c.previousWidth
-                        c.width = c.maxWidth
-                      } else {
-                        c.width = c.previousWidth + x
-                        x = 0
-                      }
-                    }
-                  }
-                }
-              } else {
-                // stretch column
-                x = d * (rtl ? -1 : 1)
-                for (j = i; j >= 0; j--) {
-                  c = columns[getIndexOffset(isFrozenColumn, j)]
-                  if (c.resizable) {
-                    if (x && c.maxWidth && c.maxWidth - c.previousWidth < x) {
-                      x -= c.maxWidth - c.previousWidth
-                      c.width = c.maxWidth
-                    } else {
-                      c.width = c.previousWidth + x
-                      x = 0
-                    }
-                  }
-                }
-
-                if (options.forceFitColumns) {
-                  x = -d * (rtl ? -1 : 1)
-                  for (j = i + 1; j < columnElements.length; j++) {
+            .on('drag', function (e, dd) {
+              setTimeout(() => {
+                isFrozenColumn = isPartOfAFrozenColumn(this)
+                columnElements = getColumnElements(this)
+                var actualMinWidth, d, x
+                d = rtl
+                  ? Math.max(maxPageX, Math.min(minPageX, e.pageX)) - pageX
+                  : Math.min(maxPageX, Math.max(minPageX, e.pageX)) - pageX
+                var isShrink = (d < 0 && !rtl) || (d > 0 && rtl)
+                if (isShrink) {
+                  // shrink column
+                  x = d * (rtl ? -1 : 1)
+                  for (j = i; j >= 0; j--) {
                     c = columns[getIndexOffset(isFrozenColumn, j)]
                     if (c.resizable) {
                       actualMinWidth = Math.max(c.minWidth || 0, absoluteColumnMinWidth)
@@ -1239,33 +1196,83 @@ if (typeof Slick === 'undefined') {
                       }
                     }
                   }
-                }
-              }
-              applyColumnHeaderWidths()
-              if (options.numberOfColumnsToFreeze > 0) {
-                updateCanvasWidth(true)
-              }
-              if (options.syncColumnCellResize) {
-                applyColumnWidths()
-              }
-            })
-            .bind('dragend', function (e, dd) {
-              isFrozenColumn = isPartOfAFrozenColumn(this)
-              columnElements = getColumnElements(this)
-              var newWidth
-              $(this).parent().removeClass('slick-header-column-active')
-              for (var j = 0; j < columnElements.length; j++) {
-                c = columns[getIndexOffset(isFrozenColumn, j)]
-                newWidth = $(columnElements[j]).outerWidth()
-                if (c.previousWidth !== newWidth) {
-                  if (c.rerenderOnResize) {
-                    invalidateAllRows()
+
+                  if (options.forceFitColumns) {
+                    x = -d * (rtl ? -1 : 1)
+                    for (j = i + 1; j < columnElements.length; j++) {
+                      c = columns[getIndexOffset(isFrozenColumn, j)]
+                      if (c.resizable) {
+                        if (x && c.maxWidth && c.maxWidth - c.previousWidth < x) {
+                          x -= c.maxWidth - c.previousWidth
+                          c.width = c.maxWidth
+                        } else {
+                          c.width = c.previousWidth + x
+                          x = 0
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  // stretch column
+                  x = d * (rtl ? -1 : 1)
+                  for (j = i; j >= 0; j--) {
+                    c = columns[getIndexOffset(isFrozenColumn, j)]
+                    if (c.resizable) {
+                      if (x && c.maxWidth && c.maxWidth - c.previousWidth < x) {
+                        x -= c.maxWidth - c.previousWidth
+                        c.width = c.maxWidth
+                      } else {
+                        c.width = c.previousWidth + x
+                        x = 0
+                      }
+                    }
+                  }
+
+                  if (options.forceFitColumns) {
+                    x = -d * (rtl ? -1 : 1)
+                    for (j = i + 1; j < columnElements.length; j++) {
+                      c = columns[getIndexOffset(isFrozenColumn, j)]
+                      if (c.resizable) {
+                        actualMinWidth = Math.max(c.minWidth || 0, absoluteColumnMinWidth)
+                        if (x && c.previousWidth + x < actualMinWidth) {
+                          x += c.previousWidth - actualMinWidth
+                          c.width = actualMinWidth
+                        } else {
+                          c.width = c.previousWidth + x
+                          x = 0
+                        }
+                      }
+                    }
                   }
                 }
-              }
-              updateCanvasWidth(true)
-              render()
-              trigger(self.onColumnsResized, {})
+                applyColumnHeaderWidths()
+                if (options.numberOfColumnsToFreeze > 0) {
+                  updateCanvasWidth(true)
+                }
+                if (options.syncColumnCellResize) {
+                  applyColumnWidths()
+                }
+              }, 0)
+            })
+            .on('dragend', function (e, dd) {
+              setTimeout(() => {
+                isFrozenColumn = isPartOfAFrozenColumn(this)
+                columnElements = getColumnElements(this)
+                var newWidth
+                $(this).parent().removeClass('slick-header-column-active')
+                for (var j = 0; j < columnElements.length; j++) {
+                  c = columns[getIndexOffset(isFrozenColumn, j)]
+                  newWidth = $(columnElements[j]).outerWidth()
+                  if (c.previousWidth !== newWidth) {
+                    if (c.rerenderOnResize) {
+                      invalidateAllRows()
+                    }
+                  }
+                }
+                updateCanvasWidth(true)
+                render()
+                trigger(self.onColumnsResized, {})
+              }, 0)
             })
         })
       }

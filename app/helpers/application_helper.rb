@@ -26,6 +26,7 @@ module ApplicationHelper
   include Canvas::LockExplanation
   include DatadogRumHelper
   include NewQuizzesFeaturesHelper
+  include HeapHelper
 
   def context_user_name_display(user)
     name = user.try(:short_name) || user.try(:name)
@@ -518,6 +519,13 @@ module ApplicationHelper
     global_inst_object
   end
 
+  def remote_env(hash = nil)
+    @remote_env ||= {}
+    @remote_env.merge!(hash) if hash
+
+    @remote_env
+  end
+
   def editor_buttons
     # called outside of Lti::ContextToolFinder to make sure that
     # @context is non-nil and also a type of Context that would have
@@ -534,9 +542,14 @@ module ApplicationHelper
         # force the YAML to be deserialized before caching, since it's expensive
         tools.each(&:settings)
       end
+
+    # Default tool icons need to have a hostname (cannot just be a path)
+    # because they are used externally via ServicesApiController endpoints
+    default_icon_base_url = "#{request.protocol}#{request.host_with_port}"
+
     ContextExternalTool
       .shard(@context.shard)
-      .editor_button_json(cached_tools.dup, @context, @current_user, session)
+      .editor_button_json(cached_tools.dup, @context, @current_user, session, default_icon_base_url)
   end
 
   def nbsp
@@ -1403,14 +1416,6 @@ module ApplicationHelper
 
   def append_default_due_time_js_env(context, hash)
     hash[:DEFAULT_DUE_TIME] = context.default_due_time if context&.default_due_time.present? && context.root_account.feature_enabled?(:default_due_time)
-  end
-
-  def find_heap_application_id
-    DynamicSettings.find(tree: :private)[:heap_app_id, failsafe: nil]
-  end
-
-  def load_heap?
-    find_heap_application_id && @domain_root_account&.feature_enabled?(:send_usage_metrics)
   end
 
   def load_hotjar?

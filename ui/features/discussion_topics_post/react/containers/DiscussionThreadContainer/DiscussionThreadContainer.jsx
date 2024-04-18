@@ -111,19 +111,19 @@ export const DiscussionThreadContainer = props => {
       props.discussionEntry.entryParticipant?.read !==
       result.data.updateDiscussionEntryParticipant.discussionEntry.entryParticipant?.read
     ) {
-      const discussionUnreadCountchange = result.data.updateDiscussionEntryParticipant
+      const discussionUnreadCountChange = result.data.updateDiscussionEntryParticipant
         .discussionEntry.entryParticipant?.read
         ? -1
         : 1
       updateDiscussionTopicEntryCounts(cache, props.discussionTopic.id, {
-        unreadCountChange: discussionUnreadCountchange,
+        unreadCountChange: discussionUnreadCountChange,
       })
 
       if (result.data.updateDiscussionEntryParticipant.discussionEntry.rootEntryId) {
         updateDiscussionEntryRootEntryCounts(
           cache,
           result.data.updateDiscussionEntryParticipant.discussionEntry,
-          discussionUnreadCountchange
+          discussionUnreadCountChange
         )
       }
     }
@@ -135,7 +135,6 @@ export const DiscussionThreadContainer = props => {
       discussionEntryID: newDiscussionEntry.parentId,
       first: ENV.per_page,
       sort: 'asc',
-      courseID: window.ENV?.course_id,
     }
 
     updateDiscussionTopicEntryCounts(cache, props.discussionTopic.id, {repliesCountChange: 1})
@@ -441,7 +440,6 @@ export const DiscussionThreadContainer = props => {
       fileId: file?._id,
       isAnonymousAuthor,
       message,
-      courseID: ENV.course_id,
       quotedEntryId,
     }
     const optimisticResponse = getOptimisticResponse({
@@ -472,10 +470,12 @@ export const DiscussionThreadContainer = props => {
         mobile: {
           marginDepth: `calc(${theme.variables.spacing.medium} * ${props.depth})`,
           padding: 'small xx-small small',
+          toolbarLeftPadding: undefined,
         },
         desktop: {
           marginDepth: `calc(${theme.variables.spacing.xxLarge} * ${props.depth})`,
           padding: 'small medium small',
+          toolbarLeftPadding: props.depth === 0 ? '0 0 0 xx-small' : undefined,
         },
       }}
       render={responsiveProps => (
@@ -568,6 +568,8 @@ export const DiscussionThreadContainer = props => {
                       !!props.discussionEntry?.rootEntryParticipantCounts?.unreadCount
                     }
                     isForcedRead={props.discussionEntry.entryParticipant?.forcedReadState}
+                    createdAt={props.discussionEntry.createdAt}
+                    updatedAt={props.discussionEntry.updatedAt}
                     timingDisplay={DateHelper.formatDatetimeForDiscussions(
                       props.discussionEntry.createdAt
                     )}
@@ -586,7 +588,7 @@ export const DiscussionThreadContainer = props => {
                     quotedEntry={props.discussionEntry.quotedEntry}
                   >
                     {threadActions.length > 0 && (
-                      <View as="div">
+                      <View as="div" padding={responsiveProps.toolbarLeftPadding}>
                         <ThreadingToolbar
                           searchTerm={searchTerm}
                           discussionEntry={props.discussionEntry}
@@ -705,7 +707,6 @@ const DiscussionSubentries = props => {
 
   const variables = {
     discussionEntryID: props.discussionEntryId,
-    courseID: window.ENV?.course_id,
   }
 
   const query = useQuery(DISCUSSION_ENTRY_ALL_ROOT_ENTRIES_QUERY, {

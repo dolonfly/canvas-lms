@@ -234,7 +234,8 @@ Returns an empty string otherwise.
 ```
 ## com.instructure.User.sectionNames
 Returns an array of the section names in a JSON-escaped format that the user is enrolled in, if the
-context of the tool launch is within a course.
+context of the tool launch is within a course. The names are sorted by the course_section_id, so that
+they are useful in conjunction with the Canvas.course.sectionIds substitution.
 
 **Availability**: *when launched from a course*  
 **Launch Parameter**: *com_instructure_user_section_names*  
@@ -1582,6 +1583,17 @@ in Canvas-side GET request that triggers the LTI launch.
 
 ```
 page
+```
+## com.instructure.Course.canvas_resource_id
+Returns the target resource id for the current page, forwarded from the request. Only functional when
+`com_instructure_course_canvas_resource_type` is included as a query param. Currently, this is not
+supported generally, and is only implemented for specific use cases.
+
+**Availability**: *always*  
+
+
+```
+123123
 ```
 ## com.instructure.Course.allow_canvas_resource_selection
 Returns whether a content can be imported into a specific group on the page, forwarded from the request.

@@ -433,22 +433,20 @@ describe DiscussionEntry do
       # scenario: you visit a page for unread entries;
       # as you scroll the page you read entries at (later times, then you go to next page and entries are now read AFTER your initial QUERY time.
 
-      Timecop.safe_mode = false
-      Timecop.freeze(Time.utc(2013, 3, 13, 9, 12))
-      @entry1 = @topic.discussion_entries.create!(message: "entry 1 outside", user: @teacher)
-      @entry1.change_read_state("read", @student)
+      Timecop.freeze(Time.utc(2013, 3, 13, 9, 12)) do
+        @entry1 = @topic.discussion_entries.create!(message: "entry 1 outside", user: @teacher)
+        @entry1.change_read_state("read", @student)
+      end
 
-      Timecop.freeze(Time.utc(2013, 3, 13, 10, 12))
-      @entry2 = @topic.discussion_entries.create!(message: "entry 2", user: @teacher)
-      @entry3 = @topic.discussion_entries.create!(message: "entry 3", user: @teacher)
+      Timecop.freeze(Time.utc(2013, 3, 13, 10, 12)) do
+        @entry2 = @topic.discussion_entries.create!(message: "entry 2", user: @teacher)
+        @entry3 = @topic.discussion_entries.create!(message: "entry 3", user: @teacher)
 
-      @entry2.change_read_state("read", @student)
+        @entry2.change_read_state("read", @student)
 
-      # Notice we read the entries 1 min after the the query issues
-      expect(DiscussionEntry.unread_for_user_before(@student, Time.utc(2013, 3, 13, 10, 11)).order("id").map(&:message)).to eq(["entry 2", "entry 3"])
-    ensure
-      Timecop.return
-      Timecop.safe_mode = true
+        # Notice we read the entries 1 min after the the query issues
+        expect(DiscussionEntry.unread_for_user_before(@student, Time.utc(2013, 3, 13, 10, 11)).order("id").map(&:message)).to eq(["entry 2", "entry 3"])
+      end
     end
   end
 
@@ -868,6 +866,24 @@ describe DiscussionEntry do
           expect(entry.grants_right?(user, :reply)).to be false
         end
       end
+
+      context "when course has announcement comments disabled" do
+        before do
+          create_enrollment(topic.course, user, { enrollment_state: "active" })
+          topic.course.lock_all_announcements = true
+          topic.course.save!
+        end
+
+        it "returns false when comments is locked for announcements" do
+          announcement = topic.course.announcements.create!(title: "announcement", message: "message")
+          announcement_entry = announcement.discussion_entries.create!(message: "Hello!", user:)
+          expect(announcement_entry.grants_right?(user, :reply)).to be false
+        end
+
+        it "returns true for non-announcement discussions" do
+          expect(entry.grants_right?(user, :reply)).to be true
+        end
+      end
     end
 
     describe "update" do
@@ -923,6 +939,23 @@ describe DiscussionEntry do
           announcement.lock!
           entry = announcement.discussion_entries.build(user: @student, message: "message")
           expect(entry.grants_right?(@student, :create)).to be false
+        end
+
+        context "when context.lock_all_announcements is true" do
+          before do
+            @course.lock_all_announcements = true
+            @course.save!
+          end
+
+          it "does not allow replies from students on announcements" do
+            entry = announcement.discussion_entries.build(user: @student, message: "message")
+            expect(entry.grants_right?(@student, :create)).to be false
+          end
+
+          it "allows replies for non-announcement topics" do
+            entry = topic.discussion_entries.build(user: @student, message: "message")
+            expect(entry.grants_right?(@student, :create)).to be true
+          end
         end
       end
     end

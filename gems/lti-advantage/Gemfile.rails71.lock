@@ -22,29 +22,28 @@ GEM
       tzinfo (~> 2.0)
     aes_key_wrap (1.1.0)
     base64 (0.2.0)
-    bigdecimal (3.1.6)
-    bindata (2.4.15)
+    bigdecimal (3.1.7)
+    bindata (2.5.0)
     concurrent-ruby (1.2.3)
     connection_pool (2.4.1)
     diff-lcs (1.5.1)
-    drb (2.2.0)
-      ruby2_keywords
+    drb (2.2.1)
     faraday (2.9.0)
       faraday-net_http (>= 2.0, < 3.2)
     faraday-follow_redirects (0.3.0)
       faraday (>= 1, < 3)
     faraday-net_http (3.1.0)
       net-http
-    i18n (1.14.1)
+    i18n (1.14.4)
       concurrent-ruby (~> 1.0)
-    json-jwt (1.16.5)
+    json-jwt (1.16.6)
       activesupport (>= 4.2)
       aes_key_wrap
       base64
       bindata
       faraday (~> 2.0)
       faraday-follow_redirects
-    minitest (5.22.2)
+    minitest (5.22.3)
     mutex_m (0.2.0)
     net-http (0.4.1)
       uri
@@ -62,8 +61,7 @@ GEM
     rspec-mocks (3.13.0)
       diff-lcs (>= 1.2.0, < 2.0)
       rspec-support (~> 3.13.0)
-    rspec-support (3.13.0)
-    ruby2_keywords (0.0.5)
+    rspec-support (3.13.1)
     tzinfo (2.0.6)
       concurrent-ruby (~> 1.0)
     uri (0.13.0)

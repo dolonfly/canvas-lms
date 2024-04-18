@@ -54,19 +54,6 @@ class User < ActiveRecord::Base
     best_unicode_collation_key(col)
   end
 
-  self.ignored_columns += %i[type
-                             creation_unique_id
-                             creation_sis_batch_id
-                             creation_email
-                             sis_name
-                             bio
-                             merge_to
-                             unread_inbox_items_count
-                             visibility
-                             account_pronoun_id
-                             gender
-                             birthdate]
-
   include Context
   include ModelCache
   include UserLearningObjectScopes
@@ -165,7 +152,7 @@ class User < ActiveRecord::Base
   has_many :developer_keys
   has_many :access_tokens, -> { where(workflow_state: "active") }, inverse_of: :user, multishard: true
   has_many :masquerade_tokens, -> { where(workflow_state: "active") }, class_name: "AccessToken", inverse_of: :real_user
-  has_many :notification_endpoints, through: :access_tokens, multishard: true
+  has_many :notification_endpoints, -> { merge(AccessToken.active) }, through: :access_tokens, multishard: true
   has_many :context_external_tools, -> { order(:name) }, as: :context, inverse_of: :context, dependent: :destroy
   has_many :lti_results, inverse_of: :user, class_name: "Lti::Result", dependent: :destroy
 
@@ -1223,12 +1210,17 @@ class User < ActiveRecord::Base
     new_cc.shard = new_user.shard
     new_cc.position += max_position
     new_cc.user = new_user
+    new_cc.workflow_state = "unconfirmed"
     new_cc.save!
     cc.notification_policies.each do |np|
       new_np = np.clone
       new_np.shard = new_user.shard
       new_np.communication_channel = new_cc
       new_np.save!
+    end
+    unless cc.unconfirmed?
+      new_cc.workflow_state = cc.workflow_state
+      new_cc.save!
     end
   end
 
@@ -1297,25 +1289,14 @@ class User < ActiveRecord::Base
     return account.grants_right?(user, sought_right) if fake_student? # doesn't have account association
 
     # Intentionally include deleted pseudonyms when checking deleted users (important for diagnosing deleted users)
-    accounts_to_search = if Account.site_admin.feature_enabled?(:deleted_user_tools)
-                           if associated_accounts.empty?
-                             if merged_into_user
-                               # Early return from inside if to ensure we handle chains of merges correctly
-                               return merged_into_user.check_accounts_right?(user, sought_right)
-                             elsif Account.where(id: pseudonyms.pluck(:account_id)).any?
-                               Account.where(id: pseudonyms.pluck(:account_id))
-                             else
-                               associated_accounts
-                             end
-                           else
-                             associated_accounts
-                           end
-                         elsif associated_accounts.empty? && Account.site_admin.grants_right?(user, :read)
+    accounts_to_search = if associated_accounts.empty?
                            if merged_into_user
                              # Early return from inside if to ensure we handle chains of merges correctly
                              return merged_into_user.check_accounts_right?(user, sought_right)
-                           else
+                           elsif Account.where(id: pseudonyms.pluck(:account_id)).any?
                              Account.where(id: pseudonyms.pluck(:account_id))
+                           else
+                             associated_accounts
                            end
                          else
                            associated_accounts
@@ -2154,7 +2135,7 @@ class User < ActiveRecord::Base
     RequestCache.cache("cached_current_enrollments", self, opts) do
       enrollments = shard.activate do
         res = Rails.cache.fetch_with_batched_keys(
-          ["current_enrollments4", opts[:include_future], ApplicationController.region].cache_key,
+          ["current_enrollments5", opts[:include_future], ApplicationController.region].cache_key,
           batch_object: self,
           batched_keys: :enrollments
         ) do

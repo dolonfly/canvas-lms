@@ -39,8 +39,6 @@ class AbstractAssignment < ActiveRecord::Base
   include LockedFor
   include Lti::Migratable
 
-  self.ignored_columns += %i[context_code checkpointed checkpoint_label]
-
   GRADING_TYPES = OpenStruct.new(
     {
       points: "points",
@@ -140,6 +138,8 @@ class AbstractAssignment < ActiveRecord::Base
   belongs_to :final_grader, class_name: "User", optional: true
   has_many :active_groups, -> { merge(GroupCategory.active).merge(Group.active) }, through: :group_category, source: :groups
   has_many :assigned_students, through: :submissions, source: :user
+  has_many :enrollments_for_assigned_students, -> { active.not_fake.where("enrollments.course_id = submissions.course_id") }, through: :assigned_students, source: :enrollments
+  has_many :sections_for_assigned_students, -> { active.distinct }, through: :enrollments_for_assigned_students, source: :course_section
 
   belongs_to :duplicate_of, class_name: "Assignment", optional: true, inverse_of: :duplicates
   has_many :duplicates, class_name: "Assignment", inverse_of: :duplicate_of, foreign_key: "duplicate_of_id"
@@ -1219,6 +1219,7 @@ class AbstractAssignment < ActiveRecord::Base
     end
   end
 
+  # @see Lti::Migratable
   def migrate_to_1_3_if_needed!(tool)
     # Don't do anything unless the tool is actually a 1.3 tool
     return unless tool&.use_1_3? && tool.developer_key.present?
@@ -1233,48 +1234,28 @@ class AbstractAssignment < ActiveRecord::Base
     update_line_items(tool, lti_1_1_id: lti_resource_link_id)
   end
 
-  def self.directly_associated_items(tool_id, context)
-    assignment_scope = Assignment.nondeleted.joins(:external_tool_tag)
-    # limit to assignments in the tool's context
-    case context
-    when Course
-      assignment_scope = assignment_scope.where(context_id: context.id)
-    when Account
-      root_account_id = context.root_account? ? context.id : context.root_account_id
-      assignment_scope = assignment_scope.where(root_account_id:, content_tags: { root_account_id: })
-    end
-
-    assignment_scope
-      .where(content_tags: { content_id: tool_id })
+  # filtered by context during migrate_content_to_1_3
+  # @see Lti::Migratable
+  def self.directly_associated_items(tool_id)
+    Assignment.nondeleted.joins(:external_tool_tag).where(content_tags: { content_id: tool_id })
   end
 
-  def self.indirectly_associated_items(_tool_id, context)
-    assignment_scope = Assignment.nondeleted.joins(:external_tool_tag)
-    # limit to assignments in the tool's context
-    case context
-    when Course
-      assignment_scope = assignment_scope.where(context_id: context.id)
-    when Account
-      root_account_id = context.root_account? ? context.id : context.root_account_id
-      assignment_scope = assignment_scope.where(root_account_id:, content_tags: { root_account_id: })
-    end
-
+  # filtered by context during migrate_content_to_1_3
+  # @see Lti::Migratable
+  def self.indirectly_associated_items(_tool_id)
     # TODO: this does not account for assignments that _are_ linked to a
     # tool and the tag has a content_id, but the content_id doesn't match
     # the current tool
-    assignment_scope
-      .where(content_tags: { content_id: nil })
+    Assignment.nondeleted.joins(:external_tool_tag).where(content_tags: { content_id: nil })
   end
 
+  # @see Lti::Migratable
   def self.fetch_direct_batch(ids, &)
-    return to_enum(:fetch_direct_batch, ids) unless block_given?
-
     Assignment.where(id: ids).find_each(&)
   end
 
-  def self.fetch_indirect_batch(tool_id, new_tool_id, ids, &)
-    return to_enum(:fetch_indirect_batch, tool_id, new_tool_id, ids) unless block_given?
-
+  # @see Lti::Migratable
+  def self.fetch_indirect_batch(tool_id, new_tool_id, ids)
     Assignment
       .where(id: ids)
       .preload(:external_tool_tag)
@@ -1328,14 +1309,24 @@ class AbstractAssignment < ActiveRecord::Base
             lti_1_1_id:
           )
 
-          li = line_items.create!(label: title, score_maximum: points_possible, resource_link: rl, coupled: true, resource_id: line_item_resource_id, tag: line_item_tag, end_date_time: due_at)
+          li = line_items.create!(
+            label: title,
+            score_maximum: points_possible,
+            resource_link: rl,
+            coupled: true,
+            resource_id: line_item_resource_id,
+            tag: line_item_tag,
+            start_date_time: unlock_at,
+            end_date_time: due_at
+          )
           create_results_from_prior_grades(li)
-        elsif saved_change_to_title? || saved_change_to_points_possible? || saved_change_to_due_at?
+        elsif saved_change_to_title? || saved_change_to_points_possible? || saved_change_to_due_at? || saved_change_to_unlock_at?
           if (li = line_items.find(&:assignment_line_item?))
             li.label = title
             li.score_maximum = points_possible || 0
             li.tag = line_item_tag if line_item_tag
             li.resource_id = line_item_resource_id if line_item_resource_id
+            li.start_date_time = unlock_at
             li.end_date_time = due_at
             li.save!
           end
@@ -2219,6 +2210,15 @@ class AbstractAssignment < ActiveRecord::Base
     actl&.associated_tool_proxy
   end
 
+  def are_previous_versions_graded(submission)
+    submission.versions.each do |versions|
+      if versions.model.grade.present?
+        return true
+      end
+    end
+    false
+  end
+
   def save_grade_to_submission(submission, original_student, group, opts)
     unless submission.grader_can_grade?
       error_details = submission.grading_error_message
@@ -2227,7 +2227,7 @@ class AbstractAssignment < ActiveRecord::Base
 
     submission.skip_grade_calc = opts[:skip_grade_calc]
 
-    previously_graded = submission.grade.present? || submission.excused?
+    previously_graded = submission.grade.present? || submission.excused? || are_previous_versions_graded(submission)
     return if previously_graded && opts[:dont_overwrite_grade]
     return if submission.user != original_student && submission.excused?
 
@@ -2680,7 +2680,7 @@ class AbstractAssignment < ActiveRecord::Base
 
       candidate_students = visible_group_students.select { |u| user_ids_who_arent_excused.include?(u.id) }
       candidate_students = visible_group_students if candidate_students.empty?
-      candidate_students.sort_by! { |s| enrollment_priority[enrollment_state[s.id]] }
+      candidate_students.sort_by! { |s| [enrollment_priority[enrollment_state[s.id]], s.sortable_name, s.id] }
 
       representative   = candidate_students.detect { |u| user_ids_with_turnitin_data.include?(u.id) || user_ids_with_vericite_data.include?(u.id) }
       representative ||= candidate_students.detect { |u| user_ids_with_submissions.include?(u.id) }
@@ -3153,7 +3153,7 @@ class AbstractAssignment < ActiveRecord::Base
     from("(SELECT s.cached_due_date AS user_due_date, a.*
           FROM #{Assignment.quoted_table_name} a
           INNER JOIN #{Submission.quoted_table_name} AS s ON s.assignment_id = a.id
-          WHERE s.user_id = #{User.connection.quote(user.id_for_database)} AND s.workflow_state <> 'deleted') AS assignments")
+          WHERE s.user_id = #{User.connection.quote(user.id_for_database)} AND s.workflow_state <> 'deleted') AS assignments").select(arel.projections, "user_due_date")
   }
 
   scope :with_latest_due_date, lambda {
@@ -3162,7 +3162,7 @@ class AbstractAssignment < ActiveRecord::Base
           LEFT JOIN #{AssignmentOverride.quoted_table_name} ao
           ON ao.assignment_id = a.id
           AND ao.due_at_overridden
-          GROUP BY a.id) AS assignments")
+          GROUP BY a.id) AS assignments").select(arel.projections, "latest_due_date")
   }
 
   scope :updated_after, lambda { |*args|
@@ -3897,7 +3897,7 @@ class AbstractAssignment < ActiveRecord::Base
   end
 
   def user_is_moderation_grader?(user)
-    moderation_grader_users.exists?(user)
+    moderation_grader_users.where(id: user).exists?
   end
 
   # This is a helper method intended to ensure the number of provisional graders

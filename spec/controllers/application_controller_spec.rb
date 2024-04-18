@@ -35,10 +35,7 @@ RSpec.describe ApplicationController do
         user_agent: nil,
         remote_ip: "0.0.0.0",
         base_url: "https://canvas.test",
-        referer: nil,
-        cookies: {}, # for make_lti_launch_debug_logger
-        cookie_jar: {}, # for make_lti_launch_debug_logger
-        original_fullpath: "/" # for make_lti_launch_debug_logger
+        referer: nil
       )
       allow(controller).to receive(:request).and_return(request_double)
     end
@@ -1070,16 +1067,9 @@ RSpec.describe ApplicationController do
             end
 
             context "ENV.LTI_TOOL_FORM_ID" do
-              it "with the lti_unique_tool_form_ids flag on, sets a random id" do
-                course.account.enable_feature!(:lti_unique_tool_form_ids)
+              it "sets a random id" do
                 expect(controller).to receive(:random_lti_tool_form_id).and_return("1")
                 expect(controller).to receive(:js_env).with(LTI_TOOL_FORM_ID: "1")
-                controller.send(:content_tag_redirect, course, content_tag, nil)
-              end
-
-              it "with the lti_unique_tool_form_ids flag off, does not set a random it" do
-                course.account.disable_feature!(:lti_unique_tool_form_ids)
-                expect(controller).not_to receive(:js_env).with(LTI_TOOL_FORM_ID: anything)
                 controller.send(:content_tag_redirect, course, content_tag, nil)
               end
             end
@@ -1169,14 +1159,8 @@ RSpec.describe ApplicationController do
               let(:cached_launch) { JSON.parse(Canvas.redis.get(redis_key)) }
 
               before do
-                Lti::LaunchDebugLogger.enable!(account, 1)
-
                 allow(SecureRandom).to receive(:hex).and_return(verifier)
                 controller.send(:content_tag_redirect, course, content_tag, nil)
-              end
-
-              after do
-                Lti::LaunchDebugLogger.disable!(account)
               end
 
               it "caches the LTI 1.3 launch" do
@@ -1234,12 +1218,6 @@ RSpec.describe ApplicationController do
                 it "uses the custom url as the target_link_uri" do
                   expect(assigns[:lti_launch].params["target_link_uri"]).to eq custom_url
                 end
-              end
-
-              it "includes debug_trace in the lti_message_hint (if enabled for the account)" do
-                message_hint = JSON::JWT.decode(assigns[:lti_launch].params["lti_message_hint"], :skip_verification)
-                expect(message_hint["debug_trace"]).to be_a(String)
-                expect(message_hint["debug_trace"]).to_not be_empty
               end
             end
 
@@ -1735,6 +1713,46 @@ RSpec.describe ApplicationController do
         @account.enable_feature!(:admin_analytics)
         external_tools = controller.external_tools_display_hashes(:account_navigation, @account)
         expect(external_tools).to include({ id: tool.id, title: "Admin Analytics", base_url: "http://admin_analytics.example.com/", icon_url: nil, canvas_icon_class: "icon-analytics", tool_id: ContextExternalTool::ADMIN_ANALYTICS })
+      end
+
+      context "LTI tool has a submission_type_selection placement" do
+        let(:developer_key) { DeveloperKey.create! }
+        let(:domain) { "http://example.com" }
+        let(:tool1) { external_tool_1_3_model(developer_key:, opts: { domain:, settings: { submission_type_selection: {} } }) }
+        let(:tool2) { external_tool_1_3_model(developer_key:, opts: { domain:, settings: { submission_type_selection: {} } }) }
+
+        def setup_tools
+          allow(Lti::ContextToolFinder).to receive(:all_tools_for).and_return([tool1, tool2])
+          allow(controller).to receive(:polymorphic_url).and_return(domain)
+        end
+
+        context "lti_placement_restrictions FF on" do
+          before do
+            expect(Account.site_admin).to receive(:feature_enabled?).with(:lti_placement_restrictions).and_return(true)
+          end
+
+          it "is filtering out not allowed placements" do
+            setup_tools
+            expect(tool1).to receive(:placement_allowed?).and_return(true)
+            expect(tool2).to receive(:placement_allowed?).and_return(false)
+            external_tools = controller.send(:external_tools_display_hashes, :submission_type_selection)
+            expect(external_tools).to include({ id: tool1.id, title: "a", base_url: domain, icon_url: nil, canvas_icon_class: nil })
+            expect(external_tools).to_not include({ id: tool2.id, title: "a", base_url: domain, icon_url: nil, canvas_icon_class: nil })
+          end
+        end
+
+        context "lti_placement_restrictions FF off" do
+          before do
+            expect(Account.site_admin).to receive(:feature_enabled?).with(:lti_placement_restrictions).and_return(false)
+          end
+
+          it "is not filtering out not allowed placements" do
+            setup_tools
+            external_tools = controller.send(:external_tools_display_hashes, :submission_type_selection)
+            expect(external_tools).to include({ id: tool1.id, title: "a", base_url: domain, icon_url: nil, canvas_icon_class: nil })
+            expect(external_tools).to include({ id: tool2.id, title: "a", base_url: domain, icon_url: nil, canvas_icon_class: nil })
+          end
+        end
       end
     end
 

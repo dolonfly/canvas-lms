@@ -24,6 +24,7 @@ export interface BaseDateDetails {
   unlock_at: string | null
   lock_at: string | null
   only_visible_to_overrides: boolean
+  visible_to_everyone: boolean
 }
 
 export interface StudentInfo {
@@ -38,6 +39,7 @@ export interface exportedOverride {
   student_id?: string
   name: string
   type: string
+  noop_id: string
 }
 
 export interface DateDetailsOverride {
@@ -55,6 +57,7 @@ export interface DateDetailsOverride {
   all_day_date?: string | null
   context_module_id?: string | null
   context_module_name?: string | null
+  noop_id?: number
 }
 
 export interface ItemAssignToCardSpec {
@@ -70,10 +73,14 @@ export interface ItemAssignToCardSpec {
   defaultOptions?: string[]
   contextModuleId?: string | null
   contextModuleName?: string | null
+  highlightCard?: boolean
 }
+
+export type DateLockTypes = 'due_dates' | 'availability_dates'
 
 export interface DateDetails extends BaseDateDetails {
   overrides?: DateDetailsOverride[]
+  blueprint_date_locks?: DateLockTypes[]
 }
 
 export interface DateDetailsPayload extends BaseDateDetails {

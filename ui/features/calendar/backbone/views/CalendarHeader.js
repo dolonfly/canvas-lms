@@ -37,8 +37,6 @@ CalendarHeader.prototype.els = {
   '.calendar_view_buttons': '$calendarViewButtons',
   '.recommend_agenda': '$recommendAgenda',
   '.calendar_navigator': '$navigator',
-  '.appointment_group_title': '$appointmentGroupTitle',
-  '.scheduler_done_button': '$schedulerDoneButton',
   '#create_new_event_link': '$createNewEventLink',
   '#refresh_calendar_link': '$refreshCalendarLink',
 }
@@ -48,7 +46,6 @@ CalendarHeader.prototype.events = {
   'click #month': '_triggerMonth',
   'click #agenda': '_triggerAgenda',
   'click #use_agenda': '_selectAgenda',
-  'click .scheduler_done_button': '_triggerDone',
   'click #create_new_event_link': '_triggerCreateNewEvent',
   'click #refresh_calendar_link': '_triggerRefreshCalendar',
   'keydown .calendar_view_buttons': '_handleKeyDownEvent',
@@ -70,40 +67,21 @@ CalendarHeader.prototype.initialize = function () {
 }
 
 CalendarHeader.prototype.connectEvents = function () {
-  this.navigator.on(
-    'navigatePrev',
-    (function (_this) {
-      return function () {
-        return _this.trigger('navigatePrev')
-      }
-    })(this)
-  )
-  this.navigator.on(
-    'navigateToday',
-    (function (_this) {
-      return function () {
-        return _this.trigger('navigateToday')
-      }
-    })(this)
-  )
-  this.navigator.on(
-    'navigateNext',
-    (function (_this) {
-      return function () {
-        return _this.trigger('navigateNext')
-      }
-    })(this)
-  )
-  this.navigator.on(
-    'navigateDate',
-    (function (_this) {
-      return function (selectedDate) {
-        return _this.trigger('navigateDate', selectedDate)
-      }
-    })(this)
-  )
-  this.$calendarViewButtons.on('click', 'button', this.toggleView)
-  return subscribe('Calendar/loadStatus', this.animateLoading)
+  const _this = this
+  this.navigator.on('navigatePrev', function () {
+    _this.trigger('navigatePrev')
+  })
+  this.navigator.on('navigateToday', function () {
+    _this.trigger('navigateToday')
+  })
+  this.navigator.on('navigateNext', function () {
+    _this.trigger('navigateNext')
+  })
+  this.navigator.on('navigateDate', function (selectedDate) {
+    _this.trigger('navigateDate', selectedDate)
+  })
+  this.$calendarViewButtons.on('click', 'button', this.toggleView.bind(this))
+  return subscribe('Calendar/loadStatus', this.animateLoading.bind(this))
 }
 
 CalendarHeader.prototype.toggleView = function (e) {
@@ -128,23 +106,7 @@ CalendarHeader.prototype.moveToCalendarViewButton = function (direction) {
 
 CalendarHeader.prototype.showNavigator = function () {
   this.$navigator.show()
-  this.$createNewEventLink.show()
-  this.$appointmentGroupTitle.hide()
-  return this.$schedulerDoneButton.hide()
-}
-
-CalendarHeader.prototype.showSchedulerTitle = function () {
-  this.$navigator.hide()
-  this.$createNewEventLink.hide()
-  this.$appointmentGroupTitle.show()
-  return this.$schedulerDoneButton.hide()
-}
-
-CalendarHeader.prototype.showDoneButton = function () {
-  this.$navigator.hide()
-  this.$createNewEventLink.hide()
-  this.$appointmentGroupTitle.hide()
-  return this.$schedulerDoneButton.show()
+  return this.$createNewEventLink.show()
 }
 
 CalendarHeader.prototype._showVisualAgendaRecommendation = function () {
@@ -189,10 +151,6 @@ CalendarHeader.prototype.hidePrevNext = function () {
 
 CalendarHeader.prototype._selectAgenda = function (_event) {
   return this.selectView('agenda')
-}
-
-CalendarHeader.prototype._triggerDone = function (_event) {
-  return this.trigger('done')
 }
 
 CalendarHeader.prototype._triggerWeek = function (_event) {

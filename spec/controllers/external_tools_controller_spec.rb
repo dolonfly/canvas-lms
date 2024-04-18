@@ -236,22 +236,6 @@ describe ExternalToolsController do
         end
       end
 
-      context "when Lti::LaunchDebugLogger is enabled" do
-        before do
-          Lti::LaunchDebugLogger.enable!(@course.root_account, 1)
-          user_session(@teacher)
-          get :show, params: { course_id: @course.id, id: tool.id }
-        end
-
-        after { Lti::LaunchDebugLogger.disable!(@course.root_account) }
-
-        it "includes a debug_trace in lti_message_hint" do
-          message_hint = JSON::JWT.decode(assigns[:lti_launch].params["lti_message_hint"], :skip_verification)
-          expect(message_hint["debug_trace"]).to be_a(String)
-          expect(message_hint["debug_trace"]).to_not be_empty
-        end
-      end
-
       context "with a bad launch url" do
         it "fails gracefully" do
           user_session(@teacher)
@@ -984,16 +968,9 @@ describe ExternalToolsController do
       end
 
       context "ENV.LTI_TOOL_FORM_ID" do
-        it "with the lti_unique_tool_form_ids flag on, sets a random id" do
-          @course.account.enable_feature!(:lti_unique_tool_form_ids)
+        it "sets a random id" do
           expect(controller).to receive(:random_lti_tool_form_id).and_return("1")
           expect(controller).to receive(:js_env).with(LTI_TOOL_FORM_ID: "1")
-          get "retrieve", params: { course_id: @course.id, url: "http://www.example.com/launch" }
-        end
-
-        it "with the lti_unique_tool_form_ids flag off, does not set a random it" do
-          @course.account.disable_feature!(:lti_unique_tool_form_ids)
-          expect(controller).not_to receive(:js_env).with(LTI_TOOL_FORM_ID: anything)
           get "retrieve", params: { course_id: @course.id, url: "http://www.example.com/launch" }
         end
       end
@@ -1474,7 +1451,7 @@ describe ExternalToolsController do
 
       it "renders the tool launch iframe" do
         subject
-        expect(response.body).to include("id=\"tool_content\"")
+        expect(response.body).to include("id=\"tool_content_")
       end
 
       it "includes post_message_forwarding JS for main frame" do
@@ -3215,29 +3192,6 @@ describe ExternalToolsController do
 
         it "finds the tool" do
           expect(json_parse["id"]).to eq(tool.id)
-        end
-      end
-
-      context "when Lti::LaunchDebugLogger is enabled" do
-        subject do
-          allow(RequestContext::Generator).to receive(:request_id).and_return("1234")
-          get(:generate_sessionless_launch, params:)
-          json_parse["url"]
-        end
-
-        before do
-          Lti::LaunchDebugLogger.enable!(Account.default, 4)
-        end
-
-        after { Lti::LaunchDebugLogger.disable!(Account.default) }
-
-        it "includes a sessionless_source in the URL" do
-          debug_trace = CGI.parse(URI.parse(subject).query)["sessionless_source"].first
-          expect(Lti::LaunchDebugLogger.decode_debug_trace(debug_trace)).to \
-            eq({
-                 "request_id" => "1234",
-                 "user_agent" => "Rails Testing",
-               })
         end
       end
     end

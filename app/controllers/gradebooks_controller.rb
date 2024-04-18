@@ -211,7 +211,7 @@ class GradebooksController < ApplicationController
                                        end
                                      end
     course_active_grading_scheme = if course_active_grading_standard
-                                     GradingSchemesJsonController.gradebook_grading_scheme_json(course_active_grading_standard, @current_user)
+                                     GradingSchemesJsonController.base_grading_scheme_json(course_active_grading_standard, @current_user)
                                    else
                                      nil
                                    end
@@ -824,7 +824,9 @@ class GradebooksController < ApplicationController
         return
       end
 
-      submissions = if params[:submissions]
+      submissions = if $canvas_rails == "7.1"
+                      params[:submissions] ? params[:submissions].values : [params[:submission]]
+                    elsif params[:submissions]
                       params[:submissions].values.map { |s| ActionController::Parameters.new(s) }
                     else
                       [params[:submission]]
@@ -1162,12 +1164,25 @@ class GradebooksController < ApplicationController
           )
         end
 
-        append_sis_data(env)
-        js_env(env)
+        if Account.site_admin.feature_enabled?(:platform_service_speedgrader) && params[:platform_sg].present?
 
-        render :speed_grader, locals: {
-          anonymize_students: @assignment.anonymize_students?
-        }
+          @page_title = t("SpeedGrader")
+          @body_classes << "full-width padless-content"
+
+          remote_env(speedgrader: Services::PlatformServiceSpeedgrader.launch_url)
+
+          js_env(env)
+          deferred_js_bundle :platform_speedgrader
+
+          render html: "".html_safe, layout: "bare"
+        else
+          append_sis_data(env)
+          js_env(env)
+
+          render :speed_grader, locals: {
+            anonymize_students: @assignment.anonymize_students?
+          }
+        end
       end
 
       format.json do
@@ -1215,7 +1230,6 @@ class GradebooksController < ApplicationController
 
   def change_gradebook_column_size
     if authorized_action(@context, @current_user, [:manage_grades, :view_all_grades])
-      @current_user.migrate_preferences_if_needed
       sub_key = @current_user.shared_gradebook_column?(params[:column_id]) ? "shared" : @context.global_id
       size_hash = @current_user.get_preference(:gradebook_column_size, sub_key) || {}
       size_hash[params[:column_id]] = params[:column_size]
@@ -1394,7 +1408,6 @@ class GradebooksController < ApplicationController
 
   def change_gradebook_version
     update_preferred_gradebook_view!("gradebook")
-    @current_user.migrate_preferences_if_needed
     @current_user.set_preference(:gradebook_version, params[:version])
     redirect_to polymorphic_url([@context, :gradebook])
   end
@@ -1697,7 +1710,6 @@ class GradebooksController < ApplicationController
   end
 
   def gradebook_column_size_preferences
-    @current_user.migrate_preferences_if_needed
     @current_user.save if @current_user.changed?
     shared_settings = @current_user.get_preference(:gradebook_column_size, "shared") || {}
     course_settings = @current_user.get_preference(:gradebook_column_size, @context.global_id) || {}

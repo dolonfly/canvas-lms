@@ -432,6 +432,30 @@ describe WikiPage do
       expect(page.can_edit_page?(student)).to be_truthy
     end
 
+    it "is true for members who are in the course" do
+      course_with_designer(active_all: true)
+      page = @course.wiki_pages.create(title: "some page", editing_roles: "members")
+      expect(page.can_edit_page?(@designer)).to be_truthy
+    end
+
+    it "is not true for members who are in the course but not active" do
+      course_with_student(active_all: true)
+      page = @course.wiki_pages.create(title: "some page", editing_roles: "members")
+      student = @course.students.first
+      @course.enrollments.update!(workflow_state: "invited")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "creation_pending")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "deleted")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "rejected")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "completed")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "inactive")
+      expect(page.can_edit_page?(student)).to be_falsey
+    end
+
     it "is not true for users who are not in the course (if it is not public)" do
       course_factory(active_all: true)
       page = @course.wiki_pages.create(title: "some page", editing_roles: "public")
@@ -439,13 +463,31 @@ describe WikiPage do
       expect(page.can_edit_page?(@user)).to be_falsey
     end
 
-    it "is true for users who are not in the course (if it is public)" do
+    it "is not true for users who are not in the course (if it is public)" do
       course_factory(active_all: true)
       @course.is_public = true
       @course.save!
       page = @course.wiki_pages.create(title: "some page", editing_roles: "public")
       user_factory(active_all: true)
-      expect(page.can_edit_page?(@user)).to be_truthy
+      expect(page.can_edit_page?(@user)).to be_falsey
+    end
+
+    it "is not true for users who are in the course but not active" do
+      course_with_student(active_all: true)
+      page = @course.wiki_pages.create(title: "some page", editing_roles: "public")
+      student = @course.students.first
+      @course.enrollments.update!(workflow_state: "invited")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "creation_pending")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "deleted")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "rejected")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "completed")
+      expect(page.can_edit_page?(student)).to be_falsey
+      @course.update!(workflow_state: "inactive")
+      expect(page.can_edit_page?(student)).to be_falsey
     end
 
     context "when the page's course is concluded" do
@@ -491,6 +533,14 @@ describe WikiPage do
           expect(subject).to be false
         end
       end
+
+      context "with 'teachers,students,members' as the editing role" do
+        let(:editing_roles) { "teachers,students,members" }
+
+        it "returns false for a teacher" do
+          expect(subject).to be false
+        end
+      end
     end
 
     context "when the context is a Group" do
@@ -524,6 +574,22 @@ describe WikiPage do
         let(:current_user) { teacher }
 
         it { is_expected.to be false }
+      end
+
+      context "with 'members' as the editing role" do
+        let(:editing_roles) { "members" }
+
+        it "returns false for a teacher" do
+          expect(subject).to be false
+        end
+      end
+
+      context "with 'members,public' as the editing role" do
+        let(:editing_roles) { "members,public" }
+
+        it "returns false for a teacher" do
+          expect(subject).to be false
+        end
       end
     end
   end
@@ -1096,62 +1162,6 @@ describe WikiPage do
         @page.save!
         expect(@page.url).to eq("original-name")
       end
-    end
-  end
-
-  describe "#generate_embeddings" do
-    before do
-      skip "not available" unless ActiveRecord::Base.connection.table_exists?("wiki_page_embeddings")
-
-      expect(OpenAi).to receive(:smart_search_available?).at_least(:once).and_return(true)
-      allow(OpenAi).to receive(:generate_embedding).and_return([[1] * 1536])
-    end
-
-    before :once do
-      course_factory
-    end
-
-    it "generates an embedding when creating a page" do
-      wiki_page_model(title: "test", body: "foo")
-      run_jobs
-      expect(@page.reload.wiki_page_embeddings.count).to eq 1
-    end
-
-    it "replaces an embedding if it already exists" do
-      wiki_page_model(title: "test", body: "foo")
-      run_jobs
-      @page.update body: "bar"
-      run_jobs
-      expect(@page.reload.wiki_page_embeddings.count).to eq 1
-    end
-
-    it "strips HTML from the body before indexing" do
-      wiki_page_model(title: "test", body: "<ul><li>foo</li></ul>")
-      expect(OpenAi).to receive(:generate_embedding).with("* foo")
-      run_jobs
-    end
-
-    it "deletes embeddings when a page is deleted (and regenerates them when undeleted)" do
-      wiki_page_model(title: "test", body: "foo")
-      run_jobs
-      @page.destroy
-      expect(@page.reload.wiki_page_embeddings.count).to eq 0
-
-      @page.restore
-      run_jobs
-      expect(@page.reload.wiki_page_embeddings.count).to eq 1
-    end
-
-    it "generates multiple embeddings for a page with long content" do
-      wiki_page_model(title: "test", body: "foo" * 2000)
-      run_jobs
-      expect(@page.reload.wiki_page_embeddings.count).to eq 2
-    end
-
-    it "generates multiple embeddings and doesn't split words" do
-      wiki_page_model(title: "test", body: "supercalifragilisticexpialidocious " * 228)
-      run_jobs
-      expect(@page.reload.wiki_page_embeddings.count).to eq 3
     end
   end
 end

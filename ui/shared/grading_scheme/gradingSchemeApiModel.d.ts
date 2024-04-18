@@ -26,11 +26,11 @@ export interface GradingSchemeTemplate {
 }
 
 export type UsedLocation = {
-  id: number
+  id: string
   name: string
-  concluded: boolean
+  'concluded?': boolean
   assignments: {
-    id: number
+    id: string
     title: string
   }[]
 }
@@ -61,6 +61,7 @@ export interface GradingSchemeUpdateRequest {
 export interface GradingSchemeSummary {
   title: string
   id: string
+  context_type: 'Account' | 'Course'
 }
 
 export interface GradingSchemeCardData {

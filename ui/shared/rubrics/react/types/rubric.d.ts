@@ -22,9 +22,12 @@ export type Rubric = {
   criteriaCount: number
   hidePoints?: boolean
   locations: string[]
+  buttonDisplay?: string
+  ratingOrder?: string
   pointsPossible: number
   title: string
   workflowState?: string
+  hasRubricAssociations?: boolean
 }
 
 export type RubricCriterion = {
@@ -32,8 +35,8 @@ export type RubricCriterion = {
   points: number
   description: string
   longDescription: string
-  ignoreForScoring: boolean
-  masteryPoints: number
+  ignoreForScoring?: boolean
+  masteryPoints?: number
   criterionUseRange: boolean
   ratings: RubricRating[]
   learningOutcomeId?: string
@@ -44,4 +47,34 @@ export type RubricRating = {
   description: string
   longDescription: string
   points: number
+}
+
+export type RubricAssessment = {
+  id: string
+  rubricId: string
+  rubricAssociationId: string
+  artifactType: string
+  artifactId: string
+  artifactOutcomeId: string
+  assessmentType: string
+  data: RubricAssessmentData[]
+  workflowState: string
+}
+
+export type RubricAssessmentData = {
+  id: string
+  points?: number
+  criterionId: string
+  learningOutcomeId?: string
+  comments: string
+  commentsEnabled: boolean
+  description: string
+  saveCommentsForLater?: boolean
+}
+
+export type UpdateAssessmentData = {
+  criterionId: string
+  points?: number
+  description?: string
+  comments?: string
 }

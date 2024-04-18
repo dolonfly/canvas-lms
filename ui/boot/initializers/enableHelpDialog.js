@@ -26,6 +26,7 @@ import $ from 'jquery'
 import {find} from 'lodash'
 import htmlEscape, {raw} from '@instructure/html-escape'
 import '@canvas/jquery/jquery.instructure_misc_helpers'
+import '@canvas/jquery/jquery.instructure_forms'
 import 'jqueryui/dialog'
 import '@canvas/jquery/jquery.disableWhileLoading'
 
@@ -49,16 +50,16 @@ const helpDialog = {
       zIndex: 1000,
     })
 
-    helpDialog.$dialog.dialog('widget').delegate(
-      `a[href="#teacher_feedback"],
-      a[href="#create_ticket"],
-      a[href="#help-dialog-options"]`,
-      'click',
-      event => {
-        if (event) event.preventDefault()
-        helpDialog.switchTo($(event.currentTarget).attr('href'))
-      }
-    )
+    helpDialog.$dialog
+      .dialog('widget')
+      .on(
+        'click',
+        'a[href="#teacher_feedback"],a[href="#create_ticket"],a[href="#help-dialog-options"]',
+        event => {
+          if (event) event.preventDefault()
+          helpDialog.switchTo($(event.currentTarget).attr('href'))
+        }
+      )
 
     helpDialog.helpLinksDfd = $.getJSON('/help_links').done(links => {
       // only show the links that are available to the roles of this user

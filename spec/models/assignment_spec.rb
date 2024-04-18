@@ -2468,6 +2468,12 @@ describe Assignment do
         it "has a version length of one" do
           expect(submission.versions.length).to eq 1
         end
+
+        it "new version is created when current grade is empty and there are previously graded versions" do
+          assignment.grade_student(student, grade: "", grader: teacher)
+          updated_submission = assignment.grade_student(student, grade: "6", grader: teacher)
+          expect(updated_submission[0].versions.length).to eq 3
+        end
       end
 
       context "and the submission is associated with an LTI::Result marked PendingManual" do
@@ -10463,6 +10469,7 @@ describe Assignment do
           expect(assignment.line_items.length).to eq 1
           expect(assignment.line_items.first.label).to eq assignment.title
           expect(assignment.line_items.first.score_maximum).to eq assignment.points_possible
+          expect(assignment.line_items.first.start_date_time).to eq assignment.unlock_at
           expect(assignment.line_items.first.end_date_time).to eq assignment.due_at
           expect(assignment.line_items.first.coupled).to be true
           expect(assignment.line_items.first.resource_link).not_to be_nil
@@ -10482,25 +10489,30 @@ describe Assignment do
           previous_title = assignment.title
           previous_points_possible = assignment.points_possible
           previous_due_at = assignment.due_at
+          previous_unlock_at = assignment.unlock_at
           first_line_item = assignment.line_items.first
           line_item_two = assignment.line_items.create!(
             label: previous_title,
             score_maximum: previous_points_possible,
             resource_link: first_line_item.resource_link,
+            start_date_time: previous_unlock_at,
             end_date_time: previous_due_at
           )
           line_item_two.update!(created_at: first_line_item.created_at + 1.minute)
           assignment.title += " edit"
           assignment.points_possible += 10
+          assignment.unlock_at = assignment.due_at - 127.hours
           assignment.due_at += 3.days
           assignment.save!
           assignment.reload
           expect(assignment.line_items.length).to eq 2
           expect(assignment.line_items.find(&:assignment_line_item?).label).to eq assignment.title
           expect(assignment.line_items.find(&:assignment_line_item?).score_maximum).to eq assignment.points_possible
+          expect(assignment.line_items.find(&:assignment_line_item?).start_date_time).to eq assignment.unlock_at
           expect(assignment.line_items.find(&:assignment_line_item?).end_date_time).to eq assignment.due_at
           expect(assignment.line_items.find { |li| !li.assignment_line_item? }.label).to eq previous_title
           expect(assignment.line_items.find { |li| !li.assignment_line_item? }.score_maximum).to eq previous_points_possible
+          expect(assignment.line_items.find { |li| !li.assignment_line_item? }.start_date_time).to eq previous_unlock_at
           expect(assignment.line_items.find { |li| !li.assignment_line_item? }.end_date_time).to eq previous_due_at
         end
       end
@@ -11162,21 +11174,12 @@ describe Assignment do
   end
 
   def setup_assignment_with_students
-    @graded_notify = Notification.create!(name: "Submission Graded")
-    @grade_change_notify = Notification.create!(name: "Submission Grade Changed")
+    @graded_notify = Notification.create!(name: "Submission Graded", category: "TestImmediately")
+    @grade_change_notify = Notification.create!(name: "Submission Grade Changed", category: "TestImmediately")
     @stu1 = @student
     communication_channel(@stu1, active_cc: true)
     @course.enroll_student(@stu2 = user_factory(active_user: true, active_cc: true))
     @assignment = @course.assignments.create(title: "a title", points_possible: 10)
-
-    [@stu1, @stu2].each do |stu|
-      [@graded_notify, @grade_change_notify].each do |notification|
-        notification_policy_model(
-          notification:,
-          communication_channel: stu.communication_channels.first
-        )
-      end
-    end
 
     @sub1 = @assignment.grade_student(@stu1, grade: 9, grader: @teacher).first
     @assignment.reload
@@ -11552,60 +11555,106 @@ describe Assignment do
       end
 
       describe "#directly_associated_items" do
-        it "finds all active assignments in the same course" do
-          create_misc_assignments
-          direct_assignment
-          indirect_assignment
+        subject { Assignment.scope_to_context(Assignment.directly_associated_items(old_tool.id), context) }
 
-          expect(Assignment.directly_associated_items(old_tool.id, course))
-            .to contain_exactly(direct_assignment, unpublished_direct)
+        context "in course" do
+          let(:context) { course }
+
+          it "finds all active assignments in the same course" do
+            create_misc_assignments
+            direct_assignment
+            indirect_assignment
+
+            expect(subject).to contain_exactly(direct_assignment, unpublished_direct)
+          end
         end
 
-        it "finds all active assignments in the same account" do
-          create_misc_assignments
-          direct_assignment
-          indirect_assignment
+        context "in account" do
+          let(:context) { account }
 
-          new_course = course_model(account:)
-          other_assign = assignment_model(
-            context: new_course,
-            submission_types: "external_tool",
-            external_tool_tag_attributes: { content: old_tool },
-            lti_context_id: SecureRandom.uuid
-          )
+          it "finds all active assignments in the same account" do
+            create_misc_assignments
+            direct_assignment
+            indirect_assignment
 
-          expect(Assignment.directly_associated_items(old_tool.id, account))
-            .to contain_exactly(direct_assignment, other_assign, unpublished_direct)
+            new_course = course_model(account:)
+            other_assign = assignment_model(
+              context: new_course,
+              submission_types: "external_tool",
+              external_tool_tag_attributes: { content: old_tool },
+              lti_context_id: SecureRandom.uuid
+            )
+
+            expect(subject).to contain_exactly(direct_assignment, other_assign, unpublished_direct)
+          end
         end
       end
 
       describe "#indirectly_associated_items" do
-        it "finds all active assignments in the same course" do
-          create_misc_assignments
-          direct_assignment
-          indirect_assignment
+        subject { Assignment.scope_to_context(Assignment.indirectly_associated_items(old_tool.id), context) }
 
-          expect(Assignment.indirectly_associated_items(old_tool.id, course))
-            .to contain_exactly(indirect_assignment, unpublished_indirect)
+        context "in course" do
+          let(:context) { course }
+
+          it "finds all active assignments in the same course" do
+            create_misc_assignments
+            direct_assignment
+            indirect_assignment
+
+            expect(subject).to contain_exactly(indirect_assignment, unpublished_indirect)
+          end
         end
 
-        it "finds all active assignments in the same account" do
-          create_misc_assignments
-          direct_assignment
-          indirect_assignment
+        context "in account" do
+          let(:context) { account }
 
-          new_course = course_model(account:)
-          other_assign = assignment_model(
-            context: new_course,
-            title: "Indirect Assignment, Same Account",
-            submission_types: "external_tool",
-            external_tool_tag_attributes: { url: },
-            lti_context_id: SecureRandom.uuid
-          )
-          other_assign.external_tool_tag.update_column(:content_id, nil)
+          it "finds all active assignments in the same account" do
+            create_misc_assignments
+            direct_assignment
+            indirect_assignment
 
-          expect(Assignment.indirectly_associated_items(old_tool.id, account))
-            .to contain_exactly(indirect_assignment, other_assign, unpublished_indirect)
+            new_course = course_model(account:)
+            other_assign = assignment_model(
+              context: new_course,
+              title: "Indirect Assignment, Same Account",
+              submission_types: "external_tool",
+              external_tool_tag_attributes: { url: },
+              lti_context_id: SecureRandom.uuid
+            )
+            other_assign.external_tool_tag.update_column(:content_id, nil)
+
+            expect(subject).to contain_exactly(indirect_assignment, other_assign, unpublished_indirect)
+          end
+        end
+
+        context "in subaccount" do
+          let(:context) { account_model(parent_account: account) }
+
+          it "finds all active assignment in the current account" do
+            create_misc_assignments
+            direct_assignment
+            indirect_assignment
+
+            new_course = course_model(account: context)
+            other_assign = assignment_model(
+              context: new_course,
+              title: "Indirect Assignment, Same Account",
+              submission_types: "external_tool",
+              external_tool_tag_attributes: { url: },
+              lti_context_id: SecureRandom.uuid
+            )
+            other_assign.external_tool_tag.update_column(:content_id, nil)
+
+            expect(subject).to contain_exactly(other_assign)
+          end
+
+          it "does not find assignments outside of the account" do
+            create_misc_assignments
+            direct_assignment
+            indirect_assignment
+
+            expect(subject).to be_empty
+          end
         end
       end
     end
@@ -11629,8 +11678,9 @@ describe Assignment do
           lti_context_id: SecureRandom.uuid
         )
 
-        expect(Assignment.fetch_indirect_batch(old_tool.id, new_tool.id, [indirect_assignment.id, invalid_assign.id]).to_a)
-          .to contain_exactly(indirect_assignment)
+        assignments = []
+        Assignment.fetch_indirect_batch(old_tool.id, new_tool.id, [indirect_assignment.id, invalid_assign.id]) { |a| assignments << a }
+        expect(assignments).to contain_exactly(indirect_assignment)
       end
     end
   end

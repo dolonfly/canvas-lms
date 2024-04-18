@@ -60,11 +60,13 @@ type Props = {
   customOnRequestSelectOption: (ids: string[]) => void
   customOnRequestShowOptions: () => void
   customRenderBeforeInput: (tags: any) => React.ReactNode
+  customOnBlur?: () => void
   disabled: boolean
   id?: string
   isLoading: boolean
   isShowingOptions?: boolean
   label: React.ReactNode
+  inputRef?: (inputElement: HTMLInputElement | null) => void
   listRef?: (ref: HTMLUListElement | null) => void
   noOptionsLabel: string
   onChange: (ids: string[]) => void
@@ -93,6 +95,7 @@ function CanvasMultiSelect(props: Props) {
     customOnRequestShowOptions,
     customOnRequestHideOptions,
     customOnRequestSelectOption,
+    customOnBlur,
     isLoading,
     onUpdateHighlightedOption,
     setInputRef,
@@ -224,10 +227,12 @@ function CanvasMultiSelect(props: Props) {
     return groups.length === 0 ? filteredChildren : renderGroups()
   }
 
-  function dismissTag(e: React.MouseEvent<ViewProps, MouseEvent>, id: string) {
+  function dismissTag(e: React.MouseEvent<ViewProps, MouseEvent>, id: string, label: string) {
     e.stopPropagation()
     e.preventDefault()
+    setAnnouncement(I18n.t('%{label} removed.', {label}))
     onChange(selectedOptionIds.filter(x => x !== id))
+    inputRef?.current?.focus()
   }
 
   function renderTags() {
@@ -246,7 +251,7 @@ function CanvasMultiSelect(props: Props) {
             text={tagText}
             title={I18n.t('Remove %{label}', {label: tagText})}
             margin="0 xxx-small"
-            onClick={(e: React.MouseEvent<ViewProps, MouseEvent>) => dismissTag(e, id)}
+            onClick={(e: React.MouseEvent<ViewProps, MouseEvent>) => dismissTag(e, id, tagText)}
           />
         )
       })
@@ -258,12 +263,16 @@ function CanvasMultiSelect(props: Props) {
     return customRenderBeforeInput ? customRenderBeforeInput(tags) : tags
   }
 
+  const memoizedChildprops = useMemo(() => {
+    return childProps.map(({label, ...props}) => props)
+  }, [childProps])
+
   useEffect(() => {
     if (inputValue !== '') {
       filterOptions(inputValue)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [childProps])
+  }, [JSON.stringify(memoizedChildprops)])
 
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const {value} = e.target
@@ -310,6 +319,7 @@ function CanvasMultiSelect(props: Props) {
 
   function onRequestHideOptions() {
     setIsShowingOptions(false)
+    customOnRequestHideOptions()
     if (!highlightedOptionId) return
     setInputValue('')
     if (filteredOptionIds?.length === 1) {
@@ -320,7 +330,6 @@ function CanvasMultiSelect(props: Props) {
       onChange([...selectedOptionIds, filteredOptionIds[0]])
     }
     setFilteredOptionIds(null)
-    customOnRequestHideOptions()
   }
 
   function onRequestHighlightOption(e: any, {id}: any) {
@@ -360,6 +369,7 @@ function CanvasMultiSelect(props: Props) {
 
   function onBlur() {
     setHighlightedOptionId(null)
+    customOnBlur?.()
   }
 
   return (

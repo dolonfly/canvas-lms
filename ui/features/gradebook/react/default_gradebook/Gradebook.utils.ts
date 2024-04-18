@@ -455,9 +455,14 @@ export function buildStudentColumn(
   gradebookColumnSizeSetting: string,
   defaultWidth: number
 ): GridColumn {
-  const studentColumnWidth = gradebookColumnSizeSetting
+  let studentColumnWidth = gradebookColumnSizeSetting
     ? parseInt(gradebookColumnSizeSetting, 10)
     : defaultWidth
+  if (Number.isNaN(studentColumnWidth)) {
+    studentColumnWidth = defaultWidth
+    // eslint-disable-next-line no-console
+    console.warn('invalid student column width')
+  }
   return {
     cssClass: 'meta-cell primary-column student',
     headerCssClass: 'primary-column student',
@@ -583,8 +588,13 @@ export function escapeStudentContent(student: Student) {
   const unescapedFirstName = student.first_name
   const unescapedLastName = student.last_name
 
-  // TODO: selectively escape fields
-  const escapedStudent: Student = htmlEscape<Student>(student)
+  for (const key in student) {
+    if (Object.prototype.hasOwnProperty.call(student, key)) {
+      ;(student as any)[key] = htmlEscape((student as any)[key])
+    }
+  }
+  const escapedStudent: Student = student
+
   escapedStudent.name = unescapedName
   escapedStudent.sortable_name = unescapedSortableName
   escapedStudent.first_name = unescapedFirstName

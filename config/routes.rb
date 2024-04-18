@@ -474,6 +474,7 @@ CanvasRails::Application.routes.draw do
     resources :content_exports, only: %i[create index destroy show]
     get "offline_web_exports" => "courses#offline_web_exports"
     post "start_offline_web_export" => "courses#start_offline_web_export"
+    get "start_offline_web_export" => "courses#start_offline_web_export"
     get "modules/items/assignment_info" => "context_modules#content_tag_assignment_data", :as => :context_modules_assignment_info
     get "modules/items/master_course_info" => "context_modules#content_tag_master_course_data", :as => :context_modules_master_course_info
     get "modules/items/:id" => "context_modules#item_redirect", :as => :context_modules_item_redirect
@@ -784,6 +785,10 @@ CanvasRails::Application.routes.draw do
     end
     resources :developer_keys, only: :index
     get "/developer_keys/:key_id", controller: :developer_keys, action: :index, as: "account_developer_key_view"
+
+    get "extensions", controller: :lti_registrations, action: :index, as: "lti_registrations"
+    get "extensions/*path", controller: :lti_registrations, action: :index
+    get "extensions/manage", controller: :lti_registrations, action: :index, as: "lti_manage_registrations"
 
     get "release_notes" => "release_notes#manage", :as => :release_notes_manage
 
@@ -1594,6 +1599,7 @@ CanvasRails::Application.routes.draw do
 
       get "users/:id", action: :api_show
       put "users/:id", action: :update
+      delete "users/mobile_sessions", action: :expire_mobile_sessions
       delete "users/:id", action: :destroy, as: "destroy_user"
       delete "users/:id/sessions", action: :terminate_sessions
 
@@ -1632,8 +1638,6 @@ CanvasRails::Application.routes.draw do
 
       post "users/:id/clear_cache", action: :clear_cache, as: "clear_cache"
 
-      delete "users/mobile_sessions", controller: "users", action: :expire_mobile_sessions
-
       scope(controller: :user_observees) do
         get    "users/:user_id/observers", action: :observers, as: "user_observers"
         get    "users/:user_id/observees", action: :index, as: "user_observees"
@@ -1645,11 +1649,17 @@ CanvasRails::Application.routes.draw do
       end
 
       scope(controller: :learning_object_dates) do
+        get "courses/:course_id/modules/:context_module_id/date_details", action: :show, as: "course_context_module_date_details"
         get "courses/:course_id/assignments/:assignment_id/date_details", action: :show, as: "course_assignment_date_details"
         get "courses/:course_id/quizzes/:quiz_id/date_details", action: :show, as: "course_quizzes_quiz_date_details"
-        get "courses/:course_id/modules/:context_module_id/date_details", action: :show, as: "course_context_module_date_details"
+        get "courses/:course_id/discussion_topics/:discussion_topic_id/date_details", action: :show, as: "course_discussion_topic_date_details"
+        get "courses/:course_id/pages/:page_id/date_details", action: :show, as: "course_wiki_page_date_details"
+        get "courses/:course_id/files/:attachment_id/date_details", action: :show, as: "course_attachment_date_details"
         put "courses/:course_id/assignments/:assignment_id/date_details", action: :update
         put "courses/:course_id/quizzes/:quiz_id/date_details", action: :update
+        put "courses/:course_id/discussion_topics/:discussion_topic_id/date_details", action: :update
+        put "courses/:course_id/pages/:page_id/date_details", action: :update
+        put "courses/:course_id/files/:attachment_id/date_details", action: :update
       end
 
       scope(controller: :login) do
@@ -2311,6 +2321,7 @@ CanvasRails::Application.routes.draw do
         put "#{prefix}/:id/fail", action: :fail
       end
       get "courses/:course_id/content_list", action: :content_list, as: "course_content_list"
+      put "courses/:course_id/content_exports/:id", action: :update
     end
 
     scope(controller: :epub_exports) do
@@ -2617,7 +2628,12 @@ CanvasRails::Application.routes.draw do
 
     scope(controller: "smart_search") do
       get "courses/:course_id/smartsearch", action: :search, as: :course_smart_search_query
+      get "courses/:course_id/smartsearch/log", action: :log
       # TODO: add account level search
+    end
+
+    scope(controller: "user_notes") do
+      put "users/:user_id/user_notes/suppress_deprecation_notice", action: :suppress_deprecation_notice
     end
   end
 
@@ -2665,6 +2681,8 @@ CanvasRails::Application.routes.draw do
   get "login/oauth2/jwks" => "security#jwks", :as => :oauth2_jwks
 
   get "post_message_forwarding", controller: "lti/platform_storage", action: :post_message_forwarding, as: :lti_post_message_forwarding
+
+  get "lti/tool_default_icon" => "lti/tool_default_icon#show"
 
   ApiRouteSet.draw(self, "/api/lti/v1") do
     post "tools/:tool_id/grade_passback", controller: :lti_api, action: :grade_passback, as: "lti_grade_passback_api"
@@ -2792,7 +2810,7 @@ CanvasRails::Application.routes.draw do
       get "accounts/:account_id/registrations/uuid/:registration_uuid", action: :registration_by_uuid
       put "accounts/:account_id/registrations/:registration_id/overlay", action: :update_registration_overlay
       get "registrations/:registration_id/view", action: :registration_view, as: :lti_registration_config
-      post "registrations", action: :create
+      post "registrations", action: :create, as: :create_lti_registration
     end
 
     # Public JWK Service

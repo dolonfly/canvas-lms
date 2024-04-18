@@ -162,13 +162,14 @@ describe('SettingsPanel', () => {
   it('calls updateParentData on unmount with changes', async () => {
     const updateParentDataMock = jest.fn()
     const {unmount, findByTestId} = renderComponent({updateParentData: updateParentDataMock})
-    userEvent.type(await findByTestId('module-name-input'), '2')
+    await userEvent.type(await findByTestId('module-name-input'), '2')
     unmount()
     expect(updateParentDataMock).toHaveBeenCalledWith(
       {
         lockUntilChecked: false,
         moduleName: 'Week 12',
         nameInputMessages: [],
+        lockUntilInputMessages: [],
         prerequisites: [],
         publishFinalGrade: false,
         requireSequentialProgress: false,
@@ -189,6 +190,7 @@ describe('SettingsPanel', () => {
         lockUntilChecked: false,
         moduleName: 'Week 1',
         nameInputMessages: [],
+        lockUntilInputMessages: [],
         prerequisites: [],
         publishFinalGrade: false,
         requireSequentialProgress: false,
@@ -211,13 +213,14 @@ describe('SettingsPanel', () => {
     })
 
     it('validates the module name', () => {
-      const {getByRole, getByText} = renderComponent({moduleName: ''})
+      const {getByRole, getByText, getByTestId} = renderComponent({moduleName: ''})
       const updateButton = getByRole('button', {name: 'Save'})
+      const nameInput = getByTestId('module-name-input')
 
       updateButton.click()
-      updateButton.focus()
       expect(getByText('Please fix errors before continuing')).toBeInTheDocument()
-      expect(getByText('Module Name is required.')).toBeInTheDocument()
+      expect(getByText('Module name can’t be blank')).toBeInTheDocument()
+      expect(nameInput).toHaveFocus()
     })
 
     it('makes a request to the modules update endpoint', async () => {
@@ -290,7 +293,7 @@ describe('SettingsPanel', () => {
         onDidSubmit: onDidSubmitMock,
         onDismiss: onDismissMock,
       })
-      userEvent.click(getByRole('button', {name: 'Save'}))
+      await userEvent.click(getByRole('button', {name: 'Save'}))
 
       expect(await findByTestId('loading-overlay')).toBeInTheDocument()
       expect(onDidSubmitMock).toHaveBeenCalled()
@@ -323,7 +326,7 @@ describe('SettingsPanel', () => {
         onDidSubmit: onDidSubmitMock,
         onDismiss: onDismissMock,
       })
-      userEvent.click(getByRole('button', {name: 'Add Module'}))
+      await userEvent.click(getByRole('button', {name: 'Add Module'}))
 
       expect(await findByTestId('loading-overlay')).toBeInTheDocument()
       expect(onDidSubmitMock).toHaveBeenCalled()

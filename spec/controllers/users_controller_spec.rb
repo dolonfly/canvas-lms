@@ -62,17 +62,10 @@ describe UsersController do
     end
 
     context "ENV.LTI_TOOL_FORM_ID" do
-      it "with the lti_unique_tool_form_ids flag on, sets a random id" do
-        account.enable_feature!(:lti_unique_tool_form_ids)
+      it "sets a random id" do
         expect(controller).to receive(:random_lti_tool_form_id).and_return("1")
         allow(controller).to receive(:js_env).with(anything).and_call_original
         expect(controller).to receive(:js_env).with(LTI_TOOL_FORM_ID: "1")
-        get :external_tool, params: { id: tool.id, user_id: user.id }
-      end
-
-      it "with the lti_unique_tool_form_ids flag off, does not set a random it" do
-        account.disable_feature!(:lti_unique_tool_form_ids)
-        expect(controller).not_to receive(:js_env).with(LTI_TOOL_FORM_ID: anything)
         get :external_tool, params: { id: tool.id, user_id: user.id }
       end
     end
@@ -131,16 +124,12 @@ describe UsersController do
       let(:developer_key) { DeveloperKey.create! }
 
       before do
-        Lti::LaunchDebugLogger.enable!(account, 1)
-
         allow(SecureRandom).to receive(:hex).and_return(verifier)
         tool.use_1_3 = true
         tool.developer_key = developer_key
         tool.save!
         get :external_tool, params: { id: tool.id, user_id: user.id }
       end
-
-      after { Lti::LaunchDebugLogger.disable!(account) }
 
       it "creates a login message" do
         expect(assigns[:lti_launch].params.keys).to match_array %w[
@@ -180,12 +169,6 @@ describe UsersController do
         it "uses the oidc_initiation_url as the resource_url" do
           expect(assigns[:lti_launch].resource_url).to eq oidc_initiation_url
         end
-      end
-
-      it "includes debug_trace in the lti_message_hint (if enabled for the account)" do
-        message_hint = JSON::JWT.decode(assigns[:lti_launch].params["lti_message_hint"], :skip_verification)
-        expect(message_hint["debug_trace"]).to be_a(String)
-        expect(message_hint["debug_trace"]).to_not be_empty
       end
     end
   end
@@ -2309,8 +2292,6 @@ describe UsersController do
     end
 
     it "404s, but still shows, on a deleted user for admins" do
-      Account.site_admin.enable_feature!(:deleted_user_tools)
-
       course_with_teacher(active_all: 1, user: user_with_pseudonym)
 
       account_admin_user
@@ -2363,8 +2344,6 @@ describe UsersController do
     end
 
     it "shows a deleted user from the account context if they have a deleted pseudonym for that account" do
-      Account.site_admin.enable_feature!(:deleted_user_tools)
-
       course_with_teacher(active_all: 1, user: user_with_pseudonym)
       account_admin_user(active_all: true)
       user_session(@admin)
@@ -2378,7 +2357,6 @@ describe UsersController do
       specs_require_sharding
 
       before do
-        Account.site_admin.enable_feature!(:deleted_user_tools)
         @shard1.activate do
           course_with_teacher(active_all: 1, user: user_with_pseudonym)
         end
@@ -3356,6 +3334,11 @@ describe UsersController do
 
     before do
       user.access_tokens.create!
+
+      @sns_client = double
+      allow(DeveloperKey).to receive(:sns).and_return(@sns_client)
+      expect(@sns_client).to receive(:create_platform_endpoint).and_return(endpoint_arn: "arn")
+      user.access_tokens.each_with_index { |ac, i| ac.notification_endpoints.create!(token: "token #{i}") }
     end
 
     it "rejects unauthenticated users" do
@@ -3382,10 +3365,13 @@ describe UsersController do
 
     it "allows admin to expire mobile sessions" do
       user_session(admin)
+      starting_notification_endpoints_count = user.notification_endpoints.count
+      expect(starting_notification_endpoints_count).to be > 0
       delete "expire_mobile_sessions", format: :json
 
       expect(response).to have_http_status :ok
       expect(user.reload.access_tokens.take.permanent_expires_at).to be <= Time.zone.now
+      expect(user.reload.notification_endpoints.count).to be < starting_notification_endpoints_count
     end
 
     it "only expires access tokens associated to mobile app developer keys" do

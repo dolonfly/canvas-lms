@@ -251,7 +251,8 @@ describe GradingSchemesJsonController, type: :request do
         expect(response_json.length).to eq 1
 
         expect(response_json.first).to eq({ "id" => account_level_grading_standard.id.to_s,
-                                            "title" => "My Account Level Grading Standard" })
+                                            "title" => "My Account Level Grading Standard",
+                                            "context_type" => account_level_grading_standard.context_type.to_s })
       end
     end
 
@@ -497,50 +498,6 @@ describe GradingSchemesJsonController, type: :request do
         expect(course_ids).to include(another_course.id)
       end
     end
-
-    describe "#default_used_locations" do
-      let_once(:data) { [["A", 94], ["F", 0]] }
-
-      before(:once) do
-        @root_account = Account.default
-        course_with_teacher(active_all: true, account: @root_account)
-        @admin = account_admin_user(account: @root_account)
-        @student = user_factory(active_user: true)
-        @sub_account = @root_account.sub_accounts.create!
-        course_with_teacher(account: @root_account)
-        @enrollment.update(workflow_state: "active")
-        @root_account.update(grading_standard_id: nil)
-        @sub_account.update(grading_standard_id: nil)
-        @course.update(grading_standard_id: nil)
-        3.times do
-          assignment = @course.assignments.create!(title: "hi", grading_standard_id: nil, grading_type: "letter_grade")
-          assignment.submissions.create!(user: @student, workflow_state: "graded")
-        end
-      end
-
-      it "returns courses and assignments where the grading standard is used" do
-        user_session(@admin)
-        get "/accounts/#{@account.id}/grading_schemes/default_used_locations", as: :json
-        locations = response.parsed_body
-
-        expect(locations.size).to eq(1)
-        expect(locations.first["id"]).to eq(@course.id)
-        expect(locations.first["assignments"].size).to eq(3)
-      end
-
-      it "does not return courses without graded assignments" do
-        another_course = course_factory
-        another_course.assignments.create!(title: "hi")
-        @course.assignments.create!(title: "hi")
-
-        user_session(@admin)
-        get "/accounts/#{@account.id}/grading_schemes/default_used_locations", as: :json
-        locations = response.parsed_body
-
-        course_ids = locations.pluck("id")
-        expect(course_ids).not_to include(another_course.id)
-      end
-    end
   end
 
   context "course teacher" do
@@ -663,10 +620,12 @@ describe GradingSchemesJsonController, type: :request do
         expect(response_json.length).to eq 2
 
         expect(response_json.first).to eq({ "id" => account_level_grading_standard.id.to_s,
-                                            "title" => "My Account Level Grading Standard" })
+                                            "title" => "My Account Level Grading Standard",
+                                            "context_type" => "Account" })
 
         expect(response_json[1]).to eq({ "id" => course_level_grading_standard.id.to_s,
-                                         "title" => "My Course Level Grading Standard" })
+                                         "title" => "My Course Level Grading Standard",
+                                         "context_type" => "Course" })
       end
     end
 
