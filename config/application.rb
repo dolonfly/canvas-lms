@@ -34,7 +34,7 @@ debug_launch = lambda do
 
     DEBUGGER__.open(nonstop: ENV["RUBY_DEBUG_NONSTOP"])
   elsif ENV["RUBY_DEBUG_START"]
-    require "debug/start"
+    require "debug/start" # rubocop:disable Lint/Debugger
   end
 end
 
@@ -185,12 +185,13 @@ module CanvasRails
 
             begin
               return super(conn_params)
-            rescue ::ActiveRecord::ActiveRecordError => e
+            rescue ::ActiveRecord::ActiveRecordError, ::PG::Error => e
               # If exception occurs using parameters from a predefined pg service, retry without
               if conn_params.key?(:service)
                 CanvasErrors.capture(e, { tags: { pg_service: conn_params[:service] } }, :warn)
                 Rails.logger.warn("Error connecting to database using pg service `#{conn_params[:service]}`; retrying without... (error: #{e.message})")
                 conn_params.delete(:service)
+                conn_params[:sslmode] = "disable"
                 retry
               else
                 raise
@@ -235,12 +236,13 @@ module CanvasRails
             else
               @raw_connection = PG::Connection.connect(connection_parameters)
             end
-          rescue ::PG::Error => e
+          rescue ::ActiveRecord::ActiveRecordError, ::PG::Error => e
             # If exception occurs using parameters from a predefined pg service, retry without
             if connection_parameters.key?(:service)
               CanvasErrors.capture(e, { tags: { pg_service: connection_parameters[:service] } }, :warn)
               Rails.logger.warn("Error connecting to database using pg service `#{connection_parameters[:service]}`; retrying without... (error: #{e.message})")
               connection_parameters.delete(:service)
+              connection_parameters[:sslmode] = "disable"
               retry
             else
               raise
