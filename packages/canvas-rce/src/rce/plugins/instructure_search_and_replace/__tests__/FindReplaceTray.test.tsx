@@ -17,7 +17,7 @@
  */
 
 import React from 'react'
-import {render, screen} from '@testing-library/react'
+import {fireEvent, render, screen, waitFor} from '@testing-library/react'
 
 import FindReplaceTrayController from '../components/FindReplaceTrayController'
 import userEvent, {UserEvent} from '@testing-library/user-event'
@@ -40,6 +40,7 @@ describe('FindReplaceTray', () => {
     props = {
       onDismiss: jest.fn(),
       plugin: fakePlugin,
+      getSelectionContext: jest.fn(() => ['text before ', ' text after']),
     }
   })
 
@@ -74,8 +75,10 @@ describe('FindReplaceTray', () => {
     await type(user, findInput, 'a')
     await user.keyboard('{backspace}')
     const errorText = screen.queryByLabelText(/no results found/i)
-    expect(errorText).not.toBeInTheDocument()
-    expect(fakePlugin.done).toHaveBeenCalledTimes(1)
+    expect(errorText).toBeNull()
+    await waitFor(() => {
+      expect(fakePlugin.done).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('cleans up when closed', async () => {
@@ -89,13 +92,13 @@ describe('FindReplaceTray', () => {
     const {user} = renderComponent()
     const findInput = screen.getByTestId('find-text-input')
     await type(user, findInput, 'some text')
-
-    const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+    const replaceInput = screen.getByTestId('replace-text-input')
     await type(user, replaceInput, 'some text')
-    const replaceButton = screen.getByRole('button', {name: /replace all/i})
+    const replaceButton = screen.getByTestId('replace-all-button')
     await user.click(replaceButton)
+
     await user.click(findInput)
-    await user.keyboard('{enter}')
+    fireEvent.keyDown(findInput, {key: 'Enter'})
     const resultText = screen.getByLabelText(/1 of 3/i)
     expect(resultText).toBeInTheDocument()
   })
@@ -134,9 +137,9 @@ describe('FindReplaceTray', () => {
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
 
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      await user.keyboard('{enter}')
+      fireEvent.keyDown(replaceInput, {key: 'Enter'})
 
       expect(fakePlugin.replace).toHaveBeenCalledWith('some text', true, false)
       expect(fakePlugin.replace).toHaveBeenCalledTimes(1)
@@ -147,12 +150,26 @@ describe('FindReplaceTray', () => {
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
 
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      await user.keyboard('{shift>}{enter}')
+      fireEvent.keyDown(replaceInput, {shiftKey: true, key: 'Enter'})
 
       expect(fakePlugin.replace).toHaveBeenCalledWith('some text', false, false)
       expect(fakePlugin.replace).toHaveBeenCalledTimes(1)
+    })
+
+    it('displays visual and screenreader alerts when replacing', async () => {
+      const {user} = renderComponent()
+      const findInput = screen.getByTestId('find-text-input')
+      await type(user, findInput, 'a')
+
+      const replaceInput = screen.getByTestId('replace-text-input')
+      await type(user, replaceInput, 'some text')
+      const replaceButton = screen.getByTestId('replace-button')
+      await user.click(replaceButton)
+
+      const alert = await screen.findAllByText(/Replaced a with some text/i)
+      expect(alert.length).toBe(2)
     })
   })
 
@@ -162,9 +179,9 @@ describe('FindReplaceTray', () => {
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
 
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      const replaceButton = screen.getByRole('button', {name: /replace all/i})
+      const replaceButton = screen.getByTestId('replace-all-button')
       await user.click(replaceButton)
 
       expect(fakePlugin.replace).toHaveBeenCalledWith('some text', true, true)
@@ -176,19 +193,33 @@ describe('FindReplaceTray', () => {
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
 
-      const nextButton = screen.getByRole('button', {name: /next/i})
+      const nextButton = screen.getByTestId('next-button')
       await user.click(nextButton)
       const initalResulttext = screen.getByLabelText(/2 of 3/i)
       expect(initalResulttext).toBeInTheDocument()
 
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      const replaceButton = screen.getByRole('button', {name: /replace all/i})
+      const replaceButton = screen.getByTestId('replace-all-button')
       await user.click(replaceButton)
 
       expect(fakePlugin.replace).toHaveBeenCalledTimes(1)
       const resultText = screen.queryByLabelText(/2 of 2/i)
       expect(resultText).not.toBeInTheDocument()
+    })
+
+    it('displays visual and screenreader alerts when replacing all', async () => {
+      const {user} = renderComponent()
+      const findInput = screen.getByTestId('find-text-input')
+      await type(user, findInput, 'a')
+
+      const replaceInput = screen.getByTestId('replace-text-input')
+      await type(user, replaceInput, 'some text')
+      const replaceButton = screen.getByTestId('replace-all-button')
+      await user.click(replaceButton)
+
+      const alert = await screen.findAllByText(/Replaced all a with some text/i)
+      expect(alert.length).toBe(2)
     })
   })
 
@@ -196,8 +227,8 @@ describe('FindReplaceTray', () => {
     it('find and previous buttons are disabled with only one search result', async () => {
       fakePlugin.find = jest.fn(() => 1)
       const {user} = renderComponent()
-      const nextButton = screen.getByRole('button', {name: /next/i})
-      const prevButton = screen.getByRole('button', {name: /previous/i})
+      const nextButton = screen.getByTestId('next-button')
+      const prevButton = screen.getByTestId('previous-button')
       expect(nextButton).toBeDisabled()
       expect(prevButton).toBeDisabled()
 
@@ -209,8 +240,8 @@ describe('FindReplaceTray', () => {
 
     it('find and previous buttons are enabled with more than one search result', async () => {
       const {user} = renderComponent()
-      const nextButton = screen.getByRole('button', {name: /next/i})
-      const prevButton = screen.getByRole('button', {name: /previous/i})
+      const nextButton = screen.getByTestId('next-button')
+      const prevButton = screen.getByTestId('previous-button')
       expect(nextButton).toBeDisabled()
       expect(prevButton).toBeDisabled()
 
@@ -222,37 +253,29 @@ describe('FindReplaceTray', () => {
 
     it('replace button is enabled when search result and replacement text', async () => {
       const {user} = renderComponent()
-      const replaceButton = screen.getByRole('button', {name: /^replace$/i})
+      const replaceButton = screen.getByTestId('replace-button')
       expect(replaceButton).toBeDisabled()
 
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
       expect(replaceButton).toBeDisabled()
 
-      await user.keyboard('{backspace}')
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      expect(replaceButton).toBeDisabled()
-
-      await type(user, findInput, 'a')
       expect(replaceButton).toBeEnabled()
     })
 
     it('replace all button is enabled with multiple search results and replacement text', async () => {
       const {user} = renderComponent()
-      const replaceButton = screen.getByRole('button', {name: /^replace all$/i})
+      const replaceButton = screen.getByTestId('replace-all-button')
       expect(replaceButton).toBeDisabled()
 
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
       expect(replaceButton).toBeDisabled()
 
-      await user.keyboard('{backspace}')
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      expect(replaceButton).toBeDisabled()
-
-      await type(user, findInput, 'a')
       expect(replaceButton).toBeEnabled()
     })
   })
@@ -270,7 +293,7 @@ describe('FindReplaceTray', () => {
       const {user} = renderComponent()
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
-      const nextButton = screen.getByRole('button', {name: /next/i})
+      const nextButton = screen.getByTestId('next-button')
       await user.click(nextButton)
       const resultText = screen.getByLabelText(/2 of 3/i)
       expect(resultText).toBeInTheDocument()
@@ -280,7 +303,7 @@ describe('FindReplaceTray', () => {
       const {user} = renderComponent()
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
-      const nextButton = screen.getByRole('button', {name: /next/i})
+      const nextButton = screen.getByTestId('next-button')
       await user.click(nextButton)
       await user.click(nextButton)
       await user.click(nextButton)
@@ -293,7 +316,10 @@ describe('FindReplaceTray', () => {
       const {user} = renderComponent()
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
-      await user.keyboard('{enter}')
+      fireEvent.keyDown(findInput, {key: 'Enter'})
+      await waitFor(() => {
+        expect(fakePlugin.next).toHaveBeenCalledTimes(1)
+      })
       const resultText = await screen.findByLabelText(/2 of 3/i)
       expect(resultText).toBeInTheDocument()
     })
@@ -302,7 +328,7 @@ describe('FindReplaceTray', () => {
       const {user} = renderComponent()
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
-      const prevButton = screen.getByRole('button', {name: /previous/i})
+      const prevButton = screen.getByTestId('previous-button')
       await user.click(prevButton)
       const resultText = screen.getByLabelText(/3 of 3/i)
       expect(resultText).toBeInTheDocument()
@@ -312,8 +338,11 @@ describe('FindReplaceTray', () => {
       const {user} = renderComponent()
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
-      await user.keyboard('{shift>}{enter}')
-      const resultText = screen.getByLabelText(/3 of 3/i)
+      fireEvent.keyDown(findInput, {shiftKey: true, key: 'Enter'})
+      await waitFor(() => {
+        expect(fakePlugin.prev).toHaveBeenCalledTimes(1)
+      })
+      const resultText = await screen.findByLabelText(/3 of 3/i)
       expect(resultText).toBeInTheDocument()
     })
 
@@ -323,15 +352,15 @@ describe('FindReplaceTray', () => {
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
 
-      const nextButton = screen.getByRole('button', {name: /next/i})
+      const nextButton = screen.getByTestId('next-button')
       await user.click(nextButton)
 
       const initalResulttext = screen.getByLabelText(/2 of 3/i)
       expect(initalResulttext).toBeInTheDocument()
 
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      const replaceButton = screen.getAllByRole('button', {name: /replace/i})[1]
+      const replaceButton = screen.getByTestId('replace-button')
       await user.click(replaceButton)
 
       expect(fakePlugin.replace).toHaveBeenCalledTimes(1)
@@ -345,16 +374,16 @@ describe('FindReplaceTray', () => {
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
 
-      const nextButton = screen.getByRole('button', {name: /next/i})
+      const nextButton = screen.getByTestId('next-button')
       await user.click(nextButton)
       await user.click(nextButton)
 
       const initalResulttext = screen.getByLabelText(/3 of 3/i)
       expect(initalResulttext).toBeInTheDocument()
 
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      const replaceButton = screen.getAllByRole('button', {name: /replace/i})[1]
+      const replaceButton = screen.getByTestId('replace-button')
       await user.click(replaceButton)
 
       expect(fakePlugin.replace).toHaveBeenCalledTimes(1)
@@ -369,13 +398,61 @@ describe('FindReplaceTray', () => {
       const findInput = screen.getByTestId('find-text-input')
       await type(user, findInput, 'a')
 
-      const replaceInput = screen.getByRole('textbox', {name: /replace with/i})
+      const replaceInput = screen.getByTestId('replace-text-input')
       await type(user, replaceInput, 'some text')
-      await user.keyboard('{shift>}{enter}')
+      fireEvent.keyDown(replaceInput, {shiftKey: true, key: 'Enter'})
 
       expect(fakePlugin.replace).toHaveBeenCalledTimes(1)
       const resultText = screen.getByLabelText(/3 of 3/i)
       expect(resultText).toBeInTheDocument()
+    })
+  })
+
+  describe('selectionScreenReaderText', () => {
+    it('is displayed when there are results', async () => {
+      const {user} = renderComponent()
+      const findInput = screen.getByTestId('find-text-input')
+      await type(user, findInput, 'abc')
+      await waitFor(() => {
+        expect(props.getSelectionContext).toHaveBeenCalledTimes(3)
+      })
+      const srText = await screen.findByText(/text before abc text after/i)
+      expect(srText).toBeInTheDocument()
+    })
+
+    it('is called when next button clicked', async () => {
+      const {user} = renderComponent()
+      const findInput = screen.getByTestId('find-text-input')
+      await type(user, findInput, 'a')
+      const nextButton = screen.getByTestId('next-button')
+      await user.click(nextButton)
+      await waitFor(() => {
+        expect(props.getSelectionContext).toHaveBeenCalledTimes(2)
+      })
+    })
+
+    it('is called when previous button clicked', async () => {
+      const {user} = renderComponent()
+      const findInput = screen.getByTestId('find-text-input')
+      await type(user, findInput, 'a')
+      const prevButton = screen.getByTestId('previous-button')
+      await user.click(prevButton)
+      await waitFor(() => {
+        expect(props.getSelectionContext).toHaveBeenCalledTimes(2)
+      })
+    })
+
+    it('is called when replace button clicked', async () => {
+      const {user} = renderComponent()
+      const findInput = screen.getByTestId('find-text-input')
+      await type(user, findInput, 'a')
+      const replaceInput = screen.getByTestId('replace-text-input')
+      await type(user, replaceInput, 'some text')
+      const replaceButton = screen.getByTestId('replace-button')
+      await user.click(replaceButton)
+      await waitFor(() => {
+        expect(props.getSelectionContext).toHaveBeenCalledTimes(2)
+      })
     })
   })
 })

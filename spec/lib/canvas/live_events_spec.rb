@@ -1433,7 +1433,8 @@ describe Canvas::LiveEvents do
       ContentMigration.create(context: course,
                               source_course:,
                               migration_type: "some_type",
-                              workflow_state: "imported")
+                              workflow_state: "imported",
+                              user: @user)
     end
 
     before do
@@ -1763,7 +1764,7 @@ describe Canvas::LiveEvents do
 
       cmp_id = context_module_progression.context_module.global_context_id
       singleton = "course_progress_course_#{cmp_id}_user_#{context_module_progression.global_user_id}"
-      job = Delayed::Job.where(singleton:).take
+      job = Delayed::Job.find_by(singleton:)
       expect(job).not_to be_nil
       expect(job.run_at).to be > Time.now
       expect(job.max_concurrent).to eq 1
@@ -1883,20 +1884,42 @@ describe Canvas::LiveEvents do
       end
     end
 
-    context "learning_outcome_result_associated_asset" do
+    describe "#learning_outcome_result_artifact_updated_and_created_at_data" do
+      it "returns the updated_at and created_at data for the artifact" do
+        expect(
+          Canvas::LiveEvents.learning_outcome_result_artifact_updated_and_created_at_data(result)
+        ).to eq(
+          {
+            artifact_created_at: result.artifact.created_at,
+            artifact_updated_at: result.artifact.updated_at
+          }
+        )
+      end
+
+      it "returns empty set if the artifact is nil" do
+        result.update!(artifact: nil)
+        result.reload
+        expect(Canvas::LiveEvents.learning_outcome_result_artifact_updated_and_created_at_data(result)).to eq({})
+      end
+    end
+
+    describe "#rubric_assessment_learning_outcome_result_associated_asset" do
       it "updates associated_asset info to the assignment if the artifact is a RubricAssessment" do
         assignment_model
-        outcome_model
-        outcome_with_rubric(outcome: @outcome, context: Account.default)
         course_with_student
+        outcome_with_rubric(outcome: @outcome, context: @course, outcome_context: Account.default)
         association = @rubric.associate_with(@assignment, @course, purpose: "grading", use_for_grading: true)
         rubric_assessment = rubric_assessment_model(rubric: @rubric, user: @student, assessment_type: "graded")
 
         create_and_associate_lor(association, rubric_assessment, nil)
 
         expect_event("learning_outcome_result_created", {
+          id: result.id.to_s,
           learning_outcome_id: result.learning_outcome_id.to_s,
-          learning_outcome_context_uuid: @course.uuid,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: result&.context&.uuid,
           mastery: result.mastery,
           score: result.score,
           created_at: result.created_at,
@@ -1912,18 +1935,90 @@ describe Canvas::LiveEvents do
           associated_asset_id: result.associated_asset_id.to_s,
           associated_asset_type: result.associated_asset_type,
           artifact_id: result.artifact_id.to_s,
-          artifact_type: result.artifact_type
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
         }.compact!).once
 
         Canvas::LiveEvents.learning_outcome_result_created(result)
       end
     end
 
+    context "artifact is not associated with learning outcome result" do
+      before do
+        result.update!(artifact: nil)
+        result.reload
+      end
+
+      it "artifact_id and artifact_type are nil in created live event" do
+        expect_event("learning_outcome_result_created", {
+          id: result.id.to_s,
+          learning_outcome_id: result.learning_outcome_id.to_s,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: result&.context&.uuid,
+          mastery: result.mastery,
+          score: result.score,
+          created_at: result.created_at,
+          attempt: result.attempt,
+          possible: result.possible,
+          original_score: result.original_score,
+          original_possible: result.original_possible,
+          original_mastery: result.original_mastery,
+          assessed_at: result.assessed_at,
+          percent: result.percent,
+          workflow_state: result.workflow_state,
+          user_uuid: result.user_uuid,
+          associated_asset_id: result.associated_asset_id.to_s,
+          associated_asset_type: result.associated_asset_type,
+          artifact_id: nil,
+          artifact_type: nil
+        }.compact!).once
+
+        Canvas::LiveEvents.learning_outcome_result_created(result)
+      end
+
+      it "artifact_id and artifact_type are nil in updated live event" do
+        expect_event("learning_outcome_result_updated", {
+          id: result.id.to_s,
+          learning_outcome_id: result.learning_outcome_id.to_s,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: result&.context&.uuid,
+          mastery: result.mastery,
+          score: result.score,
+          created_at: result.created_at,
+          updated_at: result.updated_at,
+          attempt: result.attempt,
+          possible: result.possible,
+          original_score: result.original_score,
+          original_possible: result.original_possible,
+          original_mastery: result.original_mastery,
+          assessed_at: result.assessed_at,
+          percent: result.percent,
+          workflow_state: result.workflow_state,
+          user_uuid: result.user_uuid,
+          associated_asset_id: result.associated_asset_id.to_s,
+          associated_asset_type: result.associated_asset_type,
+          artifact_id: nil,
+          artifact_type: nil
+        }.compact!).once
+
+        Canvas::LiveEvents.learning_outcome_result_updated(result)
+      end
+    end
+
     context "created" do
       it "includes result in created live event" do
         expect_event("learning_outcome_result_created", {
+          id: result.id.to_s,
           learning_outcome_id: result.learning_outcome_id.to_s,
-          learning_outcome_context_uuid: @course.uuid,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: result&.context&.uuid,
           mastery: result.mastery,
           score: result.score,
           created_at: result.created_at,
@@ -1939,10 +2034,82 @@ describe Canvas::LiveEvents do
           associated_asset_id: result.associated_asset_id.to_s,
           associated_asset_type: result.associated_asset_type,
           artifact_id: result.artifact_id.to_s,
-          artifact_type: result.artifact_type
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
         }.compact!).once
 
         Canvas::LiveEvents.learning_outcome_result_created(result)
+      end
+
+      it "learning_outcome_result has a nil context" do
+        result.update!(context: nil)
+        expect_event("learning_outcome_result_created", {
+          id: result.id.to_s,
+          learning_outcome_id: result.learning_outcome_id.to_s,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: nil,
+          result_context_type: nil,
+          result_context_uuid: nil,
+          mastery: result.mastery,
+          score: result.score,
+          created_at: result.created_at,
+          attempt: result.attempt,
+          possible: result.possible,
+          original_score: result.original_score,
+          original_possible: result.original_possible,
+          original_mastery: result.original_mastery,
+          assessed_at: result.assessed_at,
+          percent: result.percent,
+          workflow_state: result.workflow_state,
+          user_uuid: result.user_uuid,
+          associated_asset_id: result.associated_asset_id.to_s,
+          associated_asset_type: result.associated_asset_type,
+          artifact_id: result.artifact_id.to_s,
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
+        }.compact!).once
+
+        Canvas::LiveEvents.learning_outcome_result_created(result)
+      end
+
+      it "learning_outcome_result context uuid is nil" do
+        Course.skip_callback(:save, :assign_uuid)
+        context = result.context
+        context.update!(uuid: nil)
+        context.reload
+
+        result.update!(attempt: 1)
+        expect_event("learning_outcome_result_created", {
+          id: result.id.to_s,
+          learning_outcome_id: result.learning_outcome_id.to_s,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: nil,
+          mastery: result.mastery,
+          score: result.score,
+          created_at: result.created_at,
+          attempt: result.attempt,
+          possible: result.possible,
+          original_score: result.original_score,
+          original_possible: result.original_possible,
+          original_mastery: result.original_mastery,
+          assessed_at: result.assessed_at,
+          percent: result.percent,
+          workflow_state: result.workflow_state,
+          user_uuid: result.user_uuid,
+          associated_asset_id: result.associated_asset_id.to_s,
+          associated_asset_type: result.associated_asset_type,
+          artifact_id: result.artifact_id.to_s,
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
+        }.compact!).once
+
+        Canvas::LiveEvents.learning_outcome_result_created(result)
+        Course.set_callback(:save, :assign_uuid)
       end
     end
 
@@ -1950,8 +2117,12 @@ describe Canvas::LiveEvents do
       it "includes result in updated live event" do
         result.update!(attempt: 1)
         expect_event("learning_outcome_result_updated", {
+          id: result.id.to_s,
           learning_outcome_id: result.learning_outcome_id.to_s,
-          learning_outcome_context_uuid: @course.uuid,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: result&.context&.uuid,
           mastery: result.mastery,
           score: result.score,
           created_at: result.created_at,
@@ -1968,7 +2139,9 @@ describe Canvas::LiveEvents do
           associated_asset_id: result.associated_asset_id.to_s,
           associated_asset_type: result.associated_asset_type,
           artifact_id: result.artifact_id.to_s,
-          artifact_type: result.artifact_type
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
         }.compact!).once
 
         Canvas::LiveEvents.learning_outcome_result_updated(result)
@@ -1978,8 +2151,12 @@ describe Canvas::LiveEvents do
         outcome = LearningOutcome.find(result.learning_outcome_id)
         outcome.destroy
         expect_event("learning_outcome_result_updated", {
+          id: result.id.to_s,
           learning_outcome_id: result.learning_outcome_id.to_s,
-          learning_outcome_context_uuid: @course.uuid,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: result&.context&.uuid,
           mastery: result.mastery,
           score: result.score,
           created_at: result.created_at,
@@ -1996,10 +2173,84 @@ describe Canvas::LiveEvents do
           associated_asset_id: result.associated_asset_id.to_s,
           associated_asset_type: result.associated_asset_type,
           artifact_id: result.artifact_id.to_s,
-          artifact_type: result.artifact_type
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
         }.compact!).once
 
         Canvas::LiveEvents.learning_outcome_result_updated(result)
+      end
+
+      it "learning_outcome_result has a nil context" do
+        result.update!(context: nil)
+        expect_event("learning_outcome_result_updated", {
+          id: result.id.to_s,
+          learning_outcome_id: result.learning_outcome_id.to_s,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: nil,
+          result_context_type: nil,
+          result_context_uuid: nil,
+          mastery: result.mastery,
+          score: result.score,
+          created_at: result.created_at,
+          updated_at: result.updated_at,
+          attempt: result.attempt,
+          possible: result.possible,
+          original_score: result.original_score,
+          original_possible: result.original_possible,
+          original_mastery: result.original_mastery,
+          assessed_at: result.assessed_at,
+          percent: result.percent,
+          workflow_state: result.workflow_state,
+          user_uuid: result.user_uuid,
+          associated_asset_id: result.associated_asset_id.to_s,
+          associated_asset_type: result.associated_asset_type,
+          artifact_id: result.artifact_id.to_s,
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
+        }.compact!).once
+
+        Canvas::LiveEvents.learning_outcome_result_updated(result)
+      end
+
+      it "learning_outcome_result context uuid is nil" do
+        Course.skip_callback(:save, :assign_uuid)
+        context = result.context
+        context.update!(uuid: nil)
+        context.reload
+
+        result.update!(attempt: 1)
+        expect_event("learning_outcome_result_updated", {
+          id: result.id.to_s,
+          learning_outcome_id: result.learning_outcome_id.to_s,
+          learning_outcome_context_uuid: result.learning_outcome.context&.uuid,
+          result_context_id: result.context_id.to_s,
+          result_context_type: result.context_type,
+          result_context_uuid: nil,
+          mastery: result.mastery,
+          score: result.score,
+          created_at: result.created_at,
+          updated_at: result.updated_at,
+          attempt: result.attempt,
+          possible: result.possible,
+          original_score: result.original_score,
+          original_possible: result.original_possible,
+          original_mastery: result.original_mastery,
+          assessed_at: result.assessed_at,
+          percent: result.percent,
+          workflow_state: result.workflow_state,
+          user_uuid: result.user_uuid,
+          associated_asset_id: result.associated_asset_id.to_s,
+          associated_asset_type: result.associated_asset_type,
+          artifact_id: result.artifact_id.to_s,
+          artifact_type: result.artifact_type,
+          artifact_created_at: result.artifact.created_at,
+          artifact_updated_at: result.artifact.updated_at
+        }.compact!).once
+
+        Canvas::LiveEvents.learning_outcome_result_updated(result)
+        Course.set_callback(:save, :assign_uuid)
       end
     end
   end

@@ -189,7 +189,7 @@ class Course < ActiveRecord::Base
   belongs_to :wiki
   has_many :wiki_pages, as: :context, inverse_of: :context
   has_many :wiki_page_lookups, as: :context, inverse_of: :context
-  has_many :quizzes, -> { order("lock_at, title, id") }, class_name: "Quizzes::Quiz", as: :context, inverse_of: :context, dependent: :destroy
+  has_many :quizzes, -> { order(:lock_at, :title, :id) }, class_name: "Quizzes::Quiz", as: :context, inverse_of: :context, dependent: :destroy
   has_many :quiz_questions, class_name: "Quizzes::QuizQuestion", through: :quizzes
   has_many :active_quizzes, -> { preload(:assignment).where("quizzes.workflow_state<>'deleted'").order(:created_at) }, class_name: "Quizzes::Quiz", as: :context, inverse_of: :context
   has_many :assessment_question_banks, -> { preload(:assessment_questions, :assessment_question_bank_users) }, as: :context, inverse_of: :context
@@ -276,8 +276,11 @@ class Course < ActiveRecord::Base
 
   has_many :course_paces
   has_many :blackout_dates, as: :context, inverse_of: :context
+  has_many :favorites, as: :context, inverse_of: :context, dependent: :destroy
 
   prepend Profile::Association
+
+  before_create :set_restrict_quantitative_data_when_needed
 
   before_save :assign_uuid
   before_validation :assert_defaults
@@ -294,7 +297,6 @@ class Course < ActiveRecord::Base
 
   after_create :set_default_post_policy
   after_create :copy_from_course_template
-  after_create :set_restrict_quantitative_data_when_needed
 
   after_update :clear_cached_short_name, if: :saved_change_to_course_code?
   after_update :log_create_to_publish_time, if: :saved_change_to_workflow_state?
@@ -496,7 +498,7 @@ class Course < ActiveRecord::Base
 
   def modules_visible_to(user)
     scope = grants_right?(user, :view_unpublished_items) ? context_modules.not_deleted : context_modules.active
-    if Account.site_admin.feature_enabled?(:differentiated_modules)
+    if Account.site_admin.feature_enabled?(:selective_release_backend)
       DifferentiableAssignment.scope_filter(scope, user, self)
     else
       scope
@@ -640,7 +642,7 @@ class Course < ActiveRecord::Base
   def image
     @image ||= if image_id.present?
                  shard.activate do
-                   attachments.active.where(id: image_id).take&.public_download_url(1.week)
+                   attachments.active.find_by(id: image_id)&.public_download_url(1.week)
                  end
                elsif image_url
                  image_url
@@ -650,7 +652,7 @@ class Course < ActiveRecord::Base
   def banner_image
     @banner_image ||= if banner_image_id.present?
                         shard.activate do
-                          attachments.active.where(id: banner_image_id).take&.public_download_url(1.week)
+                          attachments.active.find_by(id: banner_image_id)&.public_download_url(1.week)
                         end
                       elsif banner_image_url
                         banner_image_url
@@ -1682,21 +1684,21 @@ class Course < ActiveRecord::Base
   end
 
   def storage_quota_mb
-    storage_quota / 1.megabyte
+    storage_quota / 1.decimal_megabytes
   end
 
   def storage_quota_mb=(val)
-    self.storage_quota = val.try(:to_i).try(:megabytes)
+    self.storage_quota = val.try(:to_i).try(:decimal_megabytes)
   end
 
   def storage_quota_used_mb
-    Attachment.get_quota(self)[:quota_used].to_f / 1.megabyte
+    Attachment.get_quota(self)[:quota_used].to_f / 1.decimal_megabytes
   end
 
   def storage_quota
     read_attribute(:storage_quota) ||
       (account.default_storage_quota rescue nil) ||
-      Setting.get("course_default_quota", 500.megabytes.to_s).to_i
+      Setting.get("course_default_quota", 500.decimal_megabytes.to_s).to_i
   end
 
   def storage_quota=(val)
@@ -2425,11 +2427,7 @@ class Course < ActiveRecord::Base
   def score_to_grade(score, user: nil)
     return nil unless (grading_standard_enabled? || restrict_quantitative_data?(user)) && score
 
-    if default_grading_standard
-      default_grading_standard.score_to_grade(score)
-    else
-      GradingStandard.default_instance.score_to_grade(score)
-    end
+    grading_standard_or_default.score_to_grade(score)
   end
 
   def active_course_level_observers
@@ -2895,10 +2893,11 @@ class Course < ActiveRecord::Base
   end
 
   def all_dates
-    (calendar_events.active + assignments.active).each_with_object([]) do |e, list|
-      list << e.end_at if e.end_at
-      list << e.start_at if e.start_at
-    end.compact.flatten.map(&:to_date).uniq rescue []
+    [
+      calendar_events.active.pluck(:start_at, :end_at),
+      assignments.active.pluck(:due_at),
+      context_modules.not_deleted.pluck(:unlock_at)
+    ].flatten.compact.map(&:to_date).uniq
   end
 
   def real_end_date
@@ -3369,7 +3368,7 @@ class Course < ActiveRecord::Base
       default_tabs.insert(1,
                           {
                             id: TAB_SEARCH,
-                            label: t("#tabs.search", "Search"),
+                            label: t("#tabs.search", "Smart Search"),
                             css_class: "search",
                             href: :course_search_path
                           })
@@ -3692,6 +3691,7 @@ class Course < ActiveRecord::Base
 
   add_setting :default_due_time, inherited: true
   add_setting :conditional_release, default: false, boolean: true, inherited: true
+  add_setting :search_embedding_version, arbitrary: true
 
   def elementary_enabled?
     account.enable_as_k5_account?
@@ -4000,6 +4000,10 @@ class Course < ActiveRecord::Base
     when "conclude"
       unless completed?
         complete!
+        if Account.site_admin.feature_enabled?(:default_account_grading_scheme) && grading_standard_id.nil? && root_account.grading_standard_id
+          self.grading_standard_id = root_account.grading_standard_id
+          save!
+        end
         Auditors::Course.record_concluded(self, user, options)
       end
     when "delete"
@@ -4284,8 +4288,6 @@ class Course < ActiveRecord::Base
   end
 
   def post_manually?
-    return false unless post_policies_enabled?
-
     default_post_policy.present? && default_post_policy.post_manually?
   end
 
@@ -4372,10 +4374,6 @@ class Course < ActiveRecord::Base
         send(:"#{key}_visibility=", visibility)
       end
     end
-  end
-
-  def post_policies_enabled?
-    PostPolicy.feature_enabled?
   end
 
   def sections_hidden_on_roster_page?(current_user:)
@@ -4469,10 +4467,7 @@ class Course < ActiveRecord::Base
       content_migration.migration_settings[:migration_ids_to_import] = { copy: { everything: true } }
       content_migration.workflow_state = "importing"
       priority = Delayed::LOW_PRIORITY
-      if saved_by == :sis_import
-        priority += 5
-        content_migration.strand = "sis_import_course_templates"
-      end
+      priority += 5 if saved_by == :sis_import
       content_migration.save!
       content_migration.queue_migration(priority:)
     end
@@ -4483,7 +4478,6 @@ class Course < ActiveRecord::Base
        account.restrict_quantitative_data[:value] == true &&
        account.restrict_quantitative_data[:locked] == true
       self.restrict_quantitative_data = true
-      save!
     end
   end
 

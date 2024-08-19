@@ -22,17 +22,16 @@ import $ from 'jquery'
 import htmlEscape from '@instructure/html-escape'
 import RichContentEditor from '@canvas/rce/RichContentEditor'
 import axios from '@canvas/axios'
-import {setupCache} from 'axios-cache-adapter/src/index'
 import 'jqueryui/tabs'
 import globalAnnouncements from './global_announcements'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/datetime/jquery' // date_field, time_field, datetime_field, /\$\.datetime/
 import '@canvas/jquery/jquery.instructure_forms' // formSubmit, getFormData, validateForm
 import '@canvas/jquery/jquery.instructure_misc_helpers' // replaceTags
 import '@canvas/jquery/jquery.instructure_misc_plugins' // confirmDelete, showIf, /\.log/
 import '@canvas/loading-image'
-import 'date-js' // Date.parse
+import '@instructure/date-js' // Date.parse
 import 'jquery-scroll-to-visible/jquery.scrollTo'
+import {renderDatetimeField} from '@canvas/datetime/jquery/DatetimeField'
 
 const I18n = useI18nScope('account_settings')
 
@@ -164,7 +163,7 @@ $(document).ready(function () {
     }
   })
 
-  $('.datetime_field').datetime_field({
+  renderDatetimeField($('.datetime_field'), {
     addHiddenInput: true,
   })
 
@@ -201,7 +200,7 @@ $(document).ready(function () {
           .then(req => req.text())
           .then(html => {
             $('#tab-reports').html(html)
-            $('#tab-reports .datetime_field').datetime_field()
+            renderDatetimeField($('#tab-reports .datetime_field'))
 
             $('.open_report_description_link').click(openReportDescriptionLink)
 
@@ -238,35 +237,65 @@ $(document).ready(function () {
 
             $('.configure_report_link').click(function (_event) {
               const provisioning_container = document.getElementById('provisioning_csv_form')
-              const checkboxes = provisioning_container.querySelectorAll(
+              const sis_export_container = document.getElementById('sis_export_csv_form')
+              const provisioning_checkboxes = provisioning_container.querySelectorAll(
+                'input[type="checkbox"]:not(#parameters_created_by_sis):not(#parameters_include_deleted)'
+              )
+              const sis_export_checkboxes = sis_export_container.querySelectorAll(
                 'input[type="checkbox"]:not(#parameters_created_by_sis):not(#parameters_include_deleted)'
               )
 
               provisioning_container.onclick = function () {
                 let reportIsChecked = false
 
-                checkboxes.forEach(checkbox => {
+                provisioning_checkboxes.forEach(checkbox => {
                   if (checkbox.checked) {
                     reportIsChecked = true
                   }
                 })
 
+                const createdBySisChecbox = provisioning_container.querySelector(
+                  '#parameters_created_by_sis'
+                )
+                const includeDeletedCheckbox = provisioning_container.querySelector(
+                  '#parameters_include_deleted'
+                )
+
                 if (reportIsChecked) {
-                  provisioning_container.querySelector(
-                    '#parameters_created_by_sis'
-                  ).disabled = false
-                  provisioning_container.querySelector(
-                    '#parameters_include_deleted'
-                  ).disabled = false
+                  createdBySisChecbox.disabled = false
+                  includeDeletedCheckbox.disabled = false
                 } else {
-                  provisioning_container.querySelector('#parameters_created_by_sis').checked = false
-                  provisioning_container.querySelector('#parameters_created_by_sis').disabled = true
-                  provisioning_container.querySelector(
-                    '#parameters_include_deleted'
-                  ).checked = false
-                  provisioning_container.querySelector(
-                    '#parameters_include_deleted'
-                  ).disabled = true
+                  createdBySisChecbox.checked = false
+                  createdBySisChecbox.disabled = true
+                  includeDeletedCheckbox.checked = false
+                  includeDeletedCheckbox.disabled = true
+                }
+              }
+
+              sis_export_container.onclick = function () {
+                let reportIsChecked = false
+
+                sis_export_checkboxes.forEach(checkbox => {
+                  if (checkbox.checked) {
+                    reportIsChecked = true
+                  }
+                })
+
+                const createdBySisChecbox = sis_export_container.querySelector(
+                  '#parameters_created_by_sis'
+                )
+                const includeDeletedCheckbox = sis_export_container.querySelector(
+                  '#parameters_include_deleted'
+                )
+
+                if (reportIsChecked) {
+                  createdBySisChecbox.disabled = false
+                  includeDeletedCheckbox.disabled = false
+                } else {
+                  createdBySisChecbox.checked = false
+                  createdBySisChecbox.disabled = true
+                  includeDeletedCheckbox.checked = false
+                  includeDeletedCheckbox.disabled = true
                 }
               }
 
@@ -293,17 +322,7 @@ $(document).ready(function () {
             $('#tab-reports').text(I18n.t('There are no reports for you to view.'))
           })
       } else if (tabId === 'tab-security-link') {
-        // Set up axios and send a prefetch request to get the data we need,
-        // this should make things appear to be much quicker once the bundle
-        // loads in.
-        const cache = setupCache({
-          maxAge: 0.5 * 60 * 1000, // Hold onto the data for 30 seconds
-          debug: true,
-        })
-
-        const api = axios.create({
-          adapter: cache.adapter,
-        })
+        const api = axios.create({})
 
         const splitContext = window.ENV.context_asset_string.split('_')
 
@@ -612,6 +631,26 @@ $(document).ready(function () {
     }
     onTermsTypeChange()
   }
+
+  $('#account_settings_enable_inbox_signature_block').click(event => {
+    const lockbox = $('#account_settings_disable_inbox_signature_block_for_students')
+    if (event.target.checked) {
+      lockbox.prop('disabled', false)
+    } else {
+      lockbox.prop('checked', false)
+      lockbox.prop('disabled', true)
+    }
+  })
+
+  $('#account_settings_enable_inbox_auto_response').click(event => {
+    const lockbox = $('#account_settings_disable_inbox_auto_response_for_students')
+    if (event.target.checked) {
+      lockbox.prop('disabled', false)
+    } else {
+      lockbox.prop('checked', false)
+      lockbox.prop('disabled', true)
+    }
+  })
 
   window.addEventListener('popstate', () => {
     const openTab = window.location.hash

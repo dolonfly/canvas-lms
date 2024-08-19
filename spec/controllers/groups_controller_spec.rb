@@ -614,7 +614,7 @@ describe GroupsController do
 
     describe "quota" do
       before do
-        Setting.set("group_default_quota", 11.megabytes)
+        Setting.set("group_default_quota", 11.decimal_megabytes)
       end
 
       context "teacher" do
@@ -1095,6 +1095,19 @@ describe GroupsController do
       it "does not check quota if submit_assignment is true" do
         put "create_file", params: request_params.merge(submit_assignment: true)
         expect_any_instance_of(Attachment).not_to receive(:get_quota)
+      end
+
+      context "in a limited access account" do
+        before do
+          course.root_account.enable_feature!(:allow_limited_access_for_students)
+          course.account.settings[:enable_limited_access_for_students] = true
+          course.account.save!
+        end
+
+        it "renders unauthorized" do
+          put "create_file", params: request_params.merge(submit_assignment: true)
+          expect(response.code.to_i).to be 401
+        end
       end
     end
   end

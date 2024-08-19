@@ -36,9 +36,10 @@ const I18n = useI18nScope('rubrics-criteria-new-row')
 type NewCriteriaRowProps = {
   rowIndex: number
   onEditCriterion: () => void
+  onAddOutcome: () => void
 }
 
-export const NewCriteriaRow = ({rowIndex, onEditCriterion}: NewCriteriaRowProps) => {
+export const NewCriteriaRow = ({rowIndex, onEditCriterion, onAddOutcome}: NewCriteriaRowProps) => {
   return (
     <View>
       <Flex>
@@ -60,58 +61,14 @@ export const NewCriteriaRow = ({rowIndex, onEditCriterion}: NewCriteriaRowProps)
           >
             {I18n.t('Draft New Criterion')}
           </Button>
-          <Button renderIcon={IconOutcomesLine} margin="0 0 0 small">
+          <Button
+            renderIcon={IconOutcomesLine}
+            margin="0 0 0 small"
+            onClick={onAddOutcome}
+            data-testid="create-from-outcome-button"
+          >
             {I18n.t('Create From Outcome')}
           </Button>
-        </Flex.Item>
-        <Flex.Item align="start">
-          <Pill
-            color="info"
-            themeOverride={{
-              background: '#C7CDD1',
-              infoColor: 'white',
-            }}
-          >
-            <Text size="x-small">-- pts</Text>
-          </Pill>
-          <View as="span" margin="0 0 0 medium">
-            <IconButton
-              disabled={true}
-              withBackground={false}
-              withBorder={false}
-              screenReaderLabel=""
-              themeOverride={{smallHeight: '18px'}}
-              size="small"
-            >
-              <IconEditLine />
-            </IconButton>
-          </View>
-
-          <View as="span" margin="0 0 0 medium">
-            <IconButton
-              disabled={true}
-              withBackground={false}
-              withBorder={false}
-              screenReaderLabel=""
-              themeOverride={{smallHeight: '18px'}}
-              size="small"
-            >
-              <IconTrashLine />
-            </IconButton>
-          </View>
-
-          <View as="span" margin="0 0 0 medium">
-            <IconButton
-              disabled={true}
-              withBackground={false}
-              withBorder={false}
-              screenReaderLabel=""
-              themeOverride={{smallHeight: '18px'}}
-              size="small"
-            >
-              <IconDuplicateLine />
-            </IconButton>
-          </View>
         </Flex.Item>
       </Flex>
     </View>

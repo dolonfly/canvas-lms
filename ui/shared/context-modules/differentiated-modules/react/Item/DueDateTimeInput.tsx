@@ -28,6 +28,8 @@ type DueDateTimeInputProps = CustomDateTimeInputProps & {
   dueDate: string | null
   setDueDate: (dueDate: string | null) => void
   handleDueDateChange: (_event: React.SyntheticEvent, value: string | undefined) => void
+  disabledWithGradingPeriod?: boolean
+  clearButtonAltLabel: string
 }
 
 export function DueDateTimeInput({
@@ -38,13 +40,21 @@ export function DueDateTimeInput({
   unparsedFieldKeys,
   blueprintDateLocks,
   dateInputRefs,
+  timeInputRefs,
   handleBlur,
+  disabledWithGradingPeriod,
+  clearButtonAltLabel,
   ...otherProps
 }: DueDateTimeInputProps) {
   const key = 'due_at'
   const handleClear = useCallback(() => setDueDate(null), [setDueDate])
   const dateInputRef = useCallback(
     el => (dateInputRefs[key] = el),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
+  const timeInputRef = useCallback(
+    el => (timeInputRefs[key] = el),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
@@ -57,7 +67,7 @@ export function DueDateTimeInput({
   const dueDateProps = {
     key,
     id: key,
-    disabled: Boolean(blueprintDateLocks?.includes('due_dates')),
+    disabled: Boolean(blueprintDateLocks?.includes('due_dates')) || disabledWithGradingPeriod,
     description: I18n.t('Choose a due date and time'),
     dateRenderLabel: I18n.t('Due Date'),
     value: dueDate,
@@ -66,6 +76,8 @@ export function DueDateTimeInput({
     messages,
     onBlur,
     dateInputRef,
+    timeInputRef,
+    clearButtonAltLabel,
   }
 
   return <ClearableDateTimeInput {...dueDateProps} {...otherProps} />

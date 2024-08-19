@@ -821,6 +821,15 @@ describe ApplicationHelper do
       expect(planner_enabled?).to be false
     end
 
+    it "returns false for student in at least one limited access account" do
+      course_with_student(active_all: true)
+      @current_user = @user
+      @course.root_account.enable_feature!(:allow_limited_access_for_students)
+      @course.account.settings[:enable_limited_access_for_students] = true
+      @course.account.save!
+      expect(planner_enabled?).to be false
+    end
+
     context "for observers" do
       before :once do
         @course1 = course_factory(active_all: true)
@@ -1243,7 +1252,7 @@ describe ApplicationHelper do
           app_host: "https://inst_fs.instructure.com"
         )
         helper.add_csp_for_root
-        expect(headers["Content-Security-Policy"]).to eq "frame-src 'self' blob: inst_fs.instructure.com localhost root_account.test root_account2.test; "
+        expect(headers["Content-Security-Policy"]).to eq "frame-src 'self' blob: *.inst_fs.instructure.com inst_fs.instructure.com localhost root_account.test root_account2.test; "
       end
     end
   end
@@ -1424,6 +1433,40 @@ describe ApplicationHelper do
 
     it "returns nil if supplied the id of a nonexistent user" do
       expect(context_user_name(Account.default, 0)).to be_nil
+    end
+  end
+
+  describe "number_to_human_size_mb" do
+    let(:quota) { 98_765.53 }
+
+    context "when no additional options" do
+      it "returns readable string with unit truncated to two decimal points" do
+        expect(number_to_human_size_mb(quota)).to eq("98.76 KB")
+      end
+    end
+
+    context "when using options" do
+      context "when value option[:precision] = 3" do
+        it "returns 3 decimal points (truncated)" do
+          expect(number_to_human_size_mb(quota, precision: 3)).to eq("98.765 KB")
+        end
+
+        context "and option[:round] = true" do
+          it "returns 3 decimal points rounding the last digit" do
+            expect(number_to_human_size_mb(quota, precision: 3, round: true)).to eq("98.766 KB")
+          end
+        end
+      end
+
+      context "when option[:base] = 1024" do
+        let(:quota) { 500_000_000 }
+
+        it "returns the same value as number_to_human_size" do
+          readable_size_mib = number_to_human_size_mb(quota, base: 1024, precision: 0, round: true)
+          readable_size = number_to_human_size(quota)
+          expect(readable_size_mib).to eq(readable_size)
+        end
+      end
     end
   end
 end

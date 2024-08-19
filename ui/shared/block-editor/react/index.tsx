@@ -20,8 +20,11 @@ import React from 'react'
 import ReactDOM from 'react-dom'
 import BlockEditor from './BlockEditor'
 
-export {BlockEditor}
+import BlockEditorView from './BlockEditorView'
 
-export default function renderBlockEditorApp(_, elt) {
-  ReactDOM.render(<BlockEditor />, elt)
+function renderBlockEditorView(content: string, container: HTMLElement) {
+  ReactDOM.render(<BlockEditorView content={content} />, container)
 }
+
+export {BlockEditor, BlockEditorView, renderBlockEditorView}
+export default BlockEditor

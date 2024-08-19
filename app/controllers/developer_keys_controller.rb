@@ -21,7 +21,7 @@
 class DeveloperKeysController < ApplicationController
   before_action :set_key, only: [:update, :destroy]
   before_action :require_manage_developer_keys
-  before_action :require_root_account, only: [:index, :create]
+  before_action :require_root_account, only: %i[index create]
 
   include Api::V1::DeveloperKey
 
@@ -59,6 +59,7 @@ class DeveloperKeysController < ApplicationController
 
   def create
     @key = DeveloperKey.new(developer_key_params)
+    @key.current_user = @current_user
     @key.account = @context if params[:account_id] && @context != Account.site_admin
     if @key.save
       render json: developer_key_json(@key, @current_user, session, account_context)

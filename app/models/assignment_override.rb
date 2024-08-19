@@ -28,6 +28,7 @@ class AssignmentOverride < ActiveRecord::Base
   SET_TYPE_COURSE_SECTION = "CourseSection"
   SET_TYPE_GROUP = "Group"
   SET_TYPE_NOOP = "Noop"
+  SET_TYPE_COURSE = "Course"
 
   simply_versioned keep: 10
 
@@ -121,6 +122,13 @@ class AssignmentOverride < ActiveRecord::Base
     # assignment+quiz can be set simultaneously, but otherwise there should only be 1 association
     if association_count > 1 && !has_assignment_and_quiz
       record.errors.add :base, "only one of assignment, quiz, module, page, discussion, or file may be set (except assignment and quiz may both be set)"
+    end
+  end
+
+  validate do |record|
+    if record.context_module? && (record.due_at || record.unlock_at || record.lock_at ||
+      record.due_at_overridden || record.unlock_at_overridden || record.lock_at_overridden)
+      record.errors.add :base, "cannot set dates for context module overrides"
     end
   end
 

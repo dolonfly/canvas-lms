@@ -28,7 +28,7 @@ class GradingSchemesJsonController < ApplicationController
   before_action :validate_read_permission, only: %i[grouped_list detail_list summary_list show]
 
   def grouped_list
-    standards = grading_standards_for_context.sorted.limit(GRADING_SCHEMES_LIMIT)
+    standards = grading_standards_for_context.preload(:assignments, :courses, :accounts).sorted.limit(GRADING_SCHEMES_LIMIT)
     render json: {
       archived: standards.select(&:archived?).map do |grading_standard|
         GradingSchemesJsonController.to_grading_scheme_json(grading_standard, @current_user)
@@ -40,7 +40,9 @@ class GradingSchemesJsonController < ApplicationController
   end
 
   def detail_list
-    grading_standards = grading_standards_for_context.sorted.limit(GRADING_SCHEMES_LIMIT)
+    grading_standards = grading_standards_for_context(include_parent_accounts: false)
+                        .preload(:assignments, :courses, :accounts)
+                        .sorted.limit(GRADING_SCHEMES_LIMIT)
     respond_to do |format|
       format.json do
         render json: grading_standards.map { |grading_standard|
@@ -57,6 +59,49 @@ class GradingSchemesJsonController < ApplicationController
         render json: grading_standards.map { |grading_standard|
           GradingSchemesJsonController.to_grading_scheme_summary_json(grading_standard)
         }
+      end
+    end
+  end
+
+  def show_account_default_grading_scheme
+    return unless Account.site_admin.feature_enabled?(:default_account_grading_scheme)
+    return unless @context.is_a?(Account)
+    return unless authorized_action(@context, @current_user, @context.grading_standard_read_permission)
+
+    grading_standard = @context.grading_standard
+
+    respond_to do |format|
+      if grading_standard.nil?
+        format.json { render json: nil }
+      else
+        format.json { render json: GradingSchemesJsonController.to_grading_scheme_json(grading_standard, @current_user) }
+      end
+    end
+  end
+
+  def update_account_default_grading_scheme
+    return unless Account.site_admin.feature_enabled?(:default_account_grading_scheme)
+    return unless @context.is_a?(Account)
+    return unless authorized_action(@context, @current_user, :manage)
+
+    grading_standard = if params[:id].nil?
+                         nil
+                       else
+                         GradingStandard.find(params[:id])
+                       end
+    @context.grading_standard = grading_standard
+
+    response = if grading_standard.nil?
+                 nil
+               else
+                 GradingSchemesJsonController.to_grading_scheme_json(grading_standard, @current_user)
+               end
+
+    respond_to do |format|
+      if @context.save
+        format.json { render json: response }
+      else
+        format.json { render json: @context.errors, status: :bad_request }
       end
     end
   end
@@ -95,7 +140,7 @@ class GradingSchemesJsonController < ApplicationController
   end
 
   def update
-    grading_standard = grading_standards_for_context.find(params[:id])
+    grading_standard = grading_standards_for_context(include_parent_accounts: false).find(params[:id])
     if authorized_action(grading_standard, @current_user, :manage)
       grading_standard.user = @current_user
 
@@ -209,13 +254,13 @@ class GradingSchemesJsonController < ApplicationController
     %w[id title scaling_factor points_based context_type context_id workflow_state]
   end
 
-  def grading_standards_for_context
+  def grading_standards_for_context(include_parent_accounts: true)
     include_archived = params[:include_archived] == "true"
     if params[:assignment_id]
       @assignment = @context.assignments.find(params[:assignment_id])
       return GradingStandard.for(@assignment, include_archived:)
     end
-    GradingStandard.for(@context, include_archived:)
+    GradingStandard.for(@context, include_archived:, include_parent_accounts:)
   end
 
   def self.default_canvas_grading_standard(context)

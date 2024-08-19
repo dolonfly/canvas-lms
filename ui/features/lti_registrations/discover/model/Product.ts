@@ -18,9 +18,43 @@
 
 export type Product = {
   id: string
+  global_product_id: string
   name: string
-  company: string
-  companyUrl: string
-  logoUrl: string
+  company: Company
+  logo_url: string
   tagline: string
+  description: string
+  updated_at: any
+  tool_integration_configurations: Lti
+  badges: Badges[]
+  screenshots: string[]
+  tags: Tag[]
+}
+
+export type Company = {
+  id: string
+  name: string
+  company_url?: string
+}
+
+export type Lti = {
+  lti_13?: {id: number; integration_type: string; url: string; unified_tool_id: string}[]
+  lti_11?: {id: number; integration_type: string; url: string; unified_tool_id: string}[]
+}
+
+export type Badges = {
+  name: string
+  image_url: string
+  link: string
+}
+
+export type TagGroup = {
+  id: string
+  name: string
+  description: string
+}
+
+export type Tag = {
+  id: string
+  name: string
 }

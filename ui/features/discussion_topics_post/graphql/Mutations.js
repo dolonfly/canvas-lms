@@ -22,6 +22,7 @@ import {Discussion} from './Discussion'
 import {Error} from '../../../shared/graphql/Error'
 import gql from 'graphql-tag'
 import {User} from './User'
+import {Submission} from './Submission'
 
 export const DELETE_DISCUSSION_TOPIC = gql`
   mutation DeleteDiscussionTopic($id: ID!) {
@@ -54,9 +55,13 @@ export const UPDATE_DISCUSSION_ENTRY_PARTICIPANT = gql`
     ) {
       discussionEntry {
         ...DiscussionEntry
+        anonymousAuthor {
+          ...AnonymousUser
+        }
       }
     }
   }
+  ${AnonymousUser.fragment}
   ${DiscussionEntry.fragment}
 `
 export const DELETE_DISCUSSION_ENTRY = gql`
@@ -64,6 +69,9 @@ export const DELETE_DISCUSSION_ENTRY = gql`
     deleteDiscussionEntry(input: {id: $id}) {
       discussionEntry {
         ...DiscussionEntry
+        anonymousAuthor {
+          ...AnonymousUser
+        }
       }
       errors {
         ...Error
@@ -72,6 +80,7 @@ export const DELETE_DISCUSSION_ENTRY = gql`
   }
   ${DiscussionEntry.fragment}
   ${Error.fragment}
+  ${AnonymousUser.fragment}
 `
 export const UPDATE_DISCUSSION_TOPIC = gql`
   mutation updateDiscussionTopic($discussionTopicId: ID!, $published: Boolean, $locked: Boolean) {
@@ -123,6 +132,9 @@ export const CREATE_DISCUSSION_ENTRY = gql`
           ...AnonymousUser
         }
       }
+      mySubAssignmentSubmissions {
+        ...Submission
+      }
       errors {
         ...Error
       }
@@ -130,6 +142,7 @@ export const CREATE_DISCUSSION_ENTRY = gql`
   }
   ${AnonymousUser.fragment}
   ${DiscussionEntry.fragment}
+  ${Submission.fragment}
   ${Error.fragment}
 `
 
@@ -139,6 +152,7 @@ export const UPDATE_DISCUSSION_ENTRY = gql`
     $message: String
     $fileId: ID
     $removeAttachment: Boolean
+    $quotedEntryId: ID
   ) {
     updateDiscussionEntry(
       input: {
@@ -146,10 +160,14 @@ export const UPDATE_DISCUSSION_ENTRY = gql`
         message: $message
         fileId: $fileId
         removeAttachment: $removeAttachment
+        quotedEntryId: $quotedEntryId
       }
     ) {
       discussionEntry {
         ...DiscussionEntry
+        anonymousAuthor {
+          ...AnonymousUser
+        }
       }
       errors {
         ...Error
@@ -158,6 +176,7 @@ export const UPDATE_DISCUSSION_ENTRY = gql`
   }
   ${DiscussionEntry.fragment}
   ${Error.fragment}
+  ${AnonymousUser.fragment}
 `
 
 export const UPDATE_DISCUSSION_ENTRIES_READ_STATE = gql`
@@ -178,10 +197,14 @@ export const UPDATE_DISCUSSION_THREAD_READ_STATE = gql`
     updateDiscussionThreadReadState(input: {discussionEntryId: $discussionEntryId, read: $read}) {
       discussionEntry {
         ...DiscussionEntry
+        anonymousAuthor {
+          ...AnonymousUser
+        }
       }
     }
   }
   ${DiscussionEntry.fragment}
+  ${AnonymousUser.fragment}
 `
 
 export const UPDATE_DISCUSSION_READ_STATE = gql`

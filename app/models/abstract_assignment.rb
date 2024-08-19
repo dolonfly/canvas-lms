@@ -40,24 +40,8 @@ class AbstractAssignment < ActiveRecord::Base
   include LockedFor
   include Lti::Migratable
 
-  GRADING_TYPES = OpenStruct.new(
-    {
-      points: "points",
-      percent: "percent",
-      letter_grade: "letter_grade",
-      gpa_scale: "gpa_scale",
-      pass_fail: "pass_fail",
-      not_graded: "not_graded"
-    }
-  )
-
-  ALLOWED_GRADING_TYPES = GRADING_TYPES.to_h.values.freeze
-  POINTED_GRADING_TYPES = [
-    GRADING_TYPES.points,
-    GRADING_TYPES.percent,
-    GRADING_TYPES.letter_grade,
-    GRADING_TYPES.gpa_scale
-  ].freeze
+  ALLOWED_GRADING_TYPES = %w[points percent letter_grade gpa_scale pass_fail not_graded].to_set.freeze
+  POINTED_GRADING_TYPES = %w[points percent letter_grade gpa_scale].to_set.freeze
 
   OFFLINE_SUBMISSION_TYPES = %i[on_paper external_tool none not_graded wiki_page].freeze
   SUBMITTABLE_TYPES = %w[online_quiz discussion_topic wiki_page].freeze
@@ -111,6 +95,7 @@ class AbstractAssignment < ActiveRecord::Base
   serialize :lti_resource_link_custom_params, coder: JSON
   attribute :lti_resource_link_lookup_uuid, :string, default: nil
   attribute :lti_resource_link_url, :string, default: nil
+  attribute :lti_resource_link_title, :string, default: nil
   attribute :line_item_resource_id, :string, default: nil
   attribute :line_item_tag, :string, default: nil
 
@@ -134,16 +119,17 @@ class AbstractAssignment < ActiveRecord::Base
   belongs_to :context, polymorphic: [:course]
   delegate :moderated_grading_max_grader_count, to: :course
   belongs_to :grading_standard
-  belongs_to :group_category
+  belongs_to :group_category, inverse_of: :assignments
   belongs_to :grader_section, class_name: "CourseSection", optional: true
   belongs_to :final_grader, class_name: "User", optional: true
   has_many :active_groups, -> { merge(GroupCategory.active).merge(Group.active) }, through: :group_category, source: :groups
+  has_many :group_memberships, through: :active_groups
   has_many :assigned_students, through: :submissions, source: :user
   has_many :enrollments_for_assigned_students, -> { active.not_fake.where("enrollments.course_id = submissions.course_id") }, through: :assigned_students, source: :enrollments
   has_many :sections_for_assigned_students, -> { active.distinct }, through: :enrollments_for_assigned_students, source: :course_section
 
-  belongs_to :duplicate_of, class_name: "Assignment", optional: true, inverse_of: :duplicates
-  has_many :duplicates, class_name: "Assignment", inverse_of: :duplicate_of, foreign_key: "duplicate_of_id"
+  belongs_to :duplicate_of, class_name: "AbstractAssignment", optional: true, inverse_of: :duplicates
+  has_many :duplicates, class_name: "AbstractAssignment", inverse_of: :duplicate_of, foreign_key: "duplicate_of_id"
 
   has_many :assignment_configuration_tool_lookups, dependent: :delete_all, inverse_of: :assignment, foreign_key: :assignment_id
   has_many :tool_settings_context_external_tools, through: :assignment_configuration_tool_lookups, source: :tool, source_type: "ContextExternalTool"
@@ -174,6 +160,7 @@ class AbstractAssignment < ActiveRecord::Base
   belongs_to :parent_assignment, class_name: "Assignment", inverse_of: :sub_assignments
   has_many :sub_assignments, -> { active }, foreign_key: :parent_assignment_id, inverse_of: :parent_assignment
   has_many :sub_assignment_submissions, through: :sub_assignments, source: :submissions
+  has_many :sub_assignment_overrides, through: :sub_assignments, source: :assignment_overrides
 
   scope :assigned_to_student, ->(student_id) { joins(:submissions).where(submissions: { user_id: student_id }) }
   scope :anonymous, -> { where(anonymous_grading: true) }
@@ -333,6 +320,7 @@ class AbstractAssignment < ActiveRecord::Base
     return self if new_record?
 
     default_opts = {
+      discussion_topic_for_checkpoints: nil,
       duplicate_wiki_page: true,
       duplicate_discussion_topic: true,
       duplicate_plagiarism_tool_association: true,
@@ -378,6 +366,21 @@ class AbstractAssignment < ActiveRecord::Base
                                                              copy_title: result.title,
                                                              user: opts_with_default[:user]
                                                            })
+    end
+
+    if checkpoints_parent? && opts_with_default[:discussion_topic_for_checkpoints]
+      result.discussion_topic = opts_with_default[:discussion_topic_for_checkpoints]
+
+      # we have to save result here because we have to set it as a parent_assignment
+      result.save!
+      sub_assignments.each do |sub_assignment|
+        new_sa = sub_assignment.duplicate({
+                                            duplicate_wiki_page: false,
+                                            duplicate_discussion_topic: false,
+                                          })
+        new_sa.parent_assignment = result
+        new_sa.save!
+      end
     end
 
     result.discussion_topic&.assignment = result
@@ -1069,7 +1072,14 @@ class AbstractAssignment < ActiveRecord::Base
     if will_save_change_to_submission_types? && ["none", "on_paper"].include?(self.submission_types)
       self.allowed_attempts = nil
     end
-    self.peer_reviews_assigned = false if peer_reviews_due_at_changed?
+
+    peer_review_assign_changed = peer_reviews_due_at_changed?
+    due_at_changed_with_no_peer_review_assign_date = peer_reviews_due_at.nil? && due_at_changed? && due_at.present? && next_auto_peer_review_date(Time.zone.now)
+
+    if peer_review_assign_changed || due_at_changed_with_no_peer_review_assign_date
+      self.peer_reviews_assigned = false
+    end
+
     %i[
       all_day
       could_be_locked
@@ -1237,7 +1247,7 @@ class AbstractAssignment < ActiveRecord::Base
   # filtered by context during migrate_content_to_1_3
   # @see Lti::Migratable
   def self.directly_associated_items(tool_id)
-    Assignment.nondeleted.joins(:external_tool_tag).where(content_tags: { content_id: tool_id })
+    Assignment.nondeleted.joins(:external_tool_tag).where(content_tags: { content_type: ContextExternalTool, content_id: tool_id })
   end
 
   # filtered by context during migrate_content_to_1_3
@@ -1306,6 +1316,7 @@ class AbstractAssignment < ActiveRecord::Base
             resource_link_uuid: lti_context_id,
             context_external_tool: lti_1_3_tool || tool_from_external_tool_tag,
             url: lti_resource_link_url,
+            title: lti_resource_link_title,
             lti_1_1_id:
           )
 
@@ -1344,6 +1355,7 @@ class AbstractAssignment < ActiveRecord::Base
 
           options[:lookup_uuid] = lti_resource_link_lookup_uuid unless lti_resource_link_lookup_uuid.nil?
           options[:url] = lti_resource_link_url if lti_resource_link_url
+          options[:title] = lti_resource_link_title if lti_resource_link_title
           options[:lti_1_1_id] = lti_1_1_id if lti_1_1_id.present?
 
           primary_resource_link.update!(options) unless options.empty?
@@ -1944,7 +1956,8 @@ class AbstractAssignment < ActiveRecord::Base
     given do |user, session|
       (submittable_type? || %w[discussion_topic online_quiz none not_graded].include?(submission_types)) &&
         context.grants_right?(user, session, :participate_as_student) &&
-        visible_to_user?(user)
+        visible_to_user?(user) &&
+        !course.account.limited_access_for_user?(user)
     end
     can :attach_submission_comment_files
 
@@ -1988,6 +2001,14 @@ class AbstractAssignment < ActiveRecord::Base
          !in_closed_grading_period?)
     end
     can :delete
+
+    given do |user, session|
+      next false unless user
+      next false if submission_types == "discussion_topic" && !context.grants_right?(user, session, :moderate_forum)
+
+      context.grants_any_right?(user, session, :manage_assignments, :manage_assignments_edit)
+    end
+    can :manage_assign_to
   end
 
   def user_can_update?(user, session = nil)
@@ -2566,7 +2587,7 @@ class AbstractAssignment < ActiveRecord::Base
   end
 
   def as_json(options = {})
-    json = super(options)
+    json = super
     return json unless json
 
     if json["assignment"]
@@ -2645,7 +2666,7 @@ class AbstractAssignment < ActiveRecord::Base
   # for group assignments, returns a single "student" for each
   # group's submission.  the students name will be changed to the group's
   # name.  for non-group assignments this just returns all visible users
-  def representatives(user:, includes: [:inactive], group_id: nil, section_id: nil, ignore_student_visibility: false, &block)
+  def representatives(user:, includes: [:inactive], group_id: nil, section_id: nil, ignore_student_visibility: false, include_others: false, &block)
     return visible_students_for_speed_grader(user:, includes:, group_id:, section_id:, ignore_student_visibility:) unless grade_as_group?
 
     submissions = self.submissions.to_a
@@ -2701,7 +2722,12 @@ class AbstractAssignment < ActiveRecord::Base
     if block
       sorted_reps_with_others.each(&block)
     end
-    sorted_reps_with_others.map(&:first)
+
+    if include_others
+      sorted_reps_with_others
+    else
+      sorted_reps_with_others.map(&:first)
+    end
   end
 
   def groups_and_ungrouped(user, includes: [])
@@ -3079,9 +3105,19 @@ class AbstractAssignment < ActiveRecord::Base
   scope :for_course, ->(course_id) { where(context_type: "Course", context_id: course_id) }
   scope :for_group_category, ->(group_category_id) { where(group_category_id:) }
 
-  scope :visible_to_students_in_course_with_da, lambda { |user_id, course_id|
-    joins(:assignment_student_visibilities)
-      .where(assignment_student_visibilities: { user_id:, course_id: })
+  scope :visible_to_students_in_course_with_da, lambda { |user_ids, course_ids|
+    if Account.site_admin.feature_enabled?(:selective_release_backend)
+      visible_assignment_ids = AssignmentVisibility::AssignmentVisibilityService.assignments_visible_to_students_in_courses(user_ids:, course_ids:).map(&:assignment_id)
+
+      if visible_assignment_ids.any?
+        where(id: visible_assignment_ids)
+      else
+        none # Return no records if no assignment IDs are visible
+      end
+    else
+      joins(:assignment_student_visibilities)
+        .where(assignment_student_visibilities: { user_id: user_ids, course_id: course_ids })
+    end
   }
 
   # course_ids should be courses that restrict visibility based on overrides
@@ -3089,6 +3125,15 @@ class AbstractAssignment < ActiveRecord::Base
   scope :filter_by_visibilities_in_given_courses, lambda { |user_ids, course_ids_that_have_da_enabled|
     if course_ids_that_have_da_enabled.blank?
       active
+    elsif Account.site_admin.feature_enabled?(:selective_release_backend)
+      user_ids = Array.wrap(user_ids)
+      course_ids = Array.wrap(course_ids_that_have_da_enabled)
+      visible_assignment_ids = AssignmentVisibility::AssignmentVisibilityService.assignment_visible_to_students_in_course(user_ids:, course_ids:, assignment_ids: ids).map(&:assignment_id)
+      where(
+        "(assignments.context_id NOT IN (?) AND assignments.workflow_state <> 'deleted') OR assignments.id IN (?)",
+        course_ids,
+        visible_assignment_ids
+      )
     else
       user_ids = Array.wrap(user_ids).join(",")
       course_ids = Array.wrap(course_ids_that_have_da_enabled).join(",")
@@ -3202,6 +3247,9 @@ class AbstractAssignment < ActiveRecord::Base
 
   scope :unpublished, -> { where(workflow_state: "unpublished") }
   scope :published, -> { where(workflow_state: "published") }
+
+  scope :has_sub_assignments, -> { where(has_sub_assignments: true) }
+  scope :has_no_sub_assignments, -> { where(has_sub_assignments: false) }
 
   scope :duplicating_for_too_long, lambda {
     where(
@@ -4082,6 +4130,18 @@ class AbstractAssignment < ActiveRecord::Base
 
   def hide_on_modules_view?
     %w[duplicating failed_to_duplicate outcome_alignment_cloning failed_to_clone_outcome_alignment].include?(workflow_state)
+  end
+
+  def mark_as_ready_to_migrate_to_quiz_next
+    self.settings = (settings || {}).merge({ "common_cartridge_import" => { "migrate_to_quizzes_next" => true } })
+  end
+
+  def ready_to_migrate_to_quiz_next?
+    !!settings&.dig("common_cartridge_import", "migrate_to_quizzes_next")
+  end
+
+  def unmark_as_ready_to_migrate_to_quiz_next
+    (settings || {}).delete "common_cartridge_import"
   end
 
   private

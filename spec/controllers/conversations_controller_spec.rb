@@ -59,35 +59,6 @@ describe ConversationsController do
       expect(assigns[:js_env]).not_to be_nil
     end
 
-    it "tallies legacy inbox stats" do
-      user_session(@student)
-
-      # counts toward inbox and sent, and unread
-      c1 = conversation
-      c1.update_attribute :workflow_state, "unread"
-
-      # counts toward inbox, sent, and starred
-      c2 = conversation
-      c2.update(starred: true)
-
-      # counts toward sent, and archived
-      c3 = conversation
-      c3.update_attribute :workflow_state, "archived"
-
-      term = @course.root_account.enrollment_terms.create! name: "Fall"
-      @course.update! enrollment_term: term
-
-      get "index"
-      expect(response).to be_successful
-
-      expect(InstStatsd::Statsd).to have_received(:increment).with("inbox.visit.legacy")
-      expect(InstStatsd::Statsd).to have_received(:count).with("inbox.visit.scope.inbox.count.legacy", 2).once
-      expect(InstStatsd::Statsd).to have_received(:count).with("inbox.visit.scope.sent.count.legacy", 3).once
-      expect(InstStatsd::Statsd).to have_received(:count).with("inbox.visit.scope.unread.count.legacy", 1).once
-      expect(InstStatsd::Statsd).to have_received(:count).with("inbox.visit.scope.starred.count.legacy", 1).once
-      expect(InstStatsd::Statsd).to have_received(:count).with("inbox.visit.scope.archived.count.legacy", 1).once
-    end
-
     it "assigns variables for json" do
       user_session(@student)
       conversation
@@ -306,10 +277,6 @@ describe ConversationsController do
     end
 
     context "react-inbox" do
-      before do
-        Account.default.enable_feature! :react_inbox
-      end
-
       context "metrics" do
         it "does not increment visit count if not authorized to open inbox" do
           get "index"
@@ -669,6 +636,40 @@ describe ConversationsController do
       json.each do |c|
         expect(c["subject"]).not_to be_nil
       end
+    end
+
+    it "does not trigger OOO responses on bulk messages" do
+      Account.site_admin.enable_feature! :inbox_settings
+      Account.default.settings[:enable_inbox_auto_response] = true
+      Account.default.save!
+
+      user_session(@student)
+
+      new_user1 = User.create
+      enrollment1 = @course.enroll_student(new_user1)
+      enrollment1.workflow_state = "active"
+      enrollment1.save
+
+      # Set up OOO for new_user1
+      Inbox::InboxService.update_inbox_settings_for_user(
+        user_id: new_user1.id,
+        root_account_id: Account.default.id,
+        use_signature: false,
+        signature: "",
+        use_out_of_office: true,
+        out_of_office_first_date: Time.zone.today,
+        out_of_office_last_date: Time.zone.tomorrow,
+        out_of_office_subject: "OOO",
+        out_of_office_message: "Out of Office"
+      )
+
+      new_user2 = User.create
+      enrollment2 = @course.enroll_student(new_user2)
+      enrollment2.workflow_state = "active"
+      enrollment2.save
+      post "create", params: { recipients: [new_user1.id.to_s, new_user2.id.to_s], body: "later", subject: "farewell", bulk_message: "1" }
+      expect(response).to be_successful
+      expect(ConversationMessage.count).to eq(3)
     end
 
     context "user_notes" do

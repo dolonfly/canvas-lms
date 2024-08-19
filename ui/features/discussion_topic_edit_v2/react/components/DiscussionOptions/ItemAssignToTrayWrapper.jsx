@@ -17,16 +17,26 @@
  */
 
 import React, {useContext, useEffect, useState} from 'react'
-import {GradedDiscussionDueDatesContext} from '../../util/constants'
+import {DiscussionDueDatesContext} from '../../util/constants'
 import DifferentiatedModulesSection from '@canvas/due-dates/react/DifferentiatedModulesSection'
 import LoadingIndicator from '@canvas/loading-indicator'
 
 const DEFAULT_SECTION_ID = '0'
 
 export const ItemAssignToTrayWrapper = () => {
-  const {assignedInfoList, title, assignmentID, importantDates, pointsPossible} = useContext(
-    GradedDiscussionDueDatesContext
-  )
+  const {
+    assignedInfoList,
+    setAssignedInfoList,
+    title,
+    assignmentID,
+    importantDates,
+    setImportantDates,
+    pointsPossible,
+    isGraded,
+    isCheckpoints,
+    postToSis,
+    groupCategoryId,
+  } = useContext(DiscussionDueDatesContext)
 
   const [overrides, setOverrides] = useState([])
   const [loading, setLoading] = useState(true)
@@ -36,8 +46,8 @@ export const ItemAssignToTrayWrapper = () => {
     if (assignedInfoList.length > 0) {
       const newOverrides = assignedInfoList.map(convertToOverrideObject)
       setOverrides(newOverrides)
-      setLoading(false) // Data is loaded and processed
     }
+    setLoading(false)
   }, [assignedInfoList])
 
   // Convert the assignedInfoList to the expected shape for the DifferentiatedModulesSection
@@ -46,13 +56,30 @@ export const ItemAssignToTrayWrapper = () => {
       due_at: inputObj.dueDate || null,
       lock_at: inputObj.availableUntil || null,
       unlock_at: inputObj.availableFrom || null,
+      reply_to_topic_due_at: inputObj.replyToTopicDueDate || null,
+      required_replies_due_at: inputObj.requiredRepliesDueDate || null,
       due_at_overridden: true,
       all_day: false,
       all_day_date: null,
       unlock_at_overridden: true,
+      reply_to_topic_due_at_overridden: true,
+      required_replies_due_at_overridden: true,
       lock_at_overridden: true,
+      unassign_item: inputObj.unassignItem || false,
       id: inputObj.dueDateId,
       noop_id: null,
+      stagedOverrideId: inputObj.stagedOverrideId || null,
+      rowKey: inputObj.rowKey || null,
+      replyToEntryOverrideId: inputObj.replyToEntryOverrideId || null,
+      replyToTopicOverrideId: inputObj.replyToTopicOverrideId || null,
+    }
+
+    // Add context_module_id and context_module_name fields if they exist on inputObj
+    if (inputObj.context_module_id) {
+      outputObj.context_module_id = inputObj.context_module_id
+    }
+    if (inputObj.context_module_name) {
+      outputObj.context_module_name = inputObj.context_module_name
     }
 
     let courseSectionId = null
@@ -80,7 +107,9 @@ export const ItemAssignToTrayWrapper = () => {
       } else if (type === 'user') {
         studentIds.push(id)
       } else if (type === 'group') {
-        groupIds.push(id)
+        outputObj.group_id = id
+      } else if (type === 'course') {
+        outputObj.course_id = id
       }
     })
 
@@ -90,15 +119,71 @@ export const ItemAssignToTrayWrapper = () => {
     if (studentIds.length > 0) {
       outputObj.student_ids = studentIds
     }
-    if (groupIds.length > 0) {
-      outputObj.group_ids = groupIds
+
+    return outputObj
+  }
+
+  function convertToAssignedInfoListObject(inputObj) {
+    const outputObj = {
+      dueDateId: inputObj.rowKey || inputObj.stagedOverrideId || null,
+      assignedList: [],
+      replyToTopicDueDate: inputObj.reply_to_topic_due_at || null,
+      requiredRepliesDueDate: inputObj.required_replies_due_at || null,
+      dueDate: inputObj.due_at ? inputObj.due_at : null,
+      availableFrom: inputObj.unlock_at || null,
+      availableUntil: inputObj.lock_at || null,
+      unassignItem: inputObj.unassign_item || false,
+      context_module_id: inputObj.context_module_id || null,
+      context_module_name: inputObj.context_module_name || null,
+      stagedOverrideId: inputObj.stagedOverrideId || null,
+      rowKey: inputObj.rowKey || null,
+      replyToEntryOverrideId: inputObj.replyToEntryOverrideId || null,
+      replyToTopicOverrideId: inputObj.replyToTopicOverrideId || null,
+    }
+
+    if (inputObj.noop_id === '1') {
+      outputObj.assignedList.push('mastery_paths')
+    } else if (inputObj.course_section_id) {
+      if (inputObj.course_section_id === '0') {
+        outputObj.assignedList.push('everyone')
+      } else {
+        outputObj.assignedList.push('course_section_' + inputObj.course_section_id)
+      }
+    } else if (inputObj.student_ids) {
+      inputObj.student_ids.forEach(id => {
+        outputObj.assignedList.push('user_' + id)
+      })
+    } else if (inputObj.course_id) {
+      outputObj.assignedList.push('course_' + inputObj.course_id)
+    } else if (inputObj.group_id) {
+      outputObj.assignedList.push('group_' + inputObj.group_id)
+    }
+
+    if (
+      !inputObj.course_section_id &&
+      !inputObj.course_id &&
+      !inputObj.student_ids &&
+      !inputObj.noop_id &&
+      !inputObj.group_id
+    ) {
+      outputObj.assignedList.push('everyone')
     }
 
     return outputObj
   }
-  const onSync = overrides => {
-    // convert overrides to the expected assignedInfoList shape
-    // Then Set the assignedInfoList
+
+  const onSync = (assigneeInfoUpdateOverrides, newImportantDatesValue) => {
+    if (assigneeInfoUpdateOverrides) {
+      const outputArray = []
+      assigneeInfoUpdateOverrides.forEach(inputObj => {
+        const outputObj = convertToAssignedInfoListObject(inputObj)
+        outputArray.push(outputObj)
+      })
+      // convert overrides to the expected assignedInfoList shape
+      // Then Set the assignedInfoList
+      setAssignedInfoList(outputArray)
+    }
+    setImportantDates(newImportantDatesValue)
   }
 
   if (loading) {
@@ -110,11 +195,15 @@ export const ItemAssignToTrayWrapper = () => {
       onSync={onSync}
       overrides={overrides}
       assignmentId={assignmentID}
-      assignmentName={title}
-      pointsPossible={pointsPossible}
+      getAssignmentName={() => title}
+      getPointsPossible={() => pointsPossible}
+      getGroupCategoryId={() => groupCategoryId}
       type="discussion"
       importantDates={importantDates}
       defaultSectionId={DEFAULT_SECTION_ID}
+      supportDueDates={isGraded}
+      isCheckpointed={isCheckpoints}
+      postToSIS={postToSis}
     />
   )
 }

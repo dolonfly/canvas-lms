@@ -145,6 +145,7 @@ class Submission < ActiveRecord::Base
 
   belongs_to :quiz_submission, class_name: "Quizzes::QuizSubmission"
   has_many :all_submission_comments, -> { order(:created_at) }, class_name: "SubmissionComment", dependent: :destroy
+  has_many :group_memberships, through: :assignment
   has_many :submission_comments, -> { order(:created_at).where(provisional_grade_id: nil) }
   has_many :visible_submission_comments,
            -> { published.visible.for_final_grade.order(:created_at, :id) },
@@ -305,7 +306,7 @@ class Submission < ActiveRecord::Base
   IdBookmarker = BookmarkedCollection::SimpleBookmarker.new(Submission, :id)
 
   scope :anonymized, -> { where.not(anonymous_id: nil) }
-  scope :due_in_past, -> { where("cached_due_date <= ?", Time.now.utc) }
+  scope :due_in_past, -> { where(cached_due_date: ..Time.now.utc) }
 
   scope :posted, -> { where.not(posted_at: nil) }
   scope :unposted, -> { where(posted_at: nil) }
@@ -521,7 +522,16 @@ class Submission < ActiveRecord::Base
         user.id == user_id &&
         assignment.published?
     end
-    can :read and can :comment and can :make_group_comment and can :submit and can :mark_item_read and can :read_comments
+    can :read and can :make_group_comment and can :submit and can :mark_item_read and can :read_comments
+
+    # non-deleted students in accounts with limited access setting enabled should not be able to comment on submissions
+    given do |user|
+      user &&
+        user.id == user_id &&
+        assignment.published? &&
+        !course.account.limited_access_for_user?(user)
+    end
+    can :comment
 
     # see user_can_read_grade? before editing :read_grade permissions
     given do |user|
@@ -1347,12 +1357,20 @@ class Submission < ActiveRecord::Base
   end
   # End Plagiarism functions
 
-  def external_tool_url
+  def tool_default_query_params(current_user)
+    return {} unless cached_quiz_lti?
+
+    grade_by_question_enabled = current_user.preferences.fetch(:enable_speedgrader_grade_by_question, false)
+    { grade_by_question_enabled: }
+  end
+
+  def external_tool_url(query_params: {})
     return unless submission_type == "basic_lti_launch"
 
     external_url = url
     return unless external_url
 
+    external_url = UrlHelper.add_query_params(external_url, query_params) if query_params.any?
     URI::DEFAULT_PARSER.escape(external_url)
   end
 
@@ -1390,7 +1408,7 @@ class Submission < ActiveRecord::Base
   end
 
   # If an object is pulled from a simply_versioned yaml it may not have a submitted at.
-  # submitted_at is needed by the SpeedGrader, so it is set to the updated_at value
+  # submitted_at is needed by SpeedGrader, so it is set to the updated_at value
   def submitted_at
     if submission_type
       unless read_attribute(:submitted_at)
@@ -1400,6 +1418,12 @@ class Submission < ActiveRecord::Base
     else
       nil
     end
+  end
+
+  # A student that has not submitted but has been graded will have a workflow_state of "graded".
+  # In that case, we can check the submission_type to see if the student has submitted or not.
+  def not_submitted?
+    unsubmitted? || submission_type.nil?
   end
 
   def update_attachment_associations
@@ -1498,12 +1522,12 @@ class Submission < ActiveRecord::Base
     inferred_state = workflow_state
 
     # New Quizzes returned a partial grade, but manual review is needed from a human
-    return workflow_state if workflow_state == Submission.workflow_states.pending_review && cached_quiz_lti
+    return workflow_state if pending_review? && cached_quiz_lti
 
-    inferred_state = Submission.workflow_states.submitted if unsubmitted? && submitted_at
-    inferred_state = Submission.workflow_states.unsubmitted if submitted? && !has_submission?
-    inferred_state = Submission.workflow_states.graded if grade && score && grade_matches_current_submission
-    inferred_state = Submission.workflow_states.pending_review if infer_review_needed?
+    inferred_state = "submitted" if unsubmitted? && submitted_at
+    inferred_state = "unsubmitted" if submitted? && !has_submission?
+    inferred_state = "graded" if grade && score && grade_matches_current_submission
+    inferred_state = "pending_review" if infer_review_needed?
 
     inferred_state
   end
@@ -1703,6 +1727,7 @@ class Submission < ActiveRecord::Base
   def late_policy_relevant_changes?
     return true if @regraded
     return false if grade_matches_current_submission == false # nil is treated as true
+    return false if assignment.has_sub_assignments?
 
     changes.slice(:score, :submitted_at, :seconds_late_override, :late_policy_status, :custom_grade_status_id).any?
   end
@@ -2138,10 +2163,10 @@ class Submission < ActiveRecord::Base
   scope :for_user, ->(user) { where(user_id: user) }
   scope :needing_screenshot, -> { where("submissions.submission_type='online_url' AND submissions.attachment_id IS NULL").order(:updated_at) }
 
-  def assignment_visible_to_user?(user, opts = {})
+  def assignment_visible_to_user?(user)
     return visible_to_user unless visible_to_user.nil?
 
-    assignment.visible_to_user?(user, opts)
+    assignment.visible_to_user?(user)
   end
 
   def needs_regrading?
@@ -2459,9 +2484,11 @@ class Submission < ActiveRecord::Base
   end
 
   def broadcast_group_submission
-    @group_broadcast_submission = true
-    save!
-    @group_broadcast_submission = false
+    Submission.unique_constraint_retry do
+      @group_broadcast_submission = true
+      save!
+      @group_broadcast_submission = false
+    end
   end
 
   # in a module so they can be included in other Submission-like objects. the
@@ -2636,8 +2663,22 @@ class Submission < ActiveRecord::Base
 
   # Note that this will return an Array (not an ActiveRecord::Relation) if comments are preloaded
   def comments_excluding_drafts_for(user)
-    comments = user_can_read_grade?(user) ? submission_comments : visible_submission_comments
+    comments =
+      if user_can_read_grade?(user) && course.present? && !self.course.user_is_student?(user)
+        submission_comments
+      else
+        visible_submission_comments
+      end
     comments.loaded? ? comments.reject(&:draft?) : comments.published
+  end
+
+  def comments_including_drafts_for(user)
+    comments = user_can_read_grade?(user) ? submission_comments : visible_submission_comments
+    if comments.loaded?
+      comments.select { |comment| comment.non_draft_or_authored_by(user) }
+    else
+      comments.authored_by(user.id)
+    end
   end
 
   def filter_attributes_for_user(hash, user, session)
@@ -3043,14 +3084,19 @@ class Submission < ActiveRecord::Base
 
   def word_count
     if body && submission_type != "online_quiz"
-      tinymce_wordcount_count_regex = /[\w\u2019\x27\-\u00C0-\u1FFF]+/
-      ActionController::Base.helpers.strip_tags(body).scan(tinymce_wordcount_count_regex).size
+      segments = body.split(%r{<br\s*/?>})
+      word_count = 0
+      segments.each do |segment|
+        tinymce_wordcount_count_regex = /(?:[\w\u2019\x27\-\u00C0-\u1FFF]+|(?<=<br>)([^<]+)|([^<]+)(?=<br>))/
+        words = ActionController::Base.helpers.strip_tags(segment).scan(tinymce_wordcount_count_regex).size
+        word_count += words
+      end
+
+      word_count
     elsif versioned_attachments.present?
       Attachment.where(id: versioned_attachments.pluck(:id)).sum(:word_count)
     end
   end
-
-  private
 
   def aggregate_checkpoint_submissions
     Checkpoints::SubmissionAggregatorService.call(
@@ -3058,6 +3104,8 @@ class Submission < ActiveRecord::Base
       student: user
     )
   end
+
+  private
 
   def checkpoint_changes?
     checkpoint_submission? && checkpoint_attributes_changed?
@@ -3193,8 +3241,8 @@ class Submission < ActiveRecord::Base
 
   def send_timing_data_if_needed
     return unless saved_change_to_workflow_state? &&
-                  workflow_state == Submission.workflow_states.graded &&
-                  workflow_state_before_last_save == Submission.workflow_states.pending_review &&
+                  state == :graded &&
+                  workflow_state_before_last_save == "pending_review" &&
                   (submission_type == "online_quiz" || (submission_type == "basic_lti_launch" && url.include?("quiz-lti")))
 
     time = graded_at - submitted_at

@@ -24,7 +24,7 @@ module Api::V1::AssignmentOverride
   OVERRIDABLE_ID_FIELDS = %i[assignment_id quiz_id context_module_id discussion_topic_id wiki_page_id attachment_id].freeze
 
   def assignment_override_json(override, visible_users = nil, student_names: nil, module_names: nil)
-    fields = %i[id title]
+    fields = %i[id title unassign_item]
     OVERRIDABLE_ID_FIELDS.each { |f| fields << f if override.send(f).present? }
     fields.push(:due_at, :all_day, :all_day_date) if override.due_at_overridden
     fields << :unlock_at if override.unlock_at_overridden
@@ -44,12 +44,28 @@ module Api::V1::AssignmentOverride
         json[:students] = student_ids.map { |id| { id:, name: student_names[id] } } if student_names
       when "Group"
         json[:group_id] = override.set_id
+        json[:group_category_id] = override.assignment.group_category_id
       when "CourseSection"
         json[:course_section_id] = override.set_id
       when "Course"
         json[:course_id] = override.set_id
       when "Noop"
         json[:noop_id] = override.set_id
+      end
+    end
+  end
+
+  # temporary function to convert discussion_topic_section_visibilities to section overrides
+  # will be able to remove once we deprecate the old section visibilities table
+  def section_visibility_to_override_json(section_visibilities, discussion)
+    section_visibilities.map do |section_visibility|
+      fields = %i[]
+      api_json(section_visibility, @current_user, session, only: fields).tap do |json|
+        json[:discussion_topic_id] = section_visibility.discussion_topic_id
+        json[:course_section_id] = section_visibility.course_section_id
+        json[:unlock_at] = discussion.unlock_at if discussion.unlock_at
+        json[:lock_at] = discussion.lock_at if discussion.lock_at
+        json[:unassign_item] = false
       end
     end
   end
@@ -199,6 +215,11 @@ module Api::V1::AssignmentOverride
       override_data[:section] = section
     end
 
+    if !set_type && data.key?(:course_id) && data[:course_id].present?
+      set_type = "Course"
+      override_data[:course] = learning_object.context
+    end
+
     if !set_type && data.key?(:noop_id)
       set_type = "Noop"
       override_data[:noop_id] = data[:noop_id]
@@ -208,6 +229,10 @@ module Api::V1::AssignmentOverride
 
     if %w[ADHOC Noop].include?(set_type) && data.key?(:title)
       override_data[:title] = data[:title]
+    end
+
+    if data.key?(:unassign_item) && data[:unassign_item]
+      override_data[:unassign_item] = data[:unassign_item]
     end
 
     # collect override values
@@ -342,6 +367,14 @@ module Api::V1::AssignmentOverride
 
     if override_data.key?(:section)
       override.set = override_data[:section]
+    end
+
+    if override_data.key?(:course)
+      override.set = override_data[:course]
+    end
+
+    if override_data.key?(:unassign_item)
+      override.unassign_item = override_data[:unassign_item]
     end
 
     if override.set_type == "ADHOC"
@@ -480,8 +513,8 @@ module Api::V1::AssignmentOverride
 
     raise ActiveRecord::RecordInvalid, learning_object unless learning_object.valid?
 
-    prepared_overrides[:overrides_to_create].each(&:save!)
     prepared_overrides[:overrides_to_update].each(&:save!)
+    prepared_overrides[:overrides_to_create].each(&:save!)
 
     @overrides_affected = prepared_overrides[:overrides_to_delete].size +
                           prepared_overrides[:overrides_to_create].size + prepared_overrides[:overrides_to_update].size

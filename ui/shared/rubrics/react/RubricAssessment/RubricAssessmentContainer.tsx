@@ -18,32 +18,44 @@
 
 import React, {useEffect, useRef, useState} from 'react'
 import {useScope as useI18nScope} from '@canvas/i18n'
+import {colors} from '@instructure/canvas-theme'
 import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {Flex} from '@instructure/ui-flex'
 import {View} from '@instructure/ui-view'
 import {SimpleSelect} from '@instructure/ui-simple-select'
-import {Button, CloseButton, IconButton} from '@instructure/ui-buttons'
-import {IconDownloadLine, IconPrinterLine} from '@instructure/ui-icons'
+import {Button, CloseButton} from '@instructure/ui-buttons'
 import {Text} from '@instructure/ui-text'
-import type {RubricAssessmentData, RubricCriterion, UpdateAssessmentData} from '../types/rubric'
+import type {
+  RubricAssessmentData,
+  RubricAssessmentSelect,
+  RubricCriterion,
+  UpdateAssessmentData,
+} from '../types/rubric'
 import {ModernView} from './ModernView'
 import {TraditionalView} from './TraditionalView'
 import {possibleString} from '../Points'
-import {Checkbox} from '@instructure/ui-checkbox'
 
 const I18n = useI18nScope('rubrics-assessment-tray')
 
 const MAX_TRADITIONAL_CRITERIA_RATINGS = 5
 
 export type ViewMode = 'horizontal' | 'vertical' | 'traditional'
+const {ash, shamrock} = colors
 
 type RubricAssessmentContainerProps = {
   criteria: RubricCriterion[]
+  hidePoints: boolean
   isPreviewMode: boolean
+  isPeerReview: boolean
+  isFreeFormCriterionComments: boolean
   ratingOrder: string
   rubricTitle: string
   rubricAssessmentData: RubricAssessmentData[]
+  rubricAssessmentId: string
+  rubricAssessors: RubricAssessmentSelect
+  rubricSavedComments?: Record<string, string[]>
   selectedViewMode: ViewMode
+  onAccessorChange: (accessorId: string) => void
   onViewModeChange: (viewMode: ViewMode) => void
   onDismiss: () => void
   onSubmit?: () => void
@@ -51,11 +63,18 @@ type RubricAssessmentContainerProps = {
 }
 export const RubricAssessmentContainer = ({
   criteria,
+  hidePoints,
   isPreviewMode,
+  isPeerReview,
+  isFreeFormCriterionComments,
   ratingOrder,
   rubricTitle,
   rubricAssessmentData,
+  rubricAssessmentId,
+  rubricAssessors,
+  rubricSavedComments = {},
   selectedViewMode,
+  onAccessorChange,
   onDismiss,
   onSubmit,
   onViewModeChange,
@@ -74,7 +93,9 @@ export const RubricAssessmentContainer = ({
     const calculateDistance = () => {
       if (containerRef.current) {
         const rect = (containerRef.current as HTMLElement).getBoundingClientRect()
-        const distance = window.innerHeight - rect.bottom
+        const isMasquerade = !!document.querySelector('body.is-masquerading-or-student-view')
+        const masqueradeHeight = isMasquerade ? 50 : 0
+        const distance = window.innerHeight - rect.bottom - masqueradeHeight
         setDistanceToBottom(distance)
       }
     }
@@ -87,8 +108,14 @@ export const RubricAssessmentContainer = ({
       return (
         <TraditionalView
           criteria={criteria}
+          hidePoints={hidePoints}
+          ratingOrder={ratingOrder}
           rubricAssessmentData={rubricAssessmentData}
           rubricTitle={rubricTitle}
+          rubricSavedComments={rubricSavedComments}
+          isPreviewMode={isPreviewMode}
+          isPeerReview={isPeerReview}
+          isFreeFormCriterionComments={isFreeFormCriterionComments}
           onUpdateAssessmentData={onUpdateAssessmentData}
         />
       )
@@ -97,11 +124,15 @@ export const RubricAssessmentContainer = ({
     return (
       <ModernView
         criteria={criteria}
+        hidePoints={hidePoints}
         isPreviewMode={isPreviewMode}
+        isPeerReview={isPeerReview}
         ratingOrder={ratingOrder}
+        rubricSavedComments={rubricSavedComments}
         rubricAssessmentData={rubricAssessmentData}
         selectedViewMode={selectedViewMode}
         onUpdateAssessmentData={onUpdateAssessmentData}
+        isFreeFormCriterionComments={isFreeFormCriterionComments}
       />
     )
   }
@@ -111,6 +142,8 @@ export const RubricAssessmentContainer = ({
       onViewModeChange('vertical')
     }
   }, [criteria, disableTraditionalView, onViewModeChange, selectedViewMode])
+
+  const rubricHeader = isPeerReview ? I18n.t('Peer Review') : I18n.t('Rubric')
 
   return (
     <View as="div" padding="medium medium 0 medium" themeOverride={{paddingMedium: '1rem'}}>
@@ -127,12 +160,18 @@ export const RubricAssessmentContainer = ({
         <Flex.Item as="header">
           <AssessmentHeader
             disableTraditionalView={disableTraditionalView}
+            hidePoints={hidePoints}
             instructorPoints={instructorPoints}
+            isFreeFormCriterionComments={isFreeFormCriterionComments}
             isPreviewMode={isPreviewMode}
+            isPeerReview={isPeerReview}
             isTraditionalView={isTraditionalView}
+            onAccessorChange={onAccessorChange}
             onDismiss={onDismiss}
             onViewModeChange={onViewModeChange}
-            rubricTitle={rubricTitle}
+            rubricAssessmentId={rubricAssessmentId}
+            rubricAssessors={rubricAssessors}
+            rubricHeader={rubricHeader}
             selectedViewMode={selectedViewMode}
           />
         </Flex.Item>
@@ -141,7 +180,7 @@ export const RubricAssessmentContainer = ({
             {renderViewContainer()}
           </View>
         </Flex.Item>
-        {!isPreviewMode && (
+        {!isPreviewMode && onSubmit && (
           <Flex.Item as="footer">
             <AssessmentFooter onSubmit={onSubmit} />
           </Flex.Item>
@@ -153,11 +192,13 @@ export const RubricAssessmentContainer = ({
 
 type ViewModeSelectProps = {
   disableTraditionalView: boolean
+  isFreeFormCriterionComments: boolean
   selectedViewMode: ViewMode
   onViewModeChange: (viewMode: ViewMode) => void
 }
 const ViewModeSelect = ({
   disableTraditionalView,
+  isFreeFormCriterionComments,
   selectedViewMode,
   onViewModeChange,
 }: ViewModeSelectProps) => {
@@ -176,23 +217,36 @@ const ViewModeSelect = ({
       data-testid="rubric-assessment-view-mode-select"
       onChange={(_e, {value}) => handleSelect(value as string)}
     >
-      <SimpleSelect.Option id="traditional" value="traditional" isDisabled={disableTraditionalView}>
+      <SimpleSelect.Option
+        id="traditional"
+        value="traditional"
+        isDisabled={disableTraditionalView}
+        data-testid="traditional-view-option"
+      >
         {I18n.t('Traditional')}
       </SimpleSelect.Option>
-      <SimpleSelect.Option id="horizontal" value="horizontal">
+      <SimpleSelect.Option id="horizontal" value="horizontal" data-testid="horizontal-view-option">
         {I18n.t('Horizontal')}
       </SimpleSelect.Option>
-      <SimpleSelect.Option id="vertical" value="vertical">
-        {I18n.t('Vertical')}
-      </SimpleSelect.Option>
+      {!isFreeFormCriterionComments && (
+        <SimpleSelect.Option id="vertical" value="vertical" data-testid="vertical-view-option">
+          {I18n.t('Vertical')}
+        </SimpleSelect.Option>
+      )}
     </SimpleSelect>
   )
 }
 
 type InstructorScoreProps = {
   instructorPoints: number
+  isPeerReview: boolean
+  isPreviewMode: boolean
 }
-const InstructorScore = ({instructorPoints = 0}: InstructorScoreProps) => {
+const InstructorScore = ({
+  instructorPoints = 0,
+  isPeerReview,
+  isPreviewMode,
+}: InstructorScoreProps) => {
   return (
     <Flex as="div" height="3rem" alignItems="center">
       <Flex.Item as="div" width="13.813rem" align="center">
@@ -207,7 +261,7 @@ const InstructorScore = ({instructorPoints = 0}: InstructorScoreProps) => {
         >
           <View as="span" margin="0 0 0 small">
             <Text size="medium" weight="bold">
-              {I18n.t('Instructor Score')}
+              {isPeerReview ? I18n.t('Peer Review Score') : I18n.t('Instructor Score')}
             </Text>
           </View>
         </div>
@@ -218,7 +272,7 @@ const InstructorScore = ({instructorPoints = 0}: InstructorScoreProps) => {
             lineHeight: '3rem',
             width: '4.313rem',
             height: '3rem',
-            backgroundColor: '#0B874B',
+            backgroundColor: isPreviewMode ? ash : shamrock,
             borderRadius: '0 .35rem .35rem 0',
             textAlign: 'center',
           }}
@@ -237,32 +291,78 @@ const InstructorScore = ({instructorPoints = 0}: InstructorScoreProps) => {
   )
 }
 
+type AccessorSelectProps = {
+  rubricAssessmentId: string
+  rubricAssessors: RubricAssessmentSelect
+  showLabel: boolean
+  onAccessorChange: (accessorId: string) => void
+}
+const AccessorSelect = ({
+  rubricAssessmentId,
+  rubricAssessors,
+  showLabel,
+  onAccessorChange,
+}: AccessorSelectProps) => {
+  const label = I18n.t('Select Rubric')
+  return (
+    <SimpleSelect
+      data-testid="rubric-assessment-accessor-select"
+      renderLabel={showLabel ? label : <ScreenReaderContent>{label}</ScreenReaderContent>}
+      value={rubricAssessmentId}
+      onChange={(e, {value}) => onAccessorChange((value ?? '') as string)}
+    >
+      {rubricAssessors.map(assessor => (
+        <SimpleSelect.Option key={assessor.id} id={assessor.id} value={assessor.id}>
+          {assessor.name ?? ''}
+        </SimpleSelect.Option>
+      ))}
+    </SimpleSelect>
+  )
+}
+
 type AssessmentHeaderProps = {
   disableTraditionalView: boolean
+  hidePoints: boolean
   instructorPoints: number
+  isFreeFormCriterionComments: boolean
   isPreviewMode: boolean
+  isPeerReview: boolean
   isTraditionalView: boolean
   onDismiss: () => void
   onViewModeChange: (viewMode: ViewMode) => void
-  rubricTitle: string
+  onAccessorChange: (accessorId: string) => void
+  rubricAssessmentId: string
+  rubricAssessors: RubricAssessmentSelect
+  rubricHeader: string
   selectedViewMode: ViewMode
 }
 const AssessmentHeader = ({
   disableTraditionalView,
+  hidePoints,
   instructorPoints,
+  isFreeFormCriterionComments,
   isPreviewMode,
+  isPeerReview,
   isTraditionalView,
+  onAccessorChange,
   onDismiss,
   onViewModeChange,
-  rubricTitle,
+  rubricAssessmentId,
+  rubricAssessors,
+  rubricHeader,
   selectedViewMode,
 }: AssessmentHeaderProps) => {
   return (
-    <View as="div" padding={isTraditionalView ? '0 0 medium 0' : '0'}>
+    <View
+      as="div"
+      padding={isTraditionalView ? '0 0 medium 0' : '0'}
+      overflowX="hidden"
+      overflowY="hidden"
+    >
       <Flex>
         <Flex.Item align="end">
-          <Text weight="bold" size="large">
-            {rubricTitle}
+          <Text weight="bold" size="large" data-testid="rubric-assessment-header">
+            {rubricHeader}
           </Text>
         </Flex.Item>
         <Flex.Item align="end">
@@ -275,23 +375,44 @@ const AssessmentHeader = ({
         </Flex.Item>
       </Flex>
 
-      <View as="hr" margin="x-small 0 small" />
+      <View as="hr" margin="x-small 0 small" aria-hidden={true} />
       <Flex>
         <Flex.Item shouldGrow={true} shouldShrink={true}>
           <ViewModeSelect
             disableTraditionalView={disableTraditionalView}
+            isFreeFormCriterionComments={isFreeFormCriterionComments}
             selectedViewMode={selectedViewMode}
             onViewModeChange={onViewModeChange}
           />
         </Flex.Item>
         {isTraditionalView && (
-          <Flex.Item>
-            <View as="div" margin="0 large 0 0" themeOverride={{marginLarge: '2.938rem'}}>
-              <InstructorScore instructorPoints={instructorPoints} />
-            </View>
-          </Flex.Item>
+          <>
+            {rubricAssessors.length > 0 && rubricAssessmentId && (
+              <Flex.Item>
+                <View as="div" margin="0 large 0 0" themeOverride={{marginLarge: '2.938rem'}}>
+                  <AccessorSelect
+                    rubricAssessmentId={rubricAssessmentId}
+                    rubricAssessors={rubricAssessors}
+                    showLabel={false}
+                    onAccessorChange={onAccessorChange}
+                  />
+                </View>
+              </Flex.Item>
+            )}
+            {!hidePoints && (
+              <Flex.Item>
+                <View as="div" margin="0 large 0 0" themeOverride={{marginLarge: '2.938rem'}}>
+                  <InstructorScore
+                    isPeerReview={isPeerReview}
+                    instructorPoints={instructorPoints}
+                    isPreviewMode={isPreviewMode}
+                  />
+                </View>
+              </Flex.Item>
+            )}
+          </>
         )}
-        <Flex.Item margin="0 0 0 small">
+        {/* <Flex.Item margin="0 0 0 small">
           <IconButton disabled={isPreviewMode} screenReaderLabel="Print">
             <IconPrinterLine />
           </IconButton>
@@ -300,16 +421,33 @@ const AssessmentHeader = ({
           <IconButton disabled={isPreviewMode} screenReaderLabel="Download">
             <IconDownloadLine />
           </IconButton>
-        </Flex.Item>
+        </Flex.Item> */}
       </Flex>
 
       {!isTraditionalView && (
         <>
-          <Flex.Item margin="0 0 0 small">
-            <InstructorScore instructorPoints={instructorPoints} />
-          </Flex.Item>
+          {rubricAssessors.length > 0 && rubricAssessmentId && (
+            <Flex.Item margin="0 0 0 small">
+              <AccessorSelect
+                rubricAssessmentId={rubricAssessmentId}
+                rubricAssessors={rubricAssessors}
+                showLabel={true}
+                onAccessorChange={onAccessorChange}
+              />
+            </Flex.Item>
+          )}
 
-          <View as="hr" margin="medium 0 medium 0" />
+          {!hidePoints && (
+            <Flex.Item margin="0 0 0 small">
+              <InstructorScore
+                isPeerReview={isPeerReview}
+                instructorPoints={instructorPoints}
+                isPreviewMode={isPreviewMode}
+              />
+            </Flex.Item>
+          )}
+
+          <View as="hr" margin="medium 0 medium 0" aria-hidden={true} />
         </>
       )}
     </View>
@@ -321,7 +459,7 @@ type AssessmentFooterProps = {
 }
 const AssessmentFooter = ({onSubmit}: AssessmentFooterProps) => {
   return (
-    <View as="div">
+    <View as="div" data-testid="rubric-assessment-footer">
       <View as="hr" margin="0" />
       <Flex justifyItems="end" margin="small 0">
         <Flex.Item>

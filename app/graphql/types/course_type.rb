@@ -433,5 +433,16 @@ module Types
     field :root_outcome_group, LearningOutcomeGroupType, null: false
 
     field :grade_statuses, [CourseGradeStatus], null: false
+
+    field :dashboard_card, CourseDashboardCardType, "returns dashboard card information for this course", null: true
+    def dashboard_card
+      object
+    end
+
+    field :activity_stream, ActivityStreamType, null: true
+    def activity_stream
+      context.scoped_set!(:context_type, "Course")
+      object
+    end
   end
 end

@@ -3118,6 +3118,14 @@ describe GradebooksController do
     describe "js_env" do
       let(:js_env) { assigns[:js_env] }
 
+      context "when platform_service_speedgrader is enabled" do
+        it "includes info indicating whether grade by question is supported" do
+          Account.site_admin.enable_feature!(:platform_service_speedgrader)
+          get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id, platform_sg: true }
+          expect(js_env).to have_key :GRADE_BY_QUESTION_SUPPORTED
+        end
+      end
+
       it "includes lti_retrieve_url" do
         get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id }
         expect(js_env[:lti_retrieve_url]).not_to be_nil
@@ -3298,6 +3306,40 @@ describe GradebooksController do
             get :speed_grader, params: { course_id: @course, assignment_id: @assignment }
             expect(js_env).not_to include(:filter_speed_grader_by_student_group)
           end
+        end
+      end
+
+      describe "rubric_outcome_data" do
+        before do
+          @course.account.enable_feature!(:enhanced_rubrics)
+        end
+
+        it "does not include rubric_outcome_data when the assignment does not have a rubric" do
+          rubric = Rubric.create!(context: @course, title: "testing")
+          RubricAssociation.create!(context: @course, rubric:, purpose: :grading, association_object: @assignment)
+
+          get :speed_grader, params: { course_id: @course, assignment_id: @assignment }
+          expect(js_env[:rubric_outcome_data]).to eq []
+        end
+
+        it "includes rubric_outcome_data" do
+          outcome_with_rubric({ mastery_points: 3 })
+          @outcome.display_name = "Outcome 1"
+          @outcome.save!
+          RubricAssociation.create!(context: @course, rubric: @rubric, purpose: :grading, association_object: @assignment)
+
+          get :speed_grader, params: { course_id: @course, assignment_id: @assignment }
+          expect(js_env[:rubric_outcome_data].length).to eq 1
+          expect(js_env[:rubric_outcome_data].first[:display_name]).to eq "Outcome 1"
+        end
+
+        it "does not include rubric_outcome_data when the enhanced_rubric feature is disabled" do
+          @course.account.disable_feature!(:enhanced_rubrics)
+          rubric = Rubric.create!(context: @course, title: "testing")
+          RubricAssociation.create!(context: @course, rubric:, purpose: :grading, association_object: @assignment)
+
+          get :speed_grader, params: { course_id: @course, assignment_id: @assignment }
+          expect(js_env[:rubric_outcome_data]).to eq []
         end
       end
     end

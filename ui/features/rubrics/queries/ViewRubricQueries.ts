@@ -22,10 +22,13 @@ import type {
   RubricQueryResponse,
   DeleteRubricQueryResponse,
   DuplicateRubricQueryResponse,
+  archiveRubricResponse,
 } from '../types/Rubric'
 import getCookie from '@instructure/get-cookie'
 import qs from 'qs'
 import type {Rubric, RubricCriterion} from '@canvas/rubrics/react/types/rubric'
+import type {UsedLocation} from '@canvas/grading_scheme/gradingSchemeApiModel'
+import doFetchApi from '@canvas/do-fetch-api-effect'
 
 const COURSE_RUBRICS_QUERY = gql`
   query CourseRubricsQuery($courseId: ID!) {
@@ -48,6 +51,7 @@ const COURSE_RUBRICS_QUERY = gql`
           }
           hasRubricAssociations
           hidePoints
+          freeFormCriterionComments
           pointsPossible
           ratingOrder
           title
@@ -79,6 +83,7 @@ const ACCOUNT_RUBRICS_QUERY = gql`
           }
           hasRubricAssociations
           hidePoints
+          freeFormCriterionComments
           pointsPossible
           ratingOrder
           title
@@ -103,9 +108,31 @@ const RUBRIC_PREVIEW_QUERY = gql`
         longDescription
         description
         criterionUseRange
+        learningOutcomeId
+        masteryPoints
+        outcome {
+          displayName
+          title
+        }
       }
       title
       ratingOrder
+      freeFormCriterionComments
+    }
+  }
+`
+
+const UPDATE_RUBRIC_ARCHIVE_STATE = gql`
+  mutation UpdateRubricArchivedState($id: ID!, $archived: Boolean!) {
+    updateRubricArchivedState(input: {id: $id, archived: $archived}) {
+      rubric {
+        _id
+        workflowState
+      }
+      errors {
+        attribute
+        message
+      }
     }
   }
 `
@@ -125,7 +152,7 @@ type CourseRubricQueryResponse = {
 }
 
 type RubricPreviewQueryResponse = {
-  rubric: Pick<Rubric, 'criteria' | 'title' | 'ratingOrder'>
+  rubric: Pick<Rubric, 'criteria' | 'title' | 'ratingOrder' | 'freeFormCriterionComments'>
 }
 
 type AccountRubricQueryResponse = {
@@ -144,10 +171,23 @@ type DuplicateRubricProps = {
   courseId?: string
   title: string
   hidePoints?: boolean
+  freeFormCriterionComments?: boolean
   criteria?: RubricCriterion[]
   pointsPossible: number
   buttonDisplay?: string
   ratingOrder?: string
+}
+
+type RubricArchiveResponse = {
+  rubric: {
+    _id: string
+    workflowState: string
+  }
+
+  errors: {
+    attribute: string
+    message: string
+  }
 }
 
 export type FetchRubricVariables = AccountRubricsQueryVariables | CourseRubricsQueryVariables
@@ -173,6 +213,47 @@ export const fetchRubricCriterion = async (id?: string) => {
 
   const {rubric} = await executeQuery<RubricPreviewQueryResponse>(RUBRIC_PREVIEW_QUERY, {id})
   return rubric
+}
+
+type FetchRubricUsedLocationsParams = {
+  accountId?: string
+  courseId?: string
+  id?: string
+  nextPagePath?: string
+}
+export const fetchRubricUsedLocations = async ({
+  accountId,
+  courseId,
+  id,
+  nextPagePath,
+}: FetchRubricUsedLocationsParams) => {
+  if (!id) {
+    return {
+      usedLocations: [],
+      isLastPage: true,
+      nextPage: '',
+    }
+  }
+
+  const urlPrefix = accountId ? `accounts/${accountId}` : `courses/${courseId}`
+  const path = nextPagePath ?? `/api/v1/${urlPrefix}/rubrics/${id}/used_locations`
+
+  const result = await doFetchApi({
+    path,
+    method: 'GET',
+  })
+
+  if (!result.response.ok) {
+    throw new Error(`Failed to fetch rubric locations: ${result.response.statusText}`)
+  }
+
+  const usedLocations = (result.json as UsedLocation[]) ?? []
+
+  return {
+    usedLocations,
+    isLastPage: result.link?.next === undefined,
+    nextPage: result.link?.next?.url,
+  }
 }
 
 export const deleteRubric = async ({
@@ -214,6 +295,7 @@ export const deleteRubric = async ({
 export const duplicateRubric = async ({
   title,
   hidePoints,
+  freeFormCriterionComments,
   accountId,
   courseId,
   criteria,
@@ -251,6 +333,7 @@ export const duplicateRubric = async ({
       rubric: {
         title: title + ' Copy',
         hide_points: hidePoints,
+        free_form_criterion_comments: freeFormCriterionComments,
         criteria: duplicateCriteria,
         button_display: buttonDisplay,
         rating_order: ratingOrder,
@@ -273,4 +356,22 @@ export const duplicateRubric = async ({
   }
 
   return duplicatedRubric
+}
+
+export const archiveRubric = async (rubricId: string): Promise<archiveRubricResponse> => {
+  const {rubric} = await executeQuery<RubricArchiveResponse>(UPDATE_RUBRIC_ARCHIVE_STATE, {
+    id: rubricId,
+    archived: true,
+  })
+
+  return rubric
+}
+
+export const unarchiveRubric = async (rubricId: string): Promise<archiveRubricResponse> => {
+  const {rubric} = await executeQuery<RubricArchiveResponse>(UPDATE_RUBRIC_ARCHIVE_STATE, {
+    id: rubricId,
+    archived: false,
+  })
+
+  return rubric
 }

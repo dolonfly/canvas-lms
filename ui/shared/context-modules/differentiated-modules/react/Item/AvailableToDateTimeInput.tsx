@@ -28,6 +28,8 @@ type AvailableToDateTimeInputProps = CustomDateTimeInputProps & {
   availableToDate: string | null
   setAvailableToDate: (availableToDate: string | null) => void
   handleAvailableToDateChange: (_event: React.SyntheticEvent, value: string | undefined) => void
+  disabledWithGradingPeriod?: boolean
+  clearButtonAltLabel: string
 }
 
 export function AvailableToDateTimeInput({
@@ -38,13 +40,21 @@ export function AvailableToDateTimeInput({
   unparsedFieldKeys,
   blueprintDateLocks,
   dateInputRefs,
+  timeInputRefs,
   handleBlur,
+  disabledWithGradingPeriod,
+  clearButtonAltLabel,
   ...otherProps
 }: AvailableToDateTimeInputProps) {
   const key = 'lock_at'
   const handleClear = useCallback(() => setAvailableToDate(null), [setAvailableToDate])
   const dateInputRef = useCallback(
     el => (dateInputRefs[key] = el),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
+  const timeInputRef = useCallback(
+    el => (timeInputRefs[key] = el),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
@@ -58,7 +68,8 @@ export function AvailableToDateTimeInput({
   const availableToDateProps = {
     key,
     id: key,
-    disabled: Boolean(blueprintDateLocks?.includes('availability_dates')),
+    disabled:
+      Boolean(blueprintDateLocks?.includes('availability_dates')) || disabledWithGradingPeriod,
     description: I18n.t('Choose an available to date and time'),
     dateRenderLabel: I18n.t('Until'),
     value: availableToDate,
@@ -67,6 +78,8 @@ export function AvailableToDateTimeInput({
     messages,
     onBlur,
     dateInputRef,
+    timeInputRef,
+    clearButtonAltLabel,
   }
 
   return <ClearableDateTimeInput {...availableToDateProps} {...otherProps} />

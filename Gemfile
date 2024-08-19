@@ -15,7 +15,7 @@ source "https://rubygems.org/"
 Plugin.uninstall(["bundler_lockfile_extensions"], {}) if Plugin.installed?("bundler_lockfile_extensions")
 
 # vendored until https://github.com/rubygems/rubygems/pull/6957 is merged and released
-plugin "bundler-multilock", "1.3.0", path: "vendor/gems/bundler-multilock"
+plugin "bundler-multilock", "1.3.4", path: "vendor/gems/bundler-multilock"
 # the extra check here is in case `bundle check` or `bundle exec` gets run before `bundle install`,
 # and is also fixed by the same PR
 raise GemNotFound, "bundler-multilock plugin is not installed" if !is_a?(Bundler::Plugin::DSL) && !Plugin.installed?("bundler-multilock")
@@ -35,6 +35,8 @@ unless dependencies.empty?
 end
 
 require_relative "config/canvas_rails_switcher"
+
+gem "bundler", "~> 2.2"
 
 if Bundler.default_gemfile == gemfile
   SUPPORTED_RAILS_VERSIONS.product([nil, true]).each do |rails_version, include_plugins|
@@ -84,7 +86,7 @@ module GemOverride
     if File.directory?(vendor_path)
       super(name, path: vendor_path, **kwargs)
     else
-      super(name, *version, path:, **kwargs)
+      super
     end
   end
 end

@@ -75,12 +75,6 @@ shared_context "in-process server selenium tests" do
   # set up so you can use rails urls helpers in your selenium tests
   include Rails.application.routes.url_helpers
 
-  prepend_before :all do
-    # building the schema is currently very slow.
-    # this ensures the schema is built before specs are run to avoid timeouts
-    CanvasSchema.graphql_definition
-  end
-
   prepend_before do
     resize_screen_to_standard
     SeleniumDriverSetup.allow_requests!
@@ -216,6 +210,8 @@ shared_context "in-process server selenium tests" do
         "Uncaught Error: Loading chunk", # probably happens when the test ends when the browser is still loading some JS
         "Access to Font at 'http://cdnjs.cloudflare.com/ajax/libs/mathjax/",
         "Access to XMLHttpRequest at 'http://www.example.com/' from origin",
+        "Access to fetch at 'http://canvas.instructure.com/images/messages/avatar-50.png' from origin", # The avatar image fails to load occasionally at the beginning of tests.
+        # It is potentially a request timeout issue but indicated as CORS error by the browser.
         "The user aborted a request", # The server doesn't respond fast enough sometimes and requests can be aborted. For example: when a closing a dialog.
         # Is fixed in Chrome 109, remove this once upgraded to or above Chrome 109 https://bugs.chromium.org/p/chromium/issues/detail?id=1307772
         "Found a 'popup' attribute. If you are testing the popup API, you must enable Experimental Web Platform Features.",

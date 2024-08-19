@@ -40,7 +40,10 @@ export type RubricPopoverProps = {
   pointsPossible: number
   buttonDisplay?: string
   ratingOrder?: string
+  freeFormCriterionComments?: boolean
   hasRubricAssociations?: boolean
+  onArchiveRubricChange: () => void
+  active: boolean
 }
 
 export const RubricPopover = ({
@@ -53,12 +56,20 @@ export const RubricPopover = ({
   pointsPossible,
   buttonDisplay,
   ratingOrder,
+  freeFormCriterionComments,
   hasRubricAssociations,
+  onArchiveRubricChange,
+  active,
 }: RubricPopoverProps) => {
   const navigate = useNavigate()
   const [isPopoverOpen, setPopoverIsOpen] = useState(false)
   const [isDuplicateRubricModalOpen, setIsDuplicateRubricModalOpen] = useState(false)
   const [isDeleteRubricModalOpen, setIsDeleteRubricModalOpen] = useState(false)
+
+  const handleArchiveRubric = () => {
+    setPopoverIsOpen(false)
+    onArchiveRubricChange()
+  }
 
   return (
     <View>
@@ -73,6 +84,7 @@ export const RubricPopover = ({
         pointsPossible={pointsPossible}
         buttonDisplay={buttonDisplay}
         ratingOrder={ratingOrder}
+        freeFormCriterionComments={freeFormCriterionComments}
         accountId={accountId}
         courseId={courseId}
       />
@@ -89,7 +101,7 @@ export const RubricPopover = ({
         renderTrigger={
           <IconButton
             renderIcon={IconMoreLine}
-            screenReaderLabel={I18n.t('Rubric Options')}
+            screenReaderLabel={I18n.t('Rubric options for %{rubricTitle}', {rubricTitle: title})}
             data-testid={`rubric-options-${id}-button`}
           />
         }
@@ -116,15 +128,15 @@ export const RubricPopover = ({
           >
             {I18n.t('Duplicate')}
           </Menu.Item>
-          <Menu.Item data-testid="archive-rubric-button" onClick={() => {}}>
-            {I18n.t('Archive')}
+          <Menu.Item data-testid="archive-rubric-button" onClick={handleArchiveRubric}>
+            {active ? I18n.t('Archive') : I18n.t('Un-Archive')}
           </Menu.Item>
-          <Menu.Item data-testid="download-rubric-button" onClick={() => {}}>
+          {/* <Menu.Item data-testid="download-rubric-button" onClick={() => {}}>
             {I18n.t('Download')}
           </Menu.Item>
           <Menu.Item data-testid="print-rubric-button" onClick={() => {}}>
             {I18n.t('Print')}
-          </Menu.Item>
+          </Menu.Item> */}
           <Menu.Item
             disabled={hasRubricAssociations}
             data-testid="delete-rubric-button"

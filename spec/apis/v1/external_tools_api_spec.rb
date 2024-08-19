@@ -27,6 +27,7 @@ describe ExternalToolsController, type: :request do
     before(:once) do
       course_with_teacher(active_all: true, user: user_with_pseudonym)
       @group = group_model(context: @course)
+      @tool_context = @course
     end
 
     it "shows an external tool" do
@@ -266,6 +267,7 @@ describe ExternalToolsController, type: :request do
       account_admin_user(active_all: true, user: user_with_pseudonym)
       @account = @user.account
       @group = group_model(context: @account)
+      @tool_context = @account
     end
 
     it "shows an external tool" do
@@ -794,14 +796,13 @@ describe ExternalToolsController, type: :request do
                       "#{type.singularize}_id": context.id.to_s },
                     post_hash)
     expect(context.context_external_tools.count).to eq 1
-
     et = context.context_external_tools.last
     expect(json).to eq example_json(et)
   end
 
   def update_call(context, successful: true)
     type = context.class.table_name
-    et = context.context_external_tools.create!(name: "test", consumer_key: "fakefake", shared_secret: "sofakefake", url: "http://www.example.com/ims/lti")
+    et = context.context_external_tools.create!(name: "test", consumer_key: "fakefake", shared_secret: "sofakefake", url: "http://www.example.com/ims/lti", unified_tool_id: "utid_12345")
 
     json = api_call(:put,
                     "/api/v1/#{type}/#{context.id}/external_tools/#{et.id}.json",
@@ -918,6 +919,7 @@ describe ExternalToolsController, type: :request do
     et.course_home_sub_navigation = { url: "http://www.example.com/ims/lti/resource", text: "course home sub navigation", display_type: "full_width", visibility: "admins" }
     et.course_settings_sub_navigation = { url: "http://www.example.com/ims/lti/resource", text: "course settings sub navigation", display_type: "full_width", visibility: "admins" }
     et.global_navigation = { url: "http://www.example.com/ims/lti/resource", text: "global navigation", display_type: "full_width", visibility: "admins" }
+    et.top_navigation = { url: "http://www.example.com/ims/lti/resource", text: "top navigation" }
     et.assignment_menu = { url: "http://www.example.com/ims/lti/resource", text: "assignment menu", display_type: "full_width", visibility: "admins" }
     et.assignment_index_menu = { url: "http://www.example.com/ims/lti/resource", text: "assignment index menu", display_type: "full_width", visibility: "admins" }
     et.assignment_group_menu = { url: "http://www.example.com/ims/lti/resource", text: "assignment group menu", display_type: "full_width", visibility: "admins" }
@@ -942,6 +944,7 @@ describe ExternalToolsController, type: :request do
     et.context_external_tool_placements.new(placement_type: opts[:placement]) if opts[:placement]
     et.allow_membership_service_access = opts[:allow_membership_service_access] if opts[:allow_membership_service_access]
     et.conference_selection = { url: "http://www.example.com/ims/lti/conference", icon_url: "/images/delete.png", text: "conference selection" }
+    et.unified_tool_id = "utid_12345"
     et.save!
     et
   end
@@ -1012,6 +1015,7 @@ describe ExternalToolsController, type: :request do
       "workflow_state" => "public",
       "vendor_help_link" => nil,
       "version" => "1.1",
+      "unified_tool_id" => "utid_12345",
       "deployment_id" => et&.deployment_id,
       "resource_selection" => {
         "enabled" => true,
@@ -1103,6 +1107,14 @@ describe ExternalToolsController, type: :request do
         "url" => "http://www.example.com/ims/lti/resource",
         "visibility" => "admins",
         "display_type" => "full_width",
+        "selection_height" => 400,
+        "selection_width" => 800,
+      },
+      "top_navigation" => {
+        "enabled" => true,
+        "text" => "top navigation",
+        "label" => "top navigation",
+        "url" => "http://www.example.com/ims/lti/resource",
         "selection_height" => 400,
         "selection_width" => 800,
       },
@@ -1314,6 +1326,7 @@ describe ExternalToolsController, type: :request do
                                    end
     }
     example["is_rce_favorite"] = et.is_rce_favorite if et&.can_be_rce_favorite?
+    example["is_top_nav_favorite"] = et.top_nav_favorite_in_context?(@tool_context) if et&.can_be_top_nav_favorite?
     example
   end
 end

@@ -521,6 +521,8 @@ class GradebooksController < ApplicationController
       custom_grade_statuses:,
       custom_grade_statuses_enabled:,
       default_grading_standard: grading_standard.data,
+      default_grading_standard_points_based: grading_standard.points_based,
+      default_grading_standard_scaling_factor: grading_standard.scaling_factor,
       download_assignment_submissions_url: named_context_url(@context, :context_assignment_submissions_url, "{{ assignment_id }}", zip: 1),
       enhanced_gradebook_filters: @context.feature_enabled?(:enhanced_gradebook_filters),
       hide_zero_point_quizzes: Account.site_admin.feature_enabled?(:hide_zero_point_quizzes_option),
@@ -624,6 +626,7 @@ class GradebooksController < ApplicationController
       group_weighting_scheme: @context.group_weighting_scheme,
       individual_gradebook_enhancements: true,
       outcome_gradebook_enabled: outcome_gradebook_enabled?,
+      outcome_rollups_url: api_v1_course_outcome_rollups_url(@context, per_page: 100),
       proxy_submissions_allowed: Account.site_admin.feature_enabled?(:proxy_file_uploads) && @context.grants_right?(@current_user, session, :proxy_assignment_submission),
       publish_to_sis_enabled:
         !!@context.sis_source_id && @context.allows_grade_publishing_by(@current_user) && gradebook_is_editable,
@@ -825,13 +828,7 @@ class GradebooksController < ApplicationController
         return
       end
 
-      submissions = if $canvas_rails == "7.1"
-                      params[:submissions] ? params[:submissions].values : [params[:submission]]
-                    elsif params[:submissions]
-                      params[:submissions].values.map { |s| ActionController::Parameters.new(s) }
-                    else
-                      [params[:submission]]
-                    end
+      submissions = params[:submissions] ? params[:submissions].values : [params[:submission]]
 
       # decorate submissions with user_ids if not present
       submissions_without_user_ids = submissions.select { |s| s[:user_id].blank? }
@@ -1037,7 +1034,8 @@ class GradebooksController < ApplicationController
   def speed_grader
     unless @context.allows_speed_grader?
       flash[:notice] = t(:speed_grader_disabled, "SpeedGrader is disabled for this course")
-      return redirect_to(course_gradebook_path(@context))
+      redirect_to(course_gradebook_path(@context))
+      return
     end
 
     return unless authorized_action(@context, @current_user, [:manage_grades, :view_all_grades])
@@ -1047,7 +1045,8 @@ class GradebooksController < ApplicationController
     if @assignment.unpublished?
       flash[:notice] = t(:speedgrader_enabled_only_for_published_content,
                          "SpeedGrader is enabled only for published content.")
-      return redirect_to polymorphic_url([@context, @assignment])
+      redirect_to polymorphic_url([@context, @assignment])
+      return
     end
 
     if @assignment.moderated_grading? && !@assignment.user_is_moderation_grader?(@current_user)
@@ -1057,6 +1056,8 @@ class GradebooksController < ApplicationController
     @can_comment_on_submission = !@context.completed? && !@context_enrollment.try(:completed?)
 
     @can_reassign_submissions = @assignment.can_reassign?(@current_user)
+
+    enhanced_rubrics_enabled = @context.account.feature_enabled?(:enhanced_rubrics)
 
     respond_to do |format|
       format.html do
@@ -1102,6 +1103,8 @@ class GradebooksController < ApplicationController
           media_comment_asset_string: @current_user.asset_string,
           late_policy: @context.late_policy&.as_json(include_root: false),
           assignment_missing_shortcut: Account.site_admin.feature_enabled?(:assignment_missing_shortcut),
+          enhanced_rubrics_enabled:,
+          rubric_outcome_data: enhanced_rubrics_enabled ? rubric&.outcome_data : []
         }
         if grading_role_for_user == :moderator
           env[:provisional_select_url] = api_v1_select_provisional_grade_path(@context.id, @assignment.id, "{{provisional_grade_id}}")
@@ -1165,21 +1168,24 @@ class GradebooksController < ApplicationController
           )
         end
 
-        if Account.site_admin.feature_enabled?(:platform_service_speedgrader) && params[:platform_sg].present?
+        append_sis_data(env)
+
+        if @context.feature_enabled?(:platform_service_speedgrader) &&
+           (params[:platform_sg].nil? || value_to_boolean(params[:platform_sg]))
 
           @page_title = t("SpeedGrader")
           @body_classes << "full-width padless-content"
 
           remote_env(speedgrader: Services::PlatformServiceSpeedgrader.launch_url)
 
+          env[:GRADE_BY_QUESTION_SUPPORTED] = @assignment.supports_grade_by_question?
           js_env(env)
+
           deferred_js_bundle :platform_speedgrader
 
           render html: "".html_safe, layout: "bare"
         else
-          append_sis_data(env)
           js_env(env)
-
           render :speed_grader, locals: {
             anonymize_students: @assignment.anonymize_students?
           }
@@ -1545,39 +1551,37 @@ class GradebooksController < ApplicationController
   end
 
   def group_as_assignment(group, options)
-    OpenObject.build("assignment",
-                     id: "group-#{group.id}",
-                     rules: group.rules,
-                     title: group.name,
-                     points_possible: points_possible(group.group_weight, options),
-                     hard_coded: true,
-                     special_class: "group_total",
-                     assignment_group_id: group.id,
-                     group_weight: group.group_weight,
-                     asset_string: "group_total_#{group.id}")
+    Assignment::HardCoded.new(id: "group-#{group.id}",
+                              rules: group.rules,
+                              title: group.name,
+                              points_possible: points_possible(group.group_weight, options),
+                              special_class: "group_total",
+                              assignment_group_id: group.id,
+                              group_weight: group.group_weight,
+                              asset_string: "group_total_#{group.id}")
   end
 
   def period_as_assignment(period, options)
-    OpenObject.build("assignment",
-                     id: "period-#{period.id}",
-                     rules: [],
-                     title: period.title,
-                     points_possible: points_possible(period.weight, options),
-                     hard_coded: true,
-                     special_class: "group_total",
-                     assignment_group_id: period.id,
-                     group_weight: period.weight,
-                     asset_string: "period_total_#{period.id}")
+    Assignment::HardCoded.new(
+      id: "period-#{period.id}",
+      rules: [],
+      title: period.title,
+      points_possible: points_possible(period.weight, options),
+      special_class: "group_total",
+      assignment_group_id: period.id,
+      group_weight: period.weight,
+      asset_string: "period_total_#{period.id}"
+    )
   end
 
   def total_as_assignment(options = {})
-    OpenObject.build("assignment",
-                     id: "final-grade",
-                     title: t("Total"),
-                     points_possible: (options[:out_of_final] ? "" : percentage(100)),
-                     hard_coded: true,
-                     special_class: "final_grade",
-                     asset_string: "final_grade_column")
+    Assignment::HardCoded.new(
+      id: "final-grade",
+      title: t("Total"),
+      points_possible: (options[:out_of_final] ? "" : percentage(100)),
+      special_class: "final_grade",
+      asset_string: "final_grade_column"
+    )
   end
 
   def moderated_grading_enabled_and_no_grades_published?

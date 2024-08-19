@@ -16,16 +16,21 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import type {Rubric, RubricAssessmentData} from '@canvas/rubrics/react/types/rubric'
+import type {RubricAssessment} from '@canvas/grading/grading'
+import type {Rubric, RubricAssessmentData, RubricOutcome} from '@canvas/rubrics/react/types/rubric'
 
-export type RubricTrayType = Pick<Rubric, 'title' | 'criteria' | 'ratingOrder'> | undefined
+export type RubricTrayType =
+  | Pick<Rubric, 'title' | 'criteria' | 'ratingOrder' | 'freeFormCriterionComments'>
+  | undefined
 export type RubricUnderscoreType = {
   title: string
   criteria: {
     criterion_use_range: boolean
     description: string
     id: string
+    learning_outcome_id?: string
     long_description: string
+    mastery_points?: number
     points: number
     ratings: {
       criterion_id: string
@@ -36,6 +41,16 @@ export type RubricUnderscoreType = {
     }[]
   }[]
   rating_order: string
+  free_form_criterion_comments: boolean
+}
+
+export type RubricOutcomeUnderscore = {
+  id: string
+  display_name: string
+}
+
+export type RubricAssessmentUnderscore = RubricAssessment & {
+  data: RubricAssessmentDataUnderscore[]
 }
 
 export type RubricAssessmentDataUnderscore = {
@@ -48,17 +63,33 @@ export type RubricAssessmentDataUnderscore = {
   description: string
 }
 export const mapRubricUnderscoredKeysToCamelCase = (
-  rubric: RubricUnderscoreType
+  rubric: RubricUnderscoreType,
+  rubricOutcomeData: RubricOutcomeUnderscore[] = []
 ): RubricTrayType => {
+  const rubricOutcomeMap = rubricOutcomeData.reduce((prev, curr) => {
+    prev[curr.id] = curr.display_name
+    return prev
+  }, {})
+
   return {
     title: rubric.title,
     criteria: rubric.criteria.map(criterion => {
+      const {learning_outcome_id} = criterion
+
       return {
         criterionUseRange: criterion.criterion_use_range,
         description: criterion.description,
         id: criterion.id,
         longDescription: criterion.long_description,
+        learningOutcomeId: criterion.learning_outcome_id,
         points: criterion.points,
+        masteryPoints: criterion.mastery_points,
+        outcome: learning_outcome_id
+          ? {
+              displayName: rubricOutcomeMap[learning_outcome_id],
+              title: criterion.description,
+            }
+          : undefined,
         ratings: criterion.ratings.map(rating => {
           return {
             criterionId: rating.criterion_id,
@@ -71,6 +102,7 @@ export const mapRubricUnderscoredKeysToCamelCase = (
       }
     }),
     ratingOrder: rubric.rating_order,
+    freeFormCriterionComments: rubric.free_form_criterion_comments,
   }
 }
 

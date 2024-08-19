@@ -206,7 +206,7 @@ describe Types::CourseType do
         @term1_assignment1 = course.assignments.create! name: "asdf",
                                                         due_at: 1.5.weeks.ago
         @term2_assignment1 = course.assignments.create! name: ";lkj",
-                                                        due_at: Date.today
+                                                        due_at: Time.zone.today
       end
 
       it "only returns assignments for the current grading period" do
@@ -1040,6 +1040,21 @@ describe Types::CourseType do
       expect(
         course_type.resolve("rubricsConnection { edges { node { workflowState } } }")
       ).to eq ["active"]
+    end
+  end
+
+  describe "ActivityStream" do
+    it "return activity stream summaries" do
+      cur_course = Course.create!
+      new_teacher = User.create!
+      cur_course.enroll_teacher(new_teacher).accept
+      cur_course.announcements.create! title: "hear ye!", message: "wat"
+      cur_course.discussion_topics.create!
+      cur_resolver = GraphQLTypeTester.new(cur_course, current_user: new_teacher)
+      expect(cur_resolver.resolve("activityStream { summary { type } } ")).to match_array ["DiscussionTopic", "Announcement"]
+      expect(cur_resolver.resolve("activityStream { summary { count } } ")).to match_array [1, 1]
+      expect(cur_resolver.resolve("activityStream { summary { unreadCount } } ")).to match_array [1, 1]
+      expect(cur_resolver.resolve("activityStream { summary { notificationCategory } } ")).to match_array [nil, nil]
     end
   end
 end

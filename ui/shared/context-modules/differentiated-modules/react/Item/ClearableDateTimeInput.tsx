@@ -18,7 +18,7 @@
 
 import React, {useCallback, useEffect, useRef, useState} from 'react'
 import {DateTimeInput} from '@instructure/ui-date-time-input'
-import {ScreenReaderContent} from '@instructure/ui-a11y-content'
+import {AccessibleContent, ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {CondensedButton} from '@instructure/ui-buttons'
 import {Flex} from '@instructure/ui-flex'
 import WithBreakpoints from '@canvas/with-breakpoints'
@@ -63,6 +63,8 @@ export interface ClearableDateTimeInputProps {
   locale?: string
   timezone?: string
   dateInputRef?: (el: HTMLInputElement | null) => void
+  timeInputRef?: (el: HTMLInputElement | null) => void
+  clearButtonAltLabel: string
 }
 
 function ClearableDateTimeInput({
@@ -80,6 +82,8 @@ function ClearableDateTimeInput({
   locale,
   timezone,
   dateInputRef,
+  timeInputRef,
+  clearButtonAltLabel,
 }: ClearableDateTimeInputProps) {
   const [hasErrorBorder, setHasErrorBorder] = useState(false)
   const clearButtonContainer = useRef<HTMLElement | null>()
@@ -134,6 +138,7 @@ function ClearableDateTimeInput({
           onChange={onChange}
           onBlur={onBlur}
           dateInputRef={dateInputRef}
+          timeInputRef={timeInputRef}
           interaction={disabled ? 'disabled' : 'enabled'}
         />
       </Flex.Item>
@@ -143,7 +148,7 @@ function ClearableDateTimeInput({
         elementRef={e => (clearButtonContainer.current = e as HTMLElement)}
       >
         <CondensedButton interaction={disabled ? 'disabled' : 'enabled'} onClick={onClear}>
-          {I18n.t('Clear')}
+          <AccessibleContent alt={clearButtonAltLabel}>{I18n.t('Clear')}</AccessibleContent>
         </CondensedButton>
       </Flex.Item>
     </Flex>

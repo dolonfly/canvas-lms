@@ -39,7 +39,7 @@ module AssignmentOverrideApplicator
 
     overrides = overrides_for_assignment_and_user(learning_object, user)
 
-    if Account.site_admin.feature_enabled?(:differentiated_modules)
+    if Account.site_admin.feature_enabled?(:selective_release_backend)
       is_unassigned = overrides.find { |o| o&.unassign_item? }
       overrides = overrides.split(is_unassigned)[0]
     end
@@ -50,7 +50,7 @@ module AssignmentOverrideApplicator
     # students get the last overridden date that applies to them, but teachers
     # should see the assignment's due_date if that is more lenient
     context = result_learning_object.context
-    if context &&
+    if context.is_a?(Course) &&
        (context.user_has_been_admin?(user) || context.user_has_no_enrollments?(user)) && # don't make a permissions call if we don't need to
        context.grants_any_right?(user, *RoleOverride::GRANULAR_MANAGE_ASSIGNMENT_PERMISSIONS) # faster than calling :delete rights on each learning object
 
@@ -202,7 +202,7 @@ module AssignmentOverrideApplicator
                  AssignmentOverrideStudent.where(key => learning_object, :user_id => user).active.first
                end
     # only bother to check context_modules if no other override was found
-    if !override && Account.site_admin.feature_enabled?(:differentiated_modules) && learning_object.context_module_overrides
+    if !override && Account.site_admin.feature_enabled?(:selective_release_backend) && learning_object.context_module_overrides
       override = AssignmentOverrideStudent.where(context_module_id: learning_object.assignment_context_modules.select(:id), user_id: user).active.first
     end
     override
@@ -254,8 +254,8 @@ module AssignmentOverrideApplicator
         end.pluck(:course_section_id).uniq
     end
 
-    overrides = if learning_object.all_assignment_overrides.loaded?
-                  learning_object.all_assignment_overrides.select { |o| o.set_type == "CourseSection" && section_ids.include?(o.set_id) }
+    overrides = if learning_object.preloaded_all_overrides
+                  learning_object.preloaded_all_overrides.select { |o| o.set_type == "CourseSection" && section_ids.include?(o.set_id) }
                 else
                   learning_object.all_assignment_overrides.where(set_type: "CourseSection", set_id: section_ids)
                 end
@@ -268,12 +268,12 @@ module AssignmentOverrideApplicator
   end
 
   def self.course_overrides(learning_object, user)
-    if Account.site_admin.feature_enabled? :differentiated_modules
+    if Account.site_admin.feature_enabled? :selective_release_backend
       context = learning_object.context
       return nil if user.enrollments.active.where(course: context).empty?
 
-      if learning_object.all_assignment_overrides.loaded?
-        learning_object.all_assignment_overrides.select { |o| o.set_type == "Course" && o.set_id == context.id }
+      if learning_object.preloaded_all_overrides
+        learning_object.preloaded_all_overrides.select { |o| o.set_type == "Course" && o.set_id == context.id }
       else
         learning_object.all_assignment_overrides.where(set_type: "Course", set_id: context.id)
       end
@@ -442,7 +442,7 @@ module AssignmentOverrideApplicator
                elsif learning_object.only_visible_to_overrides && nonactive_overrides.any?
                  select_override(nonactive_overrides, attribute, comparison)
                end
-    if !selected || (Account.site_admin.feature_enabled?(:differentiated_modules) && selected.unassign_item)
+    if !selected || (Account.site_admin.feature_enabled?(:selective_release_backend) && selected.unassign_item)
       learning_object
     else
       selected

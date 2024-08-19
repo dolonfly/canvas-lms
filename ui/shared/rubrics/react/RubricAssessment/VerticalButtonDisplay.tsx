@@ -18,22 +18,31 @@
 
 import React from 'react'
 import type {RubricRating} from '../types/rubric'
+import {colors} from '@instructure/canvas-theme'
 import {Flex} from '@instructure/ui-flex'
 import {RatingButton} from './RatingButton'
 import {Text} from '@instructure/ui-text'
 import {View} from '@instructure/ui-view'
+import {possibleString, possibleStringRange} from '../Points'
+import {escapeNewLineText, rangingFrom} from './utils/rubricUtils'
+
+const {licorice} = colors
 
 type VerticalButtonDisplayProps = {
+  isPreviewMode: boolean
   ratings: RubricRating[]
   ratingOrder: string
   selectedRatingIndex?: number
   onSelectRating: (index: number) => void
+  criterionUseRange: boolean
 }
 export const VerticalButtonDisplay = ({
+  isPreviewMode,
   ratings,
   ratingOrder,
   selectedRatingIndex,
   onSelectRating,
+  criterionUseRange,
 }: VerticalButtonDisplayProps) => {
   return (
     <Flex
@@ -45,15 +54,27 @@ export const VerticalButtonDisplay = ({
         const buttonDisplay = (ratings.length - (index + 1)).toString()
         const isSelected = selectedRatingIndex === index
 
+        const min = criterionUseRange ? rangingFrom(ratings, index) : undefined
+
+        const getPossibleText = (points?: number) => {
+          return min != null ? possibleStringRange(min, points) : possibleString(points)
+        }
+
+        const buttonAriaLabel = `${rating.description} ${rating.longDescription} ${getPossibleText(
+          rating.points
+        )}`
+
         return (
           <Flex.Item key={`${rating.id}-${buttonDisplay}`} padding="xx-small 0 0 0">
             <Flex>
               <Flex.Item
                 align={isSelected ? 'start' : 'center'}
                 data-testid={`rating-button-${rating.id}-${index}`}
+                aria-label={buttonAriaLabel}
               >
                 <RatingButton
                   buttonDisplay={buttonDisplay}
+                  isPreviewMode={isPreviewMode}
                   isSelected={isSelected}
                   selectedArrowDirection="right"
                   onClick={() => onSelectRating(index)}
@@ -68,12 +89,13 @@ export const VerticalButtonDisplay = ({
                 {isSelected ? (
                   <View
                     as="div"
-                    borderColor="success"
-                    borderWidth="small"
+                    borderColor="brand"
+                    borderWidth="medium"
                     borderRadius="medium"
                     padding="xx-small"
                     margin="0 0 x-small xx-small"
                     data-testid={`rating-details-${rating.id}`}
+                    themeOverride={{borderColorBrand: licorice, borderWidthMedium: '0.188rem'}}
                   >
                     <View as="div">
                       <Text size="x-small" weight="bold">
@@ -81,7 +103,16 @@ export const VerticalButtonDisplay = ({
                       </Text>
                     </View>
                     <View as="div" display="block">
-                      <Text size="x-small">{rating.longDescription}</Text>
+                      <Text
+                        size="x-small"
+                        themeOverride={{paragraphMargin: 0}}
+                        dangerouslySetInnerHTML={escapeNewLineText(rating.longDescription)}
+                      />
+                    </View>
+                    <View as="div" textAlign="end">
+                      <Text size="x-small" weight="bold">
+                        {getPossibleText(rating.points)}
+                      </Text>
                     </View>
                   </View>
                 ) : (

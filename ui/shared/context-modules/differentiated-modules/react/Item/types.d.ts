@@ -25,6 +25,9 @@ export interface BaseDateDetails {
   due_at: string | null
   unlock_at: string | null
   lock_at: string | null
+  reply_to_topic_due_at: string | null
+  required_replies_due_at: string | null
+  group_category_id: string | null
   only_visible_to_overrides: boolean
   visible_to_everyone: boolean
 }
@@ -39,9 +42,13 @@ export interface exportedOverride {
   id: string
   course_section_id?: string | null
   student_id?: string
+  course_id?: string | null
+  group_id?: string
+  group_category_id?: string
   name: string
   type: string
   noop_id: string
+  unassign_item: boolean
 }
 
 export interface DateDetailsOverride {
@@ -52,14 +59,19 @@ export interface DateDetailsOverride {
   course_section_ids?: string[] | null
   students?: StudentInfo[]
   student_ids?: string[]
+  course_id?: string | null
+  group_id?: string
   due_at: string | null
   unlock_at: string | null
+  reply_to_topic_due_at: string | null
+  required_replies_due_at: string | null
   lock_at: string | null
   all_day?: boolean
   all_day_date?: string | null
   context_module_id?: string | null
   context_module_name?: string | null
   noop_id?: number
+  unassign_item: boolean
 }
 
 export interface ItemAssignToCardSpec {
@@ -70,12 +82,15 @@ export interface ItemAssignToCardSpec {
   hasAssignees: boolean
   due_at: string | null
   unlock_at: string | null
+  reply_to_topic_due_at: string | null
+  required_replies_due_at: string | null
   lock_at: string | null
   selectedAssigneeIds: string[]
   defaultOptions?: string[]
   contextModuleId?: string | null
   contextModuleName?: string | null
   highlightCard?: boolean
+  [key: string]: any // Define an index signature to allow string indexing (for dynamic date field)
 }
 
 export type DateLockTypes = 'due_dates' | 'availability_dates'
@@ -99,9 +114,26 @@ export type CustomDateTimeInputProps = {
   unparsedFieldKeys: Set<string>
   blueprintDateLocks?: DateLockTypes[]
   dateInputRefs: Record<string, HTMLInputElement | null>
+  timeInputRefs: Record<string, HTMLInputElement | null>
   handleBlur: (unparsedFieldKey: string) => (e: SyntheticEvent) => void
   breakpoints: Breakpoints
   showMessages?: boolean
   locale?: string
   timezone?: string
+}
+
+export interface AssigneeOption {
+  id: string
+  value: string
+  sisID?: string
+  groupCategoryId?: string
+  overrideId?: string
+  group?: string
+}
+
+export type UseFetchAssigneesResult = {
+  allOptions: AssigneeOption[]
+  isLoading: boolean
+  loadedAssignees: boolean
+  setSearchTerm
 }

@@ -20,9 +20,8 @@ import React from 'react'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import $ from 'jquery'
 import {tabIdFromElement} from './course_settings_helper'
-import * as tz from '@canvas/datetime'
+import {isMidnight} from '@instructure/moment-utils'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/datetime/jquery' /* datetimeString, date_field */
 import '@canvas/jquery/jquery.instructure_forms' /* formSubmit, fillFormData, getFormData, formErrors */
 import 'jqueryui/dialog'
 import '@canvas/util/jquery/fixDialogButtons'
@@ -397,7 +396,7 @@ $(document).ready(function () {
           initiallySelectedGradingSchemeId={selectedGradingSchemeId}
           onChange={gradingSchemeId => handleSelectedGradingSchemeIdChanged(gradingSchemeId)}
           archivedGradingSchemesEnabled={ENV.ARCHIVED_GRADING_SCHEMES_ENABLED}
-          shrinkSearchBar
+          shrinkSearchBar={true}
         />,
         grading_scheme_selector
       )
@@ -440,12 +439,13 @@ $(document).ready(function () {
     const $warning = $course_form.find('#course_conclude_at_warning')
     const $parent = $(this).parent()
     const date = $(this).data('unfudged-date')
-    const isMidnight = tz.isMidnight(date)
-    $warning.detach().appendTo($parent).showIf(isMidnight)
-    $(this).attr('aria-describedby', isMidnight ? 'course_conclude_at_warning' : null)
+    const isMidnight_ = isMidnight(date)
+    $warning.detach().appendTo($parent).showIf(isMidnight_)
+    $(this).attr('aria-describedby', isMidnight_ ? 'course_conclude_at_warning' : null)
   })
   $course_form.formSubmit({
     beforeSubmit(data) {
+
       // If Restrict Quantitative Data is checked, then the course must have a default grading scheme selected
       const rqdEnabled =
         $course_form.find('#course_restrict_quantitative_data')?.prop('value') === 'true'
@@ -453,13 +453,21 @@ $(document).ready(function () {
         .find('.grading_standard_checkbox')
         .prop('checked')
 
-      if (rqdEnabled && !hasCourseDefaultGradingScheme) {
-        $.flashError(
-          I18n.t(
-            'errors.restrict_quantitative_data',
-            'If "Restrict view of quantitative data" is enabled, then the course must have a default grading scheme enabled.'
-          )
+      const errorMessages = []
+      if ((rqdEnabled && !hasCourseDefaultGradingScheme)) {
+        errorMessages.push(
+          I18n.t('If "Restrict view of quantitative data" is enabled, then the course must have a default grading scheme enabled.')
         )
+      }
+
+      if (data["course[conclude_at]"] < data["course[start_at]"]) {
+        errorMessages.push(
+          I18n.t('The course end date can not occur before the course start date.')
+        )
+      }
+
+      if(errorMessages.length > 0) {
+        renderFlashError(errorMessages.join(' '))
         return false
       }
 
@@ -472,6 +480,7 @@ $(document).ready(function () {
       $('#course_reload_form').submit()
     },
     error(_data) {
+      renderFlashError(I18n.t('There was an error saving the changes to the course.'))
       $(this).loadingImage('remove')
     },
     disableWhileLoading: 'spin_on_success',
@@ -513,25 +522,6 @@ $(document).ready(function () {
         $obj.focus().select()
       }
     })
-  $('.course_form_more_options_link').click(function (event) {
-    event.preventDefault()
-    const $moreOptions = $('.course_form_more_options')
-    const optionText = $moreOptions.is(':visible')
-      ? I18n.t('links.more_options', 'more options')
-      : I18n.t('links.fewer_options', 'fewer options')
-    $(this).text(optionText)
-    const csp = document.getElementById('csp_options')
-    if (csp) {
-      import('../react/renderCSPSelectionBox')
-        .then(({renderCSPSelectionBox}) => renderCSPSelectionBox(csp))
-        .catch(() => {
-          // We shouldn't get here, but if we do... do something.
-          const $message = $('<div />').text(I18n.t('Setting failed to load, try refreshing.'))
-          $(csp).append($message)
-        })
-    }
-    $moreOptions.slideToggle()
-  })
   $enrollment_dialog.find('.cancel_button').click(() => {
     $enrollment_dialog.dialog('close')
   })
@@ -562,7 +552,10 @@ $(document).ready(function () {
       }
     )
   })
-  $('.date_entry').datetime_field({alwaysShowTime: true})
+
+  const renderFlashError = (errorMessage) => {
+    $.flashError(errorMessage)
+  }
 
   const $default_edit_roles_select = $('#course_default_wiki_editing_roles')
   $default_edit_roles_select.data(

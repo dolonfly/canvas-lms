@@ -22,7 +22,7 @@ module Types
   class QueryType < ApplicationObjectType
     graphql_name "Query"
 
-    add_field GraphQL::Types::Relay::NodeField
+    include GraphQL::Types::Relay::HasNodeField
 
     field :legacy_node, GraphQL::Types::Relay::Node, null: true do
       description "Fetches an object given its type and legacy ID"
@@ -253,6 +253,11 @@ module Types
     end
     def rubric(id:)
       GraphQLNodeLoader.load("Rubric", id, context)
+    end
+
+    field :my_inbox_settings, Types::InboxSettingsType, null: true
+    def my_inbox_settings
+      GraphQLNodeLoader.load("MyInboxSettings", context[:current_user].id.to_s, context) if context[:current_user]
     end
   end
 end

@@ -33,7 +33,7 @@ import {
   reject,
   some,
 } from 'lodash'
-import * as tz from '@canvas/datetime'
+import * as tz from '@instructure/moment-utils'
 import React, {Suspense} from 'react'
 import ReactDOM from 'react-dom'
 import GenericErrorPage from '@canvas/generic-error-page'
@@ -167,7 +167,7 @@ import {statusColors} from './constants/colors'
 import StudentDatastore from './stores/StudentDatastore'
 import PostGradesStore from '../SISGradePassback/PostGradesStore'
 import SubmissionStateMap from '@canvas/grading/SubmissionStateMap'
-import DownloadSubmissionsDialogManager from '../shared/DownloadSubmissionsDialogManager'
+import DownloadSubmissionsDialogManager from '@canvas/grading/DownloadSubmissionsDialogManager'
 import ReuploadSubmissionsDialogManager from '../shared/ReuploadSubmissionsDialogManager'
 import GradebookKeyboardNav from '../../jquery/GradebookKeyboardNav'
 import assignmentHelper from '../shared/helpers/assignmentHelper'
@@ -182,7 +182,6 @@ import MultiSelectSearchInput from './components/MultiSelectSearchInput'
 import ApplyScoreToUngradedModal from './components/ApplyScoreToUngradedModal'
 import ScoreToUngradedManager from '../shared/ScoreToUngradedManager'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/datetime/jquery'
 import 'jqueryui/dialog'
 import 'jqueryui/tooltip'
 import '@canvas/jquery/jquery.instructure_misc_helpers'
@@ -693,7 +692,7 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
     const ref1 = this.assignments
     for (const assignmentId in ref1) {
       const a = ref1[assignmentId]
-      if (a.only_visible_to_overrides) {
+      if (!a.visible_to_everyone) {
         const hiddenStudentIds = hiddenStudentIdsForAssignment(studentIds, a)
         for (const studentId of hiddenStudentIds) {
           studentsWithHiddenAssignments.push(studentId)
@@ -960,7 +959,7 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
       const allStudentsById: StudentMap = {...this.students, ...this.studentViewStudents}
 
       const assignment = this.getAssignment(assignmentId)
-      assignmentStudentVisibility[assignmentId] = assignment.only_visible_to_overrides
+      assignmentStudentVisibility[assignmentId] = !assignment.visible_to_everyone
         ? (pick(allStudentsById, ...assignment.assignment_visibility) as StudentMap)
         : allStudentsById
     }
@@ -3571,6 +3570,7 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
     })
     const isGroupWeightZero =
       this.assignmentGroups[assignment.assignment_group_id].group_weight === 0
+    const gradingScheme = this.getAssignmentGradingScheme(assignmentId)
     return {
       assignment: camelizeProperties(assignment),
       colors: this.state.gridColors,
@@ -3580,7 +3580,9 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
       gradingDisabled: Boolean(
         !!(submissionState != null ? submissionState.locked : undefined) || student.isConcluded
       ),
-      gradingScheme: this.getAssignmentGradingScheme(assignmentId)?.data || null,
+      gradingScheme: gradingScheme?.data || null,
+      pointsBasedGradingScheme: gradingScheme?.pointsBased || false,
+      scalingFactor: gradingScheme?.scalingFactor || null,
       isFirstAssignment,
       isInOtherGradingPeriod: !!(submissionState != null
         ? submissionState.inOtherGradingPeriod
@@ -3961,7 +3963,8 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
   }
 
   isGradeEditable = (studentId: string, assignmentId: string) => {
-    if (!this.isStudentGradeable(studentId)) {
+    const assignment = this.getAssignment(assignmentId)
+    if (assignment.has_sub_assignments || !this.isStudentGradeable(studentId)) {
       return false
     }
     const submissionState = this.submissionStateMap.getSubmissionState({
@@ -4573,7 +4576,13 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
       late_policy_status?: string | undefined
       posted_grade?: string | number | null | undefined
     },
-    gradeInfo: {excused: boolean; grade: string | null; score: number | null; valid: boolean},
+    gradeInfo: {
+      excused: boolean
+      grade: string | null
+      score: number | null
+      valid: boolean
+      subAssignmentTag?: string
+    },
     enterGradesAs?: string
   ) {
     const {userId, assignmentId} = submission
@@ -4587,7 +4596,8 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
       assignmentId,
       userId,
       submission,
-      enterGradesAs
+      enterGradesAs,
+      gradeInfo.subAssignmentTag
     )
       .then(response => {
         this.removePendingGradeInfo(submission)
@@ -4699,6 +4709,7 @@ class Gradebook extends React.Component<GradebookProps, GradebookState> {
       grade: submission.entered_grade,
       score: submission.entered_score,
       valid: true,
+      subAssignmentTag: submissionData?.subAssignmentTag,
     }
     return this.apiUpdateSubmission(submissionData, gradeInfo)
   }

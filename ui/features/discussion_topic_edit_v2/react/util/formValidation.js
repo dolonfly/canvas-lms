@@ -18,8 +18,6 @@
 
 import {useScope as useI18nScope} from '@canvas/i18n'
 
-import {minimumReplyToEntryRequiredCount, maximumReplyToEntryRequiredCount} from './constants'
-
 const I18n = useI18nScope('discussion_create')
 
 export const validateTitle = (newTitle, setTitleValidationMessages) => {
@@ -104,9 +102,29 @@ const validatePostToSections = (shouldShowPostToSectionOption, sectionIdsToPostT
   }
 }
 
-const validateGradedDiscussionFields = (gradedDiscussionRefMap, gradedDiscussionRef, isGraded) => {
+const validateGradedDiscussionFields = (
+  gradedDiscussionRefMap,
+  gradedDiscussionRef,
+  isGraded,
+  assignedInfoList,
+  postToSis,
+  showPostToSisError
+) => {
   if (!isGraded) {
     return true
+  }
+
+  if (
+    ENV.DUE_DATE_REQUIRED_FOR_ACCOUNT &&
+    ENV.FEATURES?.selective_release_ui_api &&
+    assignedInfoList &&
+    postToSis
+  ) {
+    const aDueDateMissing = assignedInfoList.some(assignee => !assignee.dueDate)
+    if (aDueDateMissing) {
+      showPostToSisError()
+      return false
+    }
   }
 
   for (const refMap of gradedDiscussionRefMap.values()) {
@@ -119,16 +137,6 @@ const validateGradedDiscussionFields = (gradedDiscussionRefMap, gradedDiscussion
   }
   gradedDiscussionRef.current = null
   return true
-}
-
-const validateReplyToEntryRequiredCount = (isCheckpoints, replyToEntryRequiredCount) => {
-  if (!isCheckpoints) {
-    return true
-  }
-  return (
-    replyToEntryRequiredCount >= minimumReplyToEntryRequiredCount &&
-    replyToEntryRequiredCount <= maximumReplyToEntryRequiredCount
-  )
 }
 
 export const validateFormFields = (
@@ -153,9 +161,9 @@ export const validateFormFields = (
   setAvailabilityValidationMessages,
   shouldShowPostToSectionOption,
   sectionIdsToPostTo,
-  isCheckpoints,
-  replyToEntryRequiredCount,
-  replyToEntryRequiredRef
+  assignedInfoList,
+  postToSis,
+  showPostToSisError
 ) => {
   let isValid = true
 
@@ -189,16 +197,12 @@ export const validateFormFields = (
       validationFunction: validateGradedDiscussionFields(
         gradedDiscussionRefMap,
         gradedDiscussionRef,
-        isGraded
+        isGraded,
+        assignedInfoList,
+        postToSis,
+        showPostToSisError
       ),
       ref: gradedDiscussionRef.current,
-    },
-    {
-      validationFunction: validateReplyToEntryRequiredCount(
-        isCheckpoints,
-        replyToEntryRequiredCount
-      ),
-      ref: replyToEntryRequiredRef.current,
     },
     {
       validationFunction: validateUsageRights(

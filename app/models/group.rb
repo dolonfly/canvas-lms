@@ -75,6 +75,7 @@ class Group < ActiveRecord::Base
            inverse_of: :context,
            class_name: "Lti::ResourceLink",
            dependent: :destroy
+  has_many :favorites, as: :context, inverse_of: :context, dependent: :destroy
 
   before_validation :ensure_defaults
   before_save :update_max_membership_from_group_category
@@ -271,6 +272,16 @@ class Group < ActiveRecord::Base
 
   def short_name
     name
+  end
+
+  def self.ids_by_student_by_assignment(student_ids, assignment_ids)
+    GroupMembership.for_assignments(assignment_ids)
+                   .for_students(student_ids)
+                   .pluck("assignments.id", "group_memberships.group_id", "group_memberships.user_id")
+                   .each_with_object({}) do |(assignment_id, group_id, user_id), acc|
+                     acc[assignment_id] ||= {}
+                     acc[assignment_id][user_id] = group_id
+                   end
   end
 
   def self.find_all_by_context_code(codes)
@@ -757,15 +768,15 @@ class Group < ActiveRecord::Base
   end
 
   def self.default_storage_quota
-    Setting.get("group_default_quota", 50.megabytes.to_s).to_i
+    Setting.get("group_default_quota", 50.decimal_megabytes.to_s).to_i
   end
 
   def storage_quota_mb
-    quota / 1.megabyte
+    quota / 1.decimal_megabytes
   end
 
   def storage_quota_mb=(val)
-    self.storage_quota = val.try(:to_i).try(:megabytes)
+    self.storage_quota = val.try(:to_i).try(:decimal_megabytes)
   end
 
   TAB_HOME, TAB_PAGES, TAB_PEOPLE, TAB_DISCUSSIONS, TAB_FILES,
@@ -799,7 +810,7 @@ class Group < ActiveRecord::Base
   end
 
   def as_json(options = nil)
-    json = super(options)
+    json = super
     if json && json["group"]
       # remove anything coming automatically from deprecated db column
       json["group"].delete("category")

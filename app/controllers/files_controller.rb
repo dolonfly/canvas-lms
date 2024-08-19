@@ -169,6 +169,8 @@ class FilesController < ApplicationController
   before_action :verify_api_id, only: %i[
     api_show api_create_success api_file_status api_update destroy icon_metadata reset_verifier
   ]
+  before_action :check_limited_access_contexts, only: %i[index]
+  before_action :check_limited_access_for_students, only: %i[show api_index api_show]
 
   include Api::V1::Attachment
   include Api::V1::Avatar
@@ -180,6 +182,14 @@ class FilesController < ApplicationController
 
   def verify_api_id
     raise ActiveRecord::RecordNotFound unless Api::ID_REGEX.match?(params[:id])
+  end
+
+  def check_limited_access_contexts
+    if @context.is_a?(Course) && @context&.account&.limited_access_for_user?(@current_user)
+      redirect_to course_path(@context)
+    else
+      check_limited_access_for_students
+    end
   end
 
   def quota
@@ -616,6 +626,9 @@ class FilesController < ApplicationController
   end
 
   def show
+    # Ensure these links are not indexed by search engines
+    response.headers["X-Robots-Tag"] = "noindex, nofollow" unless @allow_robot_indexing
+
     GuardRail.activate(:secondary) do
       params[:id] ||= params[:file_id]
 
@@ -659,7 +672,7 @@ class FilesController < ApplicationController
           render status: :not_found, template: "shared/errors/404_message", formats: [:html]
           return
         end
-        flash[:notice] = t "notices.deleted", "The file %{display_name} has been deleted", display_name: @attachment.display_name
+        flash[:notice] = t "notices.deleted", "The file %{display_name} has been deleted", display_name: @attachment.display_name unless request.format == :json # rubocop:disable Rails/ActionControllerFlashBeforeRender
         if params[:preview] && @attachment.mime_class == "image"
           redirect_to "/images/blank.png"
         elsif request.format == :json
@@ -1062,7 +1075,7 @@ class FilesController < ApplicationController
 
     overwritten_instfs_uuid = nil
     @attachment = if params.key?(:precreated_attachment_id)
-                    att = Attachment.where(id: params[:precreated_attachment_id]).take
+                    att = Attachment.find_by(id: params[:precreated_attachment_id])
                     if att.nil?
                       reject! "Requested to use precreated attachment, but attachment with id #{params[:precreated_attachment_id]} doesn't exist", 422
                     else
@@ -1117,9 +1130,7 @@ class FilesController < ApplicationController
 
     # apply duplicate handling
     if overwritten_instfs_uuid
-      # FIXME: this instfs uuid may be in use by other files;
-      # add a check and reinstate when we know it's safe
-      # InstFS.delay_if_production.delete_file(overwritten_instfs_uuid)
+      @attachment.delay_if_production.safe_delete_overwritten_instfs_uuid(overwritten_instfs_uuid)
     else
       @attachment.handle_duplicates(params[:on_duplicate])
     end

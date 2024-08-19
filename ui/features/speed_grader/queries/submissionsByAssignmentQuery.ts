@@ -24,7 +24,11 @@ const SUBMISSIONS_BY_ASSIGNMENT_QUERY = gql`
   query SubmissionsByAssignmentQuery($assignmentId: ID!) {
     assignment(id: $assignmentId) {
       submissionsConnection(
-        filter: {includeUnsubmitted: true, applyGradebookEnrollmentFilters: true}
+        filter: {
+          includeUnsubmitted: true
+          applyGradebookEnrollmentFilters: true
+          representativesOnly: true
+        }
       ) {
         nodes {
           _id
@@ -34,12 +38,17 @@ const SUBMISSIONS_BY_ASSIGNMENT_QUERY = gql`
           excused
           excused
           gradeMatchesCurrentSubmission
+          submissionCommentDownloadUrl
           gradingPeriodId
           gradingStatus
+          groupId
           postedAt
           score
           submissionStatus
           submittedAt
+          attachments {
+            submissionPreviewUrl
+          }
           user {
             _id
             id
@@ -60,7 +69,7 @@ function transform(result: any) {
 }
 
 export const ZGetAssignmentParams = z.object({
-  assignmentId: z.string(),
+  assignmentId: z.string().min(1),
 })
 
 type GetSubmissionsByAssignmentParams = z.infer<typeof ZGetAssignmentParams>

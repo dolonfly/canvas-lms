@@ -207,6 +207,7 @@ CanvasRails::Application.routes.draw do
     post "unconclude_user/:id" => "courses#unconclude_user", :as => :unconclude_user_enrollment
     resources :sections, except: %i[index edit new] do
       get "crosslist/confirm/:new_course_id" => "sections#crosslist_check", :as => :confirm_crosslist
+      get "user_count" => "sections#user_count", :on => :collection, :as => :user_count
       post :crosslist
       delete "crosslist" => "sections#uncrosslist", :as => :uncrosslist
     end
@@ -660,6 +661,10 @@ CanvasRails::Application.routes.draw do
     end
     get "calendar_settings", action: :account_calendar_settings, as: :calendar_settings
 
+    scope(controller: :analytics_hub) do
+      get "analytics_hub", action: :show, as: :analytics_hub
+    end
+
     scope(controller: :brand_configs) do
       get "theme_editor", action: :new, as: :theme_editor
       get "brand_configs", action: :index
@@ -786,9 +791,9 @@ CanvasRails::Application.routes.draw do
     resources :developer_keys, only: :index
     get "/developer_keys/:key_id", controller: :developer_keys, action: :index, as: "account_developer_key_view"
 
-    get "extensions", controller: :lti_registrations, action: :index, as: "lti_registrations"
-    get "extensions/*path", controller: :lti_registrations, action: :index
-    get "extensions/manage", controller: :lti_registrations, action: :index, as: "lti_manage_registrations"
+    get "apps", controller: "lti/registrations", action: :index, as: "lti_registrations"
+    get "apps/*path", controller: "lti/registrations", action: :index
+    get "apps/manage", controller: "lti/registrations", action: :index, as: "lti_manage_registrations"
 
     get "release_notes" => "release_notes#manage", :as => :release_notes_manage
 
@@ -800,6 +805,8 @@ CanvasRails::Application.routes.draw do
     post "grading_schemes/:id/archive" => "grading_schemes_json#archive"
     post "grading_schemes/:id/unarchive" => "grading_schemes_json#unarchive"
     post "grading_schemes" => "grading_schemes_json#create"
+    get "grading_schemes/account_default" => "grading_schemes_json#show_account_default_grading_scheme"
+    put "grading_schemes/account_default" => "grading_schemes_json#update_account_default_grading_scheme"
     delete "grading_schemes/:id" => "grading_schemes_json#destroy"
     put "grading_schemes/:id" => "grading_schemes_json#update"
     get "grading_schemes/:id/used_locations" => "grading_schemes_json#used_locations", :as => :grading_schemes_used_locations
@@ -826,6 +833,9 @@ CanvasRails::Application.routes.draw do
 
   get "login/canvas" => "login/canvas#new", :as => :canvas_login
   post "login/canvas" => "login/canvas#create"
+
+  get "login/email_verify" => "login/email_verify#show", :as => :login_email_verify_show
+  post "login/email_verify" => "login/email_verify#verify", :as => :login_email_verify
 
   get "login/ldap" => "login/ldap#new"
   post "login/ldap" => "login/ldap#create"
@@ -966,7 +976,7 @@ CanvasRails::Application.routes.draw do
   get "message_templates" => "messages#templates"
   resource :profile, controller: :profile, only: [:show, :update] do
     resources :pseudonyms, except: :index
-    resources :tokens, except: :index
+    resources :tokens, except: [:index, :destroy]
     member do
       put :update_profile
       get :communication
@@ -1100,6 +1110,12 @@ CanvasRails::Application.routes.draw do
     get "courses/:course_id/search", action: :show, as: :course_search
     # TODO: Add back global search once we have a good way to handle it
     # get "search", action: :show
+  end
+
+  scope(controller: :translation) do
+    post "courses/:course_id/translate", action: :translate, as: :translate
+    post "courses/:course_id/translate/paragraph", action: :translate_paragraph, as: :translate_paragraph
+    post "translate/message", action: :translate_message, as: :translate_message
   end
 
   ### API routes ###
@@ -1261,6 +1277,10 @@ CanvasRails::Application.routes.draw do
       post "accounts/:account_id/terms", action: :create
       put "accounts/:account_id/terms/:id", action: :update
       delete "accounts/:account_id/terms/:id", action: :destroy
+    end
+
+    scope(controller: :tokens) do
+      delete "users/:user_id/tokens/:id", action: :destroy, as: "token"
     end
 
     scope(controller: :authentication_audit_api) do
@@ -1447,6 +1467,14 @@ CanvasRails::Application.routes.draw do
 
     scope(controller: :discussion_topics_api) do
       %w[course group].each do |context|
+        put "#{context.pluralize}/:#{context}_id/discussion_topics/read_all", action: :mark_all_topic_read, as: "#{context}_discussion_mark_all_read"
+        put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read", action: :mark_topic_read, as: "#{context}_discussion_topic_mark_read"
+        delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read", action: :mark_topic_unread, as: "#{context}_discussion_topic_mark_unread"
+        put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read_all", action: :mark_all_read, as: "#{context}_discussion_topic_mark_all_read"
+        delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read_all", action: :mark_all_unread, as: "#{context}_discussion_topic_mark_all_unread"
+        put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries/:entry_id/read", action: :mark_entry_read, as: "#{context}_discussion_topic_discussion_entry_mark_read"
+        delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries/:entry_id/read", action: :mark_entry_unread, as: "#{context}_discussion_topic_discussion_entry_mark_unread"
+
         get "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id", action: :show, as: "#{context}_discussion_topic"
         post "#{context.pluralize}/:#{context}_id/discussion_topics", controller: :discussion_topics, action: :create
         put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id", controller: :discussion_topics, action: :update
@@ -1454,6 +1482,9 @@ CanvasRails::Application.routes.draw do
         delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id", controller: :discussion_topics, action: :destroy
 
         get "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/view", action: :view, as: "#{context}_discussion_topic_view"
+        get "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/summaries", action: :summary, as: "#{context}_discussion_topic_summary"
+        put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/summaries/disable", action: :disable_summary, as: "#{context}_discussion_topic_disable_summary"
+        post "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/summaries/:summary_id/feedback", action: :summary_feedback, as: "#{context}_discussion_topic_summary_feedback"
         post "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/duplicate", action: :duplicate
         get "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entry_list", action: :entry_list, as: "#{context}_discussion_topic_entry_list"
         post "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries", action: :add_entry, as: "#{context}_discussion_add_entry"
@@ -1463,12 +1494,6 @@ CanvasRails::Application.routes.draw do
         put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries/:id", controller: :discussion_entries, action: :update, as: "#{context}_discussion_update_reply"
         delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries/:id", controller: :discussion_entries, action: :destroy, as: "#{context}_discussion_delete_reply"
 
-        put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read", action: :mark_topic_read, as: "#{context}_discussion_topic_mark_read"
-        delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read", action: :mark_topic_unread, as: "#{context}_discussion_topic_mark_unread"
-        put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read_all", action: :mark_all_read, as: "#{context}_discussion_topic_mark_all_read"
-        delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/read_all", action: :mark_all_unread, as: "#{context}_discussion_topic_mark_all_unread"
-        put "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries/:entry_id/read", action: :mark_entry_read, as: "#{context}_discussion_topic_discussion_entry_mark_read"
-        delete "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries/:entry_id/read", action: :mark_entry_unread, as: "#{context}_discussion_topic_discussion_entry_mark_unread"
         post "#{context.pluralize}/:#{context}_id/discussion_topics/:topic_id/entries/:entry_id/rating",
              action: :rate_entry,
              as: "#{context}_discussion_topic_discussion_entry_rate"
@@ -1499,12 +1524,19 @@ CanvasRails::Application.routes.draw do
       post "/accounts/:account_id/external_tools/rce_favorites/:id", action: :add_rce_favorite, as: :account_external_tools_add_rce_favorite
       delete "/accounts/:account_id/external_tools/rce_favorites/:id", action: :remove_rce_favorite, as: :account_external_tools_remove_rce_favorite
 
+      post "/accounts/:account_id/external_tools/top_nav_favorites/:id", action: :add_top_nav_favorite, as: :account_external_tools_add_top_nav_favorite
+      delete "/accounts/:account_id/external_tools/top_nav_favorites/:id", action: :remove_top_nav_favorite, as: :account_external_tools_remove_top_nav_favorite
+
       get "/courses/:course_id/external_tools/visible_course_nav_tools", action: :visible_course_nav_tools, as: :visible_course_nav_tools
       get "/external_tools/visible_course_nav_tools", action: :all_visible_nav_tools, as: :all_visible_nav_tools
 
       %w[course account].each do |context|
         get "#{context}s/:#{context}_id/external_tools/sessionless_launch", action: :generate_sessionless_launch, as: "#{context}_external_tool_sessionless_launch"
         get "#{context}s/:#{context}_id/external_tools/:external_tool_id", action: :show, as: "#{context}_external_tool_show"
+
+        # Migration URL
+        get "#{context}s/:#{context}_id/external_tools/:external_tool_id/migration_info", action: :migration_info, as: "#{context}_external_tool_migration_info"
+
         get "#{context}s/:#{context}_id/external_tools", action: :index, as: "#{context}_external_tools"
         post "#{context}s/:#{context}_id/external_tools", action: :create, as: "#{context}_external_tools_create"
         post "#{context}s/:#{context}_id/create_tool_with_verification", action: :create_tool_with_verification, as: "#{context}_create_tool_with_verification"
@@ -1603,6 +1635,7 @@ CanvasRails::Application.routes.draw do
       delete "users/mobile_sessions", action: :expire_mobile_sessions
       delete "users/:id", action: :destroy, as: "destroy_user"
       delete "users/:id/sessions", action: :terminate_sessions
+      delete "users/:id/mobile_sessions", action: :expire_mobile_sessions
 
       post "users/:user_id/files", action: :create_file
       get  "users/:user_id/files", controller: :files, action: :api_index, as: "user_files"
@@ -1654,12 +1687,12 @@ CanvasRails::Application.routes.draw do
         get "courses/:course_id/assignments/:assignment_id/date_details", action: :show, as: "course_assignment_date_details"
         get "courses/:course_id/quizzes/:quiz_id/date_details", action: :show, as: "course_quizzes_quiz_date_details"
         get "courses/:course_id/discussion_topics/:discussion_topic_id/date_details", action: :show, as: "course_discussion_topic_date_details"
-        get "courses/:course_id/pages/:page_id/date_details", action: :show, as: "course_wiki_page_date_details"
+        get "courses/:course_id/pages/:url_or_id/date_details", action: :show, as: "course_wiki_page_date_details"
         get "courses/:course_id/files/:attachment_id/date_details", action: :show, as: "course_attachment_date_details"
         put "courses/:course_id/assignments/:assignment_id/date_details", action: :update
         put "courses/:course_id/quizzes/:quiz_id/date_details", action: :update
         put "courses/:course_id/discussion_topics/:discussion_topic_id/date_details", action: :update
-        put "courses/:course_id/pages/:page_id/date_details", action: :update
+        put "courses/:course_id/pages/:url_or_id/date_details", action: :update
         put "courses/:course_id/files/:attachment_id/date_details", action: :update
       end
 
@@ -1700,6 +1733,7 @@ CanvasRails::Application.routes.draw do
       put "accounts/:account_id/logins/:id", action: :update
       delete "users/:user_id/logins/:id", action: :destroy
       post "users/reset_password", action: :forgot_password
+      post "users/:user_id/logins/:id/migrate_login_attribute", action: :migrate_login_attribute
     end
 
     scope(controller: :accounts) do
@@ -1898,6 +1932,20 @@ CanvasRails::Application.routes.draw do
 
       get "accounts/:account_id/developer_keys", action: :index, as: "account_developer_keys"
       post "accounts/:account_id/developer_keys", action: :create
+    end
+
+    scope(controller: "lti/registrations") do
+      get "accounts/:account_id/lti_registrations", action: :list
+      delete "accounts/:account_id/lti_registrations/:id", action: :destroy
+      get "accounts/:account_id/lti_registrations/:id", action: :show
+      put "accounts/:account_id/lti_registrations/:id", action: :update
+      post "accounts/:account_id/lti_registrations/:id/bind", action: :bind
+    end
+
+    scope(controller: "lti/resource_links") do
+      get "courses/:course_id/lti_resource_links", action: :index
+      get "courses/:course_id/lti_resource_links/:id", action: :show
+      put "courses/:course_id/lti_resource_links/:id", action: :update
     end
 
     scope(controller: :immersive_reader) do
@@ -2273,6 +2321,14 @@ CanvasRails::Application.routes.draw do
       end
     end
 
+    scope(controller: :learn_platform) do
+      prefix = "accounts/:account_id/learn_platform"
+      get  "#{prefix}/products", action: :index
+      get  "#{prefix}/products_categories", action: :index_by_category
+      get  "#{prefix}/products/:id", action: :show
+      get  "#{prefix}/filters", action: :filters
+    end
+
     scope(controller: :feature_flags) do
       %w[course account user].each do |context|
         prefix = "#{context}s/:#{context}_id/features"
@@ -2448,6 +2504,12 @@ CanvasRails::Application.routes.draw do
       get "accounts/:account_id/rubrics/:id", action: :show
       get "courses/:course_id/rubrics", action: :index, as: :course_rubrics
       get "courses/:course_id/rubrics/:id", action: :show
+      get "courses/:course_id/rubrics/:id/used_locations", action: "used_locations", as: "rubrics_course_used_locations"
+      get "accounts/:account_id/rubrics/:id/used_locations", action: "used_locations", as: "rubrics_account_used_locations"
+      post "courses/:course_id/rubrics/upload", action: "upload", as: "rubrics_course_upload"
+      post "accounts/:account_id/rubrics/upload", action: "upload", as: "rubrics_account_upload"
+      get "courses/:course_id/rubrics/upload/:id", action: "upload_status", as: "rubrics_course_upload_status"
+      get "accounts/:account_id/rubrics/upload/:id", action: "upload_status", as: "rubrics_account_upload_status"
       post "courses/:course_id/rubrics", controller: :rubrics, action: :create
       put "courses/:course_id/rubrics/:id", controller: :rubrics, action: :update
       delete "courses/:course_id/rubrics/:id", controller: :rubrics, action: :destroy
@@ -2630,11 +2692,25 @@ CanvasRails::Application.routes.draw do
     scope(controller: "smart_search") do
       get "courses/:course_id/smartsearch", action: :search, as: :course_smart_search_query
       get "courses/:course_id/smartsearch/log", action: :log
+      get "courses/:course_id/smartsearch/index_status", action: :index_status
       # TODO: add account level search
     end
 
     scope(controller: "user_notes") do
       put "users/:user_id/user_notes/suppress_deprecation_notice", action: :suppress_deprecation_notice
+    end
+
+    scope(controller: :what_if_grades_api) do
+      put "submissions/:id/what_if_grades", action: :update
+    end
+
+    scope(controller: :plugins) do
+      put "plugins/:id", action: :update
+      get "plugins/:id", action: :show
+    end
+
+    scope(controller: :rich_content_api) do
+      post "rich_content/generate", action: :generate
     end
   end
 
@@ -2810,6 +2886,7 @@ CanvasRails::Application.routes.draw do
       get "accounts/:account_id/registration_token", action: :registration_token
       get "accounts/:account_id/registrations/uuid/:registration_uuid", action: :registration_by_uuid
       put "accounts/:account_id/registrations/:registration_id/overlay", action: :update_registration_overlay
+      get "accounts/:account_id/dr_iframe", action: :dr_iframe
       get "registrations/:registration_id/view", action: :registration_view, as: :lti_registration_config
       post "registrations", action: :create, as: :create_lti_registration
     end

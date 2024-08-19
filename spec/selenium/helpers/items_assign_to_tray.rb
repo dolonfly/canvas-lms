@@ -30,7 +30,7 @@ module ItemsAssignToTray
   end
 
   def assign_to_card_delete_button_selector
-    "//button[.//*[contains(text(), 'Delete')]]"
+    "//*[@data-testid = 'delete-card-button']"
   end
 
   def assign_to_date_and_time_selector
@@ -41,16 +41,32 @@ module ItemsAssignToTray
     "//*[@data-testid = 'clearable-date-time-input']//*[contains(@class,'-dateInput')]//input"
   end
 
-  def due_date_input_selector
-    "[data-testid = 'due_at_input']"
-  end
-
   def available_from_input_selector
     "[data-testid = 'unlock_at_input']"
   end
 
-  def until_input_selector
-    "[data-testid = 'lock_at_input']"
+  def clear_due_datetime_selector
+    "//button[*//*[contains(text(),'Clear due date/time')]]"
+  end
+
+  def close_button_selector
+    "//*[@data-testid = 'module-item-edit-tray']//button[. = 'Close']"
+  end
+
+  def due_date_input_selector
+    "[data-testid = 'due_at_input']"
+  end
+
+  def reply_to_topic_due_date_input_selector
+    "[data-testid = 'reply_to_topic_due_at_input']"
+  end
+
+  def required_replies_due_date_input_selector
+    "[data-testid = 'required_replies_due_at_input']"
+  end
+
+  def assignee_selected_option_selector
+    "[data-testid='assignee_selector_selected_option']"
   end
 
   def assign_to_in_tray_selector(button_title)
@@ -65,8 +81,16 @@ module ItemsAssignToTray
     "//*[@data-testid = 'clearable-date-time-input']//*[contains(@class, '-select')]//input"
   end
 
+  def bp_locked_alert_text_selector(alert_text = "Due Dates & Availability Dates")
+    "//*[. = '#{alert_text}']"
+  end
+
   def cancel_button_selector
     "//*[@data-testid = 'module-item-edit-tray']//button[.//*[contains(text(), 'Cancel')]]"
+  end
+
+  def highlighted_card_selector
+    "[data-testid='highlighted_card']"
   end
 
   def icon_type_selector(icon_type)
@@ -101,8 +125,16 @@ module ItemsAssignToTray
     "//*[@data-testid = 'module-item-edit-tray-footer']//button[.//*[contains(text(), '#{save_button_text}')]]"
   end
 
+  def selected_assignee_options_text(card)
+    card.find_all(assignee_selected_option_selector).map(&:text)
+  end
+
   def tray_header_selector
-    "[data-testid='module-item-edit-tray'] h3"
+    "[data-testid='module-item-edit-tray'] h2"
+  end
+
+  def until_input_selector
+    "[data-testid = 'lock_at_input']"
   end
 
   #------------------------------ Elements ------------------------------
@@ -122,12 +154,56 @@ module ItemsAssignToTray
     ff(assign_to_date_and_time_selector)
   end
 
-  def assign_to_available_from_date(card_number = 0)
-    assign_to_date[1 + (card_number * 3)]
+  def all_displayed_assign_to_date_and_time
+    ff(assign_to_date_and_time_selector + " input")
+      .map { |input| input.attribute("value") }
+      .each_slice(2)
+      .map { |date, time| DateTime.parse("#{date} #{time}") }
   end
 
-  def assign_to_available_from_time(card_number = 0)
-    assign_to_time[1 + (card_number * 3)]
+  def assign_to_reply_to_topic_date(card_number = 0)
+    position = 0
+    number_of_fields = 4
+    assign_to_date[position + (card_number * number_of_fields)]
+  end
+
+  def assign_to_reply_to_topic_time(card_number = 0)
+    position = 0
+    number_of_fields = 4
+    assign_to_time[position + (card_number * number_of_fields)]
+  end
+
+  def assign_to_required_replies_date(card_number = 0)
+    position = 1
+    number_of_fields = 4
+    assign_to_date[position + (card_number * number_of_fields)]
+  end
+
+  def assign_to_required_replies_time(card_number = 0)
+    position = 1
+    number_of_fields = 4
+    assign_to_time[position + (card_number * number_of_fields)]
+  end
+
+  def assign_to_available_from_date(card_number = 0, exclude_due_date = false, exclude_checkpoints = true)
+    position = exclude_due_date ? 0 : 1
+    position = 2 unless exclude_checkpoints
+    number_of_fields = exclude_due_date ? 2 : 3
+    unless exclude_checkpoints
+      position = 2
+      number_of_fields = 4
+    end
+    assign_to_date[position + (card_number * number_of_fields)]
+  end
+
+  def assign_to_available_from_time(card_number = 0, exclude_due_date = false, exclude_checkpoints = true)
+    position = exclude_due_date ? 0 : 1
+    number_of_fields = exclude_due_date ? 2 : 3
+    unless exclude_checkpoints
+      position = 2
+      number_of_fields = 4
+    end
+    assign_to_time[position + (card_number * number_of_fields)]
   end
 
   def assign_to_due_date(card_number = 0)
@@ -146,16 +222,44 @@ module ItemsAssignToTray
     ffxpath(assign_to_time_selector)
   end
 
-  def assign_to_until_date(card_number = 0)
-    assign_to_date[2 + (card_number * 3)]
+  def assign_to_until_date(card_number = 0, exclude_due_date = false, exclude_checkpoints = true)
+    position = exclude_due_date ? 1 : 2
+    number_of_fields = exclude_due_date ? 2 : 3
+    unless exclude_checkpoints
+      position = 3
+      number_of_fields = 4
+    end
+    assign_to_date[position + (card_number * number_of_fields)]
   end
 
-  def assign_to_until_time(card_number = 0)
-    assign_to_time[2 + (card_number * 3)]
+  def assign_to_until_time(card_number = 0, exclude_due_date = false, exclude_checkpoints = true)
+    position = exclude_due_date ? 1 : 2
+    number_of_fields = exclude_due_date ? 2 : 3
+    unless exclude_checkpoints
+      position = 3
+      number_of_fields = 4
+    end
+    assign_to_time[position + (card_number * number_of_fields)]
+  end
+
+  def bp_locked_alert_text
+    fxpath(bp_locked_alert_text_selector)
   end
 
   def cancel_button
     fxpath(cancel_button_selector)
+  end
+
+  def clear_due_datetime
+    ffxpath(clear_due_datetime_selector)
+  end
+
+  def close_button
+    fxpath(close_button_selector)
+  end
+
+  def highlighted_item_assign_to_card
+    ff(highlighted_card_selector)
   end
 
   def icon_type(icon_type)
@@ -190,6 +294,10 @@ module ItemsAssignToTray
     fxpath(save_button_selector(save_button_text))
   end
 
+  def selected_assignee_options
+    ff(assignee_selected_option_selector)
+  end
+
   def tray_header
     f(tray_header_selector)
   end
@@ -200,8 +308,16 @@ module ItemsAssignToTray
     add_assign_to_card.click
   end
 
+  def click_duedate_clear_button(card_number = 0)
+    clear_due_datetime[card_number].click
+  end
+
   def click_delete_assign_to_card(card_number)
     assign_to_card_delete_button[card_number].click
+  end
+
+  def click_delete_assign_to_item(item_title, item_number = 0)
+    assign_to_in_tray(item_title)[item_number].click
   end
 
   def click_cancel_button
@@ -233,20 +349,36 @@ module ItemsAssignToTray
     replace_content(assign_to_due_time(card_number), due_time, tab_out: true)
   end
 
-  def update_available_date(card_number, available_date)
-    replace_content(assign_to_available_from_date(card_number), available_date, tab_out: true)
+  def update_reply_to_topic_date(card_number, due_date)
+    replace_content(assign_to_reply_to_topic_date(card_number), due_date, tab_out: true)
   end
 
-  def update_available_time(card_number, available_time)
-    replace_content(assign_to_available_from_time(card_number), available_time, tab_out: true)
+  def update_reply_to_topic_time(card_number, due_time)
+    replace_content(assign_to_reply_to_topic_time(card_number), due_time, tab_out: true)
   end
 
-  def update_until_date(card_number, until_date)
-    replace_content(assign_to_until_date(card_number), until_date, tab_out: true)
+  def update_required_replies_date(card_number, due_date)
+    replace_content(assign_to_required_replies_date(card_number), due_date, tab_out: true)
   end
 
-  def update_until_time(card_number, until_time)
-    replace_content(assign_to_until_time(card_number), until_time, tab_out: true)
+  def update_required_replies_time(card_number, due_time)
+    replace_content(assign_to_required_replies_time(card_number), due_time, tab_out: true)
+  end
+
+  def update_available_date(card_number, available_date, exclude_due_date = false, exclude_checkpoints = true)
+    replace_content(assign_to_available_from_date(card_number, exclude_due_date, exclude_checkpoints), available_date, tab_out: true)
+  end
+
+  def update_available_time(card_number, available_time, exclude_due_date = false, exclude_checkpoints = true)
+    replace_content(assign_to_available_from_time(card_number, exclude_due_date, exclude_checkpoints), available_time, tab_out: true)
+  end
+
+  def update_until_date(card_number, until_date, exclude_due_date = false, exclude_checkpoints = true)
+    replace_content(assign_to_until_date(card_number, exclude_due_date, exclude_checkpoints), until_date, tab_out: true)
+  end
+
+  def update_until_time(card_number, until_time, exclude_due_date = false, exclude_checkpoints = true)
+    replace_content(assign_to_until_time(card_number, exclude_due_date, exclude_checkpoints), until_time, tab_out: true)
   end
 
   def wait_for_assign_to_tray_spinner

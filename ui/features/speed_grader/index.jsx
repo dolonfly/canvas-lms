@@ -18,21 +18,34 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom'
-import {Spinner} from '@instructure/ui-spinner'
-import {useScope as useI18nScope} from '@canvas/i18n'
-import ready from '@instructure/ready'
-import speedGrader from './jquery/speed_grader'
-import {getCurrentTheme} from '@instructure/theme-registry'
+
 import {captureException} from '@sentry/browser'
+import {Spinner} from '@instructure/ui-spinner'
+import ready from '@instructure/ready'
+import {getCurrentTheme} from '@instructure/theme-registry'
+
 import {getAssignment} from './queries/assignmentQuery'
 import {getCourse} from './queries/courseQuery'
 import {getSectionsByAssignment} from './queries/sectionsByAssignmentQuery'
 import {getSubmission} from './queries/submissionQuery'
 import {getSubmissionsByAssignment} from './queries/submissionsByAssignmentQuery'
+import {getSubmissionsByStudentIds} from './queries/submissionsByStudentsIdsQuery'
+
 import {updateSubmissionGrade} from './mutations/updateSubmissionGradeMutation'
 import {createSubmissionComment} from './mutations/createSubmissionCommentMutation'
+import {hideAssignmentGradesForSections} from './mutations/hideAssignmentGradesForSectionsMutation'
+import {postDraftSubmissionComment} from './mutations/postDraftSubmissionCommentMutation'
+import {updateSubmissionGradeStatus} from './mutations/updateSubmissionGradeStatusMutation'
+import {deleteSubmissionComment} from './mutations/deleteSubmissionCommentMutation'
+import {
+  postAssignmentGradesForSections,
+  resolvePostAssignmentGradesStatus,
+} from './mutations/postAssignmentGradesForSectionsMutation'
+
+import {useScope as useI18nScope} from '@canvas/i18n'
 import GenericErrorPage from '@canvas/generic-error-page'
 import errorShipUrl from '@canvas/images/ErrorShip.svg'
+import speedGrader from './jquery/speed_grader'
 
 const I18n = useI18nScope('speed_grader')
 
@@ -42,27 +55,55 @@ ready(() => {
     const theme = getCurrentTheme()
     const mountPoint = document.querySelector('#react-router-portals')
     const params = new URLSearchParams(window.location.search)
+    const postMessageAliases = {
+      'quizzesNext.register': 'tool.register',
+      'quizzesNext.nextStudent': 'tool.nextStudent',
+      'quizzesNext.previousStudent': 'tool.previousStudent',
+      'quizzesNext.submissionUpdate': 'tool.submissionUpdate',
+    }
 
     import('speedgrader/appInjector')
       .then(module => {
         module.render(mountPoint, {
           theme,
-          queries: {
-            getCourse,
+          queryFns: {
             getAssignment,
+            getCourse,
+            getSectionsByAssignment,
             getSubmission,
             getSubmissionsByAssignment,
-            getSectionsByAssignment,
+            getSubmissionsByStudentIds,
+            resolvePostAssignmentGradesStatus,
           },
-          mutations: {
+          mutationFns: {
             updateSubmissionGrade,
             createSubmissionComment,
+            deleteSubmissionComment,
+            hideAssignmentGradesForSections,
+            postAssignmentGradesForSections,
+            postDraftSubmissionComment,
+            updateSubmissionGradeStatus,
           },
+          postMessageAliases,
           context: {
             courseId: window.ENV.course_id,
+            userId: window.ENV.current_user_id,
             assignmentId: params.get('assignment_id'),
             studentId: params.get('student_id'),
-            gradeBookIconHref: `/courses/${window.ENV.course_id}/gradebook`,
+            hrefs: {
+              heroIcon: `/courses/${window.ENV.course_id}/gradebook`,
+            },
+            emojisDenyList: window.ENV.EMOJI_DENY_LIST?.split(','),
+            mediaSettings: window.INST.kalturaSettings,
+            lang: window.navigator.language || ENV.LOCALE || ENV.BIGEASY_LOCALE,
+          },
+          features: {
+            extendedSubmissionState: window.ENV.FEATURES.extended_submission_state,
+            gradeByQuestion: {
+              supported: window.ENV.GRADE_BY_QUESTION_SUPPORTED,
+              enabled: window.ENV.GRADE_BY_QUESTION,
+            },
+            emojisEnabled: !!window.ENV.EMOJIS_ENABLED,
           },
         })
       })
@@ -80,6 +121,9 @@ ready(() => {
         )
       })
   } else {
+    // touch punch simulates mouse events for touch devices
+    require('./touch_punch.js')
+
     const mountPoint = document.getElementById('speed_grader_loading')
 
     ReactDOM.render(

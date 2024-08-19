@@ -22,6 +22,7 @@ import DirectShareUserModal from '@canvas/direct-sharing/react/components/Direct
 import DirectShareCourseTray from '@canvas/direct-sharing/react/components/DirectShareCourseTray'
 import {Discussion} from '../../../graphql/Discussion'
 import {DiscussionEdit} from '../../components/DiscussionEdit/DiscussionEdit'
+import {DiscussionSummary} from '../../components/DiscussionSummary/DiscussionSummary'
 import {getSpeedGraderUrl, getReviewLinkUrl, responsiveQuerySizes} from '../../utils'
 import {Highlight} from '../../components/Highlight/Highlight'
 import {useScope as useI18nScope} from '@canvas/i18n'
@@ -50,18 +51,17 @@ import {Text} from '@instructure/ui-text'
 import {Responsive} from '@instructure/ui-responsive/lib/Responsive'
 import '@canvas/context-cards/react/StudentContextCardTrigger'
 
-import assignmentRubricDialog from '../../../../discussion_topic/jquery/assignmentRubricDialog'
+import assignmentRubricDialog from '@canvas/discussions/jquery/assignmentRubricDialog'
 import rubricEditing from '../../../../../shared/rubrics/jquery/edit_rubric'
 
 const I18n = useI18nScope('discussion_posts')
 
 import('@canvas/rubrics/jquery/rubricEditBinding')
 
-export const DiscussionTopicContainer = ({createDiscussionEntry, ...props}) => {
+export const DiscussionTopicContainer = ({createDiscussionEntry, setExpandedTopicReply, expandedTopicReply, ...props}) => {
   const {setOnFailure, setOnSuccess} = useContext(AlertManagerContext)
   const [sendToOpen, setSendToOpen] = useState(false)
   const [copyToOpen, setCopyToOpen] = useState(false)
-  const [expandedReply, setExpandedReply] = useState(false)
   const [lastMarkAllAction, setLastMarkAllAction] = useState('')
 
   const {searchTerm, filter} = useContext(SearchContext)
@@ -257,7 +257,7 @@ export const DiscussionTopicContainer = ({createDiscussionEntry, ...props}) => {
           },
         },
       }}
-      render={responsiveProps => (
+      render={(responsiveProps, matches) => (
         <>
           <DiscussionTopicAlertManager discussionTopic={props.discussionTopic} />
           {!isSearch && (
@@ -286,6 +286,8 @@ export const DiscussionTopicContainer = ({createDiscussionEntry, ...props}) => {
                             discussionTopic={props.discussionTopic}
                             inPacedCourse={ENV.IN_PACED_COURSE}
                             courseId={ENV.course_id}
+                            replyToTopicSubmission={props.replyToTopicSubmission}
+                            replyToEntrySubmission={props.replyToEntrySubmission}
                           />
                           {props.discussionTopic.assignment?.assessmentRequestsForCurrentUser?.map(
                             assessmentRequest => (
@@ -410,7 +412,16 @@ export const DiscussionTopicContainer = ({createDiscussionEntry, ...props}) => {
                             attachment={props.discussionTopic.attachment}
                             discussionTopic={props.discussionTopic}
                           >
-                            {props.discussionTopic.permissions?.reply && !expandedReply && (
+                            {!props.discussionTopic.permissions?.reply && (
+                              <Text
+                                size="small"
+                                color="secondary"
+                                data-testid="discussion-topic-closed-for-comments"
+                              >
+                                {I18n.t('This topic is closed for comments.')}
+                              </Text>
+                            )}
+                            {props.discussionTopic.permissions?.reply && !expandedTopicReply && (
                               <>
                                 <View
                                   as="div"
@@ -422,7 +433,7 @@ export const DiscussionTopicContainer = ({createDiscussionEntry, ...props}) => {
                                       display={responsiveProps?.replyButton?.display}
                                       color="primary"
                                       onClick={() => {
-                                        setExpandedReply(!expandedReply)
+                                        setExpandedTopicReply(!expandedTopicReply)
                                       }}
                                       data-testid="discussion-topic-reply"
                                     >
@@ -452,27 +463,27 @@ export const DiscussionTopicContainer = ({createDiscussionEntry, ...props}) => {
                           shouldShrink={true}
                           shouldGrow={true}
                           padding={
-                            expandedReply
+                            expandedTopicReply
                               ? responsiveProps?.RCE?.paddingOpen
                               : responsiveProps?.RCE?.paddingClosed
                           }
                           overflowX="hidden"
                           overflowY="hidden"
                         >
-                          {expandedReply && (
+                          {expandedTopicReply && (
                             <DiscussionEdit
                               rceIdentifier="root"
                               discussionAnonymousState={props.discussionTopic.anonymousState}
                               canReplyAnonymously={props.discussionTopic.canReplyAnonymously}
-                              show={expandedReply}
+                              show={expandedTopicReply}
                               onSubmit={(message, _quotedEntryId, file, anonymousAuthorState) => {
                                 if (createDiscussionEntry) {
                                   createDiscussionEntry(message, file, anonymousAuthorState)
-                                  setExpandedReply(false)
                                 }
                               }}
+                              isSubmitting={props.isSubmitting}
                               onCancel={() => {
-                                setExpandedReply(false)
+                                setExpandedTopicReply(false)
                                 setTimeout(() => {
                                   document
                                     .querySelector('.discussion-topic-reply-button button')
@@ -487,6 +498,23 @@ export const DiscussionTopicContainer = ({createDiscussionEntry, ...props}) => {
                     )}
                   </View>
                 </Flex.Item>
+                {props.isSummaryEnabled && (
+                  <Flex.Item>
+                    <View
+                      as="div"
+                      borderWidth={responsiveProps?.border?.width}
+                      borderRadius={responsiveProps?.border?.radius}
+                      borderStyle="solid"
+                      borderColor="primary"
+                      padding="small"
+                      margin="0 0 small 0"
+                    >
+                      <Flex direction="column" padding={responsiveProps?.container?.padding}>
+                        <DiscussionSummary onDisableSummaryClick={() => props.setIsSummaryEnabled(false)}/>
+                      </Flex>
+                    </View>
+                  </Flex.Item>
+                )}
               </Flex>
             </Highlight>
           )}
@@ -540,6 +568,22 @@ DiscussionTopicContainer.propTypes = {
    * useState Boolean to toggle highlight
    */
   isHighlighted: PropTypes.bool,
+  /**
+   * useState object to set the REPLY_TO_TOPIC submission status
+   */
+  replyToTopicSubmission: PropTypes.object,
+  /**
+   * useState object to set the REPLY_TO_ENTRY submission status
+   */
+  replyToEntrySubmission: PropTypes.object,
+  /**
+   * useState Boolean to toggle the Discussion Summary
+   */
+  isSummaryEnabled: PropTypes.bool,
+  /**
+   * useState function to set the Discussion Summary
+   */
+  setIsSummaryEnabled: PropTypes.func,
 }
 
 export default DiscussionTopicContainer

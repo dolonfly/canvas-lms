@@ -29,6 +29,8 @@ module Lti
 
     after_update :update_external_tools!, if: :update_external_tools?
 
+    after_commit :update_unified_tool_id, if: :update_unified_tool_id?
+
     validates :developer_key_id, :settings, presence: true
     validates :developer_key_id, uniqueness: true
     validate :validate_configuration, unless: proc { |c| c.developer_key_id.blank? || c.settings.blank? }
@@ -121,15 +123,22 @@ module Lti
 
     # @return [String | nil] A warning message about any disallowed placements
     def verify_placements
-      return unless placements.any? { |p| p["placement"] == "submission_type_selection" }
-      return unless Account.site_admin.feature_enabled?(:lti_placement_restrictions)
+      placements_to_verify = placements.filter_map { |p| p["placement"] if Lti::ResourcePlacement::RESTRICTED_PLACEMENTS.include? p["placement"].to_sym }
+      return unless placements_to_verify.present? && Account.site_admin.feature_enabled?(:lti_placement_restrictions)
 
       # This is a candidate for a deduplication with the same logic in app/models/context_external_tool.rb#placement_allowed?
-      allowed_domains = Setting.get("submission_type_selection_allowed_launch_domains", "").split(",").map(&:strip).reject(&:empty?)
-      allowed_dev_keys = Setting.get("submission_type_selection_allowed_dev_keys", "").split(",").map(&:strip).reject(&:empty?)
-      return if allowed_domains.include?(domain) || allowed_dev_keys.include?(Shard.global_id_for(developer_key_id).to_s)
+      placements_to_verify.each do |placement|
+        allowed_domains = Setting.get("#{placement}_allowed_launch_domains", "").split(",").map(&:strip).reject(&:empty?)
+        allowed_dev_keys = Setting.get("#{placement}_allowed_dev_keys", "").split(",").map(&:strip).reject(&:empty?)
+        next if allowed_domains.include?(domain) || allowed_dev_keys.include?(Shard.global_id_for(developer_key_id).to_s)
 
-      t("Warning: the submission_type_selection placement is only allowed for Instructure approved LTI tools. If you believe you have received this message in error, please contact your support team.")
+        return t(
+          "Warning: the %{placement} placement is only allowed for Instructure approved LTI tools. If you believe you have received this message in error, please contact your support team.",
+          placement:
+        )
+      end
+
+      nil
     end
 
     private
@@ -180,6 +189,12 @@ module Lti
     end
 
     def validate_placements
+      placements.each do |p|
+        unless Lti::ResourcePlacement.supported_message_type?(p["placement"], p["message_type"])
+          errors.add(:placements, "Placement #{p["placement"]} does not support message type #{p["message_type"]}")
+        end
+      end
+
       return if disabled_placements.blank?
 
       invalid = disabled_placements.reject { |p| Lti::ResourcePlacement::PLACEMENTS.include?(p.to_sym) }
@@ -226,6 +241,28 @@ module Lti
 
     def normalize_configuration
       self.configuration = JSON.parse(configuration) if configuration.is_a? String
+    end
+
+    def update_unified_tool_id
+      return unless developer_key.root_account.feature_enabled?(:update_unified_tool_id)
+
+      unified_tool_id = LearnPlatform::GlobalApi.get_unified_tool_id(**params_for_unified_tool_id)
+      update_column(:unified_tool_id, unified_tool_id) if unified_tool_id
+    end
+    handle_asynchronously :update_unified_tool_id, priority: Delayed::LOW_PRIORITY
+
+    def params_for_unified_tool_id
+      {
+        lti_name: settings["title"],
+        lti_tool_id: canvas_extensions["tool_id"],
+        lti_domain: canvas_extensions["domain"],
+        lti_version: "1.3",
+        lti_url: settings["target_link_uri"],
+      }
+    end
+
+    def update_unified_tool_id?
+      saved_change_to_settings?
     end
   end
 end

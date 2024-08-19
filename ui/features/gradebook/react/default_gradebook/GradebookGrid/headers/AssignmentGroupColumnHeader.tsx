@@ -29,6 +29,7 @@ import {useScope as useI18nScope} from '@canvas/i18n'
 import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import ColumnHeader from './ColumnHeader'
 import {showMessageStudentsWithObserversModal} from '../../../shared/MessageStudentsWithObserversModal'
+import {MSWLaunchContext} from '@canvas/message-students-dialog/react/MessageStudentsWhoDialog'
 
 const I18n = useI18nScope('gradebook')
 
@@ -111,7 +112,7 @@ type Props = {
   viewUngradedAsZero: any
   weightedGroups: any
   onMenuDismiss: any
-  allStudents: PartialStudent[]
+  getAllStudents: () => PartialStudent[]
   courseId: string
   messageAttachmentUploadFolderId: string
   userId: string
@@ -167,6 +168,8 @@ export default class AssignmentGroupColumnHeader extends ColumnHeader<Props, Sta
 
     const props = {
       assignment: null,
+      launchContext: MSWLaunchContext.ASSIGNMENT_GROUP_CONTEXT,
+      assignmentGroupName: this.props.assignmentGroup.name,
       students: students.filter(student => !student.isInactive && !student.isTestStudent),
       courseId,
       onClose: () => {},
@@ -182,7 +185,7 @@ export default class AssignmentGroupColumnHeader extends ColumnHeader<Props, Sta
   render() {
     const {assignmentGroup, sortBySetting, viewUngradedAsZero, weightedGroups} = this.props
     const selectedSortSetting = sortBySetting.isSortColumn && sortBySetting.settingKey
-    const allStudents = this.props.allStudents
+    const allStudents = this.props.getAllStudents()
     const courseId = this.props.courseId
     const classes = `Gradebook__ColumnHeaderAction ${this.state.menuShown ? 'menuShown' : ''}`
 

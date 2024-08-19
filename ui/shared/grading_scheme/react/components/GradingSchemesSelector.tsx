@@ -228,11 +228,12 @@ export const GradingSchemesSelector = ({
   async function openGradingSchemeViewModal() {
     setSelectedGradingScheme(undefined)
     try {
-      const scheme = selectedGradingSchemeId
+      const schemeId = selectedGradingSchemeId || courseDefaultSchemeId
+      const scheme = schemeId
         ? await loadGradingScheme(
             contextType,
             contextId,
-            selectedGradingSchemeId,
+            schemeId,
             archivedGradingSchemesEnabled ? assignmentId : null
           )
         : defaultCanvasGradingScheme
@@ -391,11 +392,11 @@ export const GradingSchemesSelector = ({
                   <SimpleSelect
                     value={selectedGradingSchemeId ?? ''}
                     onChange={onChangeInput}
-                    id={shortid()}
                     renderLabel={
                       <ScreenReaderContent>{I18n.t('Select a grading scheme')}</ScreenReaderContent>
                     }
                     data-testid="grading-schemes-selector-dropdown"
+                    id="grading-schemes-selector-dropdown"
                   >
                     <SimpleSelect.Option
                       value=""

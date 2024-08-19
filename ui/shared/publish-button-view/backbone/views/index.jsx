@@ -24,7 +24,7 @@ import $ from 'jquery'
 import Backbone from '@canvas/backbone'
 import htmlEscape from '@instructure/html-escape'
 import '@canvas/jquery/jquery.instructure_forms'
-import * as tz from '@canvas/datetime'
+import * as tz from '@instructure/moment-utils'
 import React from 'react'
 import ReactDOM from 'react-dom'
 import DelayedPublishDialog from '../../react/components/DelayedPublishDialog'
@@ -113,6 +113,9 @@ export default (function (superClass) {
   }
 
   PublishButton.prototype.handleMouseLeave = function () {
+    if (this.isDelayedPublish()) {
+      return
+    }
     this.keepState = false
     if (!(this.isPublish() || this.isDisabled())) {
       this.renderPublished()

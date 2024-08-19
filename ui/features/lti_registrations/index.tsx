@@ -18,18 +18,22 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom'
-import {createBrowserRouter, RouterProvider, Link} from 'react-router-dom'
-import {Discover} from './discover/components/Discover'
-import {Manage} from './manage/Manage'
+import {createBrowserRouter, RouterProvider} from 'react-router-dom'
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query'
 import {LtiAppsLayout} from './layout/LtiAppsLayout'
 import {DiscoverRoute} from './discover/components'
-import {ManageRoute} from './manage'
+import {ManageRoutes} from './manage'
+import ProductDetail from './discover/components/ProductDetail/ProductDetail'
+import {ZAccountId} from './manage/model/AccountId'
+import {RegistrationWizardModal} from './manage/registration_wizard/RegistrationWizardModal'
 
 const getBasename = () => {
   const path = window.location.pathname
   const parts = path.split('/')
-  return parts.slice(0, parts.indexOf('extensions') + 1).join('/')
+  return parts.slice(0, parts.indexOf('apps') + 1).join('/')
 }
+
+const queryClient = new QueryClient()
 
 // window.ENV.lti_registrations_discover_page
 
@@ -39,13 +43,26 @@ const router = createBrowserRouter(
       path: '/',
       element: <LtiAppsLayout />,
       children: window.ENV.FEATURES.lti_registrations_discover_page
-        ? [DiscoverRoute, ManageRoute]
-        : [ManageRoute],
+        ? [DiscoverRoute, ...ManageRoutes]
+        : [...ManageRoutes],
+    },
+    {
+      path: 'product_detail/:id',
+      element: <ProductDetail />,
     },
   ],
+
   {
     basename: getBasename(),
   }
 )
 
-ReactDOM.render(<RouterProvider router={router} />, document.getElementById('reactContent'))
+const accountId = ZAccountId.parse(window.location.pathname.split('/')[2])
+
+ReactDOM.render(
+  <QueryClientProvider client={queryClient}>
+    <RegistrationWizardModal accountId={accountId} />
+    <RouterProvider router={router} />
+  </QueryClientProvider>,
+  document.getElementById('reactContent')
+)

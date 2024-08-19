@@ -141,6 +141,7 @@
 class GroupsController < ApplicationController
   before_action :get_context
   before_action :require_user, only: %w[index accept_invitation activity_stream activity_stream_summary]
+  before_action :check_limited_access_for_students, only: %i[create_file]
 
   include Api::V1::Attachment
   include Api::V1::Group
@@ -358,7 +359,7 @@ class GroupsController < ApplicationController
         path = send(:"api_v1_#{@context.class.to_s.downcase}_user_groups_url")
 
         if value_to_boolean(params[:only_own_groups]) || !tab_enabled?(Course::TAB_PEOPLE, no_render: true)
-          all_groups = all_groups.merge(@current_user.current_groups)
+          all_groups = all_groups.merge(@current_user.current_groups.shard(@current_user))
         end
         @paginated_groups = Api.paginate(all_groups, self, path)
         render json: @paginated_groups.map { |g|

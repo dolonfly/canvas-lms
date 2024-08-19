@@ -20,6 +20,96 @@ import {z} from 'zod'
 import {executeQuery} from '@canvas/query/graphql'
 import gql from 'graphql-tag'
 import {omit} from 'lodash'
+import speedGraderHelpers from '../jquery/speed_grader_helpers'
+import doFetchApi from '@canvas/do-fetch-api-effect'
+
+export const SUBMISSION_FRAGMENT = gql`
+  fragment SubmissionInterfaceFragment on SubmissionInterface {
+    cachedDueDate
+    gradingStatus
+    user {
+      _id
+      avatarUrl
+      name
+    }
+    gradeMatchesCurrentSubmission
+    submissionCommentDownloadUrl
+    score
+    grade
+    excused
+    postedAt
+    previewUrl
+    proxySubmitter
+    wordCount
+    late
+    missing
+    latePolicyStatus
+    submissionStatus
+    customGradeStatus
+    submittedAt
+    submissionType
+    secondsLate
+    commentsConnection(includeDraftComments: true) {
+      nodes {
+        id
+        _id
+        comment
+        attempt
+        createdAt
+        draft
+        author {
+          name
+          updatedAt
+          avatarUrl
+        }
+        attachments {
+          _id
+          displayName
+          url
+          mimeClass
+        }
+        mediaObject {
+          _id
+          mediaSources {
+            height
+            src: url
+            type: contentType
+            width
+          }
+          mediaTracks {
+            _id
+            locale
+            content
+            kind
+          }
+          thumbnailUrl
+          mediaType
+          title
+        }
+      }
+    }
+    attachments {
+      _id
+      displayName
+      wordCount
+      submissionPreviewUrl
+      url
+    }
+    rubricAssessmentsConnection {
+      nodes {
+        _id
+        assessmentType
+        artifactAttempt
+        score
+        assessmentRatings {
+          ratingTag: _id
+          comments
+          points
+        }
+      }
+    }
+  }
+`
 
 const SUBMISSION_QUERY = gql`
   query SubmissionQuery($assignmentId: ID!, $userId: ID!) {
@@ -31,88 +121,72 @@ const SUBMISSION_QUERY = gql`
       pointsPossible
       courseId
       submissionsConnection(
-        filter: {includeUnsubmitted: true, userId: $userId, applyGradebookEnrollmentFilters: true}
+        filter: {
+          applyGradebookEnrollmentFilters: true
+          includeUnsubmitted: true
+          representativesOnly: true
+          userId: $userId
+        }
       ) {
         nodes {
-          _id
-          id
-          cachedDueDate
-          gradingStatus
-          user {
-            _id
-            avatarUrl
-            name
-          }
-          gradeMatchesCurrentSubmission
-          score
-          excused
           id
           _id
-          postedAt
-          previewUrl
-          wordCount
-          late
-          submissionStatus
-          customGradeStatus
-          excused
-          submittedAt
-          commentsConnection {
+          ...SubmissionInterfaceFragment
+          submissionHistoriesConnection {
             nodes {
-              id
-              comment
-              attempt
-              createdAt
-              author {
-                name
-                updatedAt
-                avatarUrl
-              }
-            }
-          }
-          attachments {
-            _id
-            displayName
-            wordCount
-          }
-          rubricAssessmentsConnection {
-            nodes {
-              _id
-              assessmentType
-              artifactAttempt
-              score
-              assessmentRatings {
-                ratingTag: _id
-                comments
-                points
-              }
+              ...SubmissionInterfaceFragment
             }
           }
         }
       }
     }
   }
+  ${SUBMISSION_FRAGMENT}
 `
 
 function transform(result: any) {
   const submission = result.assignment?.submissionsConnection?.nodes?.[0]
   if (submission) {
     submission.attachments.forEach((attachment: any) => {
-      attachment.downloadUrl = `/courses/${result.assignment.courseId}/assignments/${result.assignment._id}/submissions/${submission.user._id}?download=${attachment._id}`
-      attachment.previewUrl = `/courses/${result.assignment.courseId}/assignments/${result.assignment._id}/submissions/${submission.user._id}?download=${attachment._id}&inline=1`
-      attachment.deleteUrl = `/api/v1/files/${attachment._id}?replace=1`
+      attachment.delete = () =>
+        doFetchApi({
+          path: `/api/v1/files/${attachment._id}?replace=1`,
+          method: 'DELETE',
+        })
     })
+    submission.submissionHistoriesConnection?.nodes.forEach(
+      (submissionHistory: any, index: number) => {
+        submissionHistory.attachments.forEach((attachment: any) => {
+          attachment.delete = () =>
+            doFetchApi({
+              path: `/api/v1/files/${attachment._id}?replace=1`,
+              method: 'DELETE',
+            })
+        })
+        submissionHistory.comments = submissionHistory.commentsConnection?.nodes
+        submissionHistory.rubricAssessments = submissionHistory.rubricAssessmentsConnection?.nodes
+        delete submissionHistory.commentsConnection
+        delete submissionHistory.rubricAssessmentsConnection
+      }
+    )
     return {
-      ...omit(submission, ['commentsConnection', 'rubricAssessmentsConnection']),
+      ...omit(submission, [
+        'commentsConnection',
+        'rubricAssessmentsConnection',
+        'submissionHistoriesConnection',
+      ]),
       comments: submission?.commentsConnection?.nodes,
-      rubricAssessments: submission?.rubricAssessmentsConnection?.nodes,
+      rubricAssessments: submission.rubricAssessmentsConnection?.nodes,
+      submissionHistory: submission.submissionHistoriesConnection?.nodes,
+      submissionState: speedGraderHelpers.submissionState(submission, ENV.grading_role ?? ''),
     }
   }
   return null
 }
 
 export const ZGetSubmissionParams = z.object({
-  assignmentId: z.string(),
-  userId: z.string(),
+  assignmentId: z.string().min(1),
+  userId: z.string().min(1),
 })
 
 type GetSubmissionParams = z.infer<typeof ZGetSubmissionParams>

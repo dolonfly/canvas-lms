@@ -33,6 +33,7 @@ import {Link} from '@instructure/ui-link'
 import {Text} from '@instructure/ui-text'
 import type {CamelizedAssignment, PartialStudent} from '@canvas/grading/grading.d'
 import {showMessageStudentsWithObserversModal} from '../../../shared/MessageStudentsWithObserversModal'
+import {MSWLaunchContext} from '@canvas/message-students-dialog/react/MessageStudentsWhoDialog'
 
 const {Separator: MenuSeparator, Item: MenuItem, Group: MenuGroup} = Menu as any
 
@@ -236,6 +237,7 @@ export default class AssignmentColumnHeader extends ColumnHeader<
     if (this.props.showMessageStudentsWithObserversDialog) {
       const props = {
         assignment: options.assignment,
+        launchContext: MSWLaunchContext.ASSIGNMENT_CONTEXT,
         students: options.students,
         courseId: options.assignment.courseId,
         onClose: () => {},
@@ -259,7 +261,8 @@ export default class AssignmentColumnHeader extends ColumnHeader<
       .filter(student => !student.isInactive && !student.isTestStudent)
 
     return activeStudents.map(student => {
-      const {excused, grade, latePolicyStatus, score, submittedAt, redoRequest} = student.submission
+      const {excused, grade, latePolicyStatus, score, submittedAt, redoRequest, workflowState} =
+        student.submission
       return {
         excused,
         grade,
@@ -270,6 +273,7 @@ export default class AssignmentColumnHeader extends ColumnHeader<
         score,
         sortableName: student.sortableName,
         submittedAt,
+        workflowState,
       }
     })
   }

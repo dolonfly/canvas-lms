@@ -22,7 +22,7 @@ import {View} from '@instructure/ui-view'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import {AssignmentGroupSelect} from './AssignmentGroupSelect'
 import {DisplayGradeAs} from './DisplayGradeAs'
-import {DiscussionTopicNumberInput} from './DiscussionTopicNumberInput'
+import {PointsPossible} from './PointsPossible'
 import {PeerReviewOptions} from './PeerReviewOptions'
 import {AssignmentDueDatesManager} from './AssignmentDueDatesManager'
 import {SyncToSisCheckbox} from './SyncToSisCheckbox'
@@ -35,7 +35,7 @@ import CoursePacingNotice from '@canvas/due-dates/react/CoursePacingNotice'
 type Props = {
   assignmentGroups: [{_id: string; name: string}]
   pointsPossible: number
-  setPointsPossible: (points: number) => void
+  setPointsPossible: (points: number | string) => void
   displayGradeAs: string
   setDisplayGradeAs: (id: string | undefined) => void
   assignmentGroup: string
@@ -53,6 +53,7 @@ type Props = {
   intraGroupPeerReviews: boolean
   setIntraGroupPeerReviews: (intraGroupPeerReviews: boolean) => void
   isCheckpoints: boolean
+  canManageAssignTo: boolean
 }
 
 const I18n = useI18nScope('discussion_create')
@@ -78,19 +79,36 @@ export const GradedDiscussionOptions = ({
   intraGroupPeerReviews,
   setIntraGroupPeerReviews,
   isCheckpoints,
+  canManageAssignTo,
 }: Props) => {
-  const differentiatedModulesEnabled = ENV.FEATURES?.differentiated_modules
+  const differentiatedModulesEnabled = ENV.FEATURES?.selective_release_ui_api
   const isPacedDiscussion = ENV?.DISCUSSION_TOPIC?.ATTRIBUTES?.in_paced_course
+
+  const renderDiffModulesAssignTo = () => {
+    if (!canManageAssignTo) {
+      return
+    }
+    return (
+      <>
+        <Text size="large">{I18n.t('Assignment Settings')}</Text>
+        {isPacedDiscussion ? (
+          <CoursePacingNotice courseId={ENV.COURSE_ID} />
+        ) : (
+          <ItemAssignToTrayWrapper />
+        )}
+      </>
+    )
+  }
 
   return (
     <View as="div">
       {!isCheckpoints && (
         <View as="div" margin="medium 0">
-          <DiscussionTopicNumberInput
-            numberInput={pointsPossible || 0}
-            setNumberInput={setPointsPossible}
-            numberInputLabel={I18n.t('Points Possible')}
-            numberInputDataTestId="points-possible-input"
+          <PointsPossible
+            pointsPossible={pointsPossible}
+            setPointsPossible={setPointsPossible}
+            pointsPossibleLabel={I18n.t('Points Possible')}
+            pointsPossibleDataTestId="points-possible-input"
           />
         </View>
       )}
@@ -104,7 +122,9 @@ export const GradedDiscussionOptions = ({
           contextType="Course"
           initiallySelectedGradingSchemeId={gradingSchemeId}
           onChange={newSchemeId => setGradingSchemeId(newSchemeId || '')}
-          archivedGradingSchemesEnabled={false}
+          archivedGradingSchemesEnabled={ENV.ARCHIVED_GRADING_SCHEMES_ENABLED ?? false}
+          assignmentId={ENV.ASSIGNMENT_ID ? String(ENV.ASSIGNMENT_ID) : undefined}
+          courseDefaultSchemeId={ENV.COURSE_DEFAULT_GRADING_SCHEME_ID || ''}
         />
       )}
       {ENV.POST_TO_SIS && (
@@ -136,14 +156,7 @@ export const GradedDiscussionOptions = ({
         {!differentiatedModulesEnabled ? (
           <AssignmentDueDatesManager />
         ) : (
-          <>
-            <Text size="large">{I18n.t('Assignment Settings')}</Text>
-            {isPacedDiscussion ? (
-              <CoursePacingNotice courseId={ENV.COURSE_ID} />
-            ) : (
-              <ItemAssignToTrayWrapper />
-            )}
-          </>
+          renderDiffModulesAssignTo()
         )}
       </View>
     </View>

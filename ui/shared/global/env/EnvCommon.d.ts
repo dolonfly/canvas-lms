@@ -41,6 +41,31 @@ type Role = {
   plural_label: string
 }
 
+type ToolPlacement = 'top_navigation'
+
+export type Tool = {
+  id: string
+  title: string
+  base_url: string
+  icon_url: string
+  pinned?: boolean
+  placement?: ToolPlacement
+}
+
+export type GroupOutcome = {
+  id: string
+  title: string
+  vendor_guid: string
+  url: string
+  subgroups_url: string
+  outcomes_url: string
+  can_edit: boolean
+  import_url: string
+  context_id: string
+  context_type: string
+  description: string
+}
+
 export interface EnvCommon {
   ASSET_HOST: string
   active_brand_config_json_url: string
@@ -64,6 +89,7 @@ export interface EnvCommon {
   current_user_id: string | null
   current_user_global_id: string
   COURSE_ROLES: Role[]
+  COURSE_USERS_PATH?: string
   current_user_roles: string[]
   current_user_is_student: boolean
   current_user_is_admin: boolean
@@ -79,6 +105,7 @@ export interface EnvCommon {
   ACCOUNT_ID: string
   DOMAIN_ROOT_ACCOUNT_ID: string
   ROOT_ACCOUNT_ID: string
+  ROOT_OUTCOME_GROUP: GroupOutcome
   k12: false
   help_link_name: string
   help_link_icon: string
@@ -87,6 +114,7 @@ export interface EnvCommon {
   disable_celebrations: boolean
   disable_keyboard_shortcuts: boolean
   LTI_LAUNCH_FRAME_ALLOWANCES: string[]
+  LTI_TOOL_SCOPES?: {[key: string]: string[]}
   DEEP_LINKING_POST_MESSAGE_ORIGIN: string
   comment_library_suggestions_enabled: boolean
   INCOMPLETE_REGISTRATION: boolean
@@ -173,6 +201,7 @@ export interface EnvCommon {
   K5_HOMEROOM_COURSE: string
   K5_SUBJECT_COURSE: string
   LOCALE_TRANSLATION_FILE: string
+  DEFAULT_DUE_TIME?: string
 
   FEATURES: Partial<
     Record<
@@ -192,7 +221,14 @@ export interface EnvCommon {
     type?: string
     classes?: string
   }>
-  breadcrumbs: {name: string; url: string}[]
+  breadcrumbs: {name: string; url: string | null}[]
+  enhanced_rubrics_enabled?: boolean
+
+  /**
+   * Used by ui/features/top_navigation_tools/react/TopNavigationTools.tsx
+   * and ui/shared/trays/react/ContentTypeExternalToolDrawer.tsx
+   */
+  top_navigation_tools: Tool[]
 }
 
 /**
@@ -203,9 +239,10 @@ export type SiteAdminFeatureId =
   | 'account_level_blackout_dates'
   | 'course_paces_for_students'
   | 'course_paces_redesign'
-  | 'differentiated_modules'
+  | 'selective_release_backend'
+  | 'selective_release_ui_api'
+  | 'selective_release_edit_page'
   | 'enhanced_course_creation_account_fetching'
-  | 'enhanced_rubrics'
   | 'explicit_latex_typesetting'
   | 'featured_help_links'
   | 'instui_for_import_page'
@@ -217,6 +254,9 @@ export type SiteAdminFeatureId =
   | 'render_both_to_do_lists'
   | 'instui_header'
   | 'lti_registrations_discover_page'
+  | 'courses_popout_sisid'
+  | 'dashboard_graphql_integration'
+  | 'speedgrader_studio_media_capture'
 
 /**
  * From ApplicationController#JS_ENV_ROOT_ACCOUNT_FEATURES
@@ -237,6 +277,9 @@ export type RootAccountFeatureId =
   | 'scheduled_page_publication'
   | 'send_usage_metrics'
   | 'usage_rights_discussion_topics'
+  | 'account_level_mastery_scales'
+  | 'non_scoring_rubrics'
+  | 'rubric_criterion_range'
 
 /**
  * From ApplicationController#JS_ENV_BRAND_ACCOUNT_FEATURES

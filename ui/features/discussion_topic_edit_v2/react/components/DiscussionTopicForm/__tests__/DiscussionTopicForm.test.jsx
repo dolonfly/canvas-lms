@@ -20,9 +20,11 @@
 import {render, waitFor, fireEvent} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import React from 'react'
-import DiscussionTopicForm from '../DiscussionTopicForm'
+import DiscussionTopicForm, {isGuidDataValid, getAbGuidArray} from '../DiscussionTopicForm'
 import {DiscussionTopic} from '../../../../graphql/DiscussionTopic'
+import {Assignment} from '../../../../graphql/Assignment'
 import {GroupSet} from '../../../../graphql/GroupSet'
+import {REPLY_TO_TOPIC, REPLY_TO_ENTRY} from '../../../util/constants'
 
 jest.mock('@canvas/rce/react/CanvasRce')
 
@@ -61,6 +63,8 @@ describe('DiscussionTopicForm', () => {
           CAN_MODERATE: true,
           CAN_CREATE_ASSIGNMENT: true,
           CAN_SET_GROUP: true,
+          CAN_MANAGE_ASSIGN_TO_GRADED: true,
+          CAN_MANAGE_ASSIGN_TO_UNGRADED: true,
         },
         ATTRIBUTES: {},
       },
@@ -72,6 +76,8 @@ describe('DiscussionTopicForm', () => {
       current_user: {},
       STUDENT_PLANNER_ENABLED: true,
       DISCUSSION_CHECKPOINTS_ENABLED: true,
+      ASSIGNMENT_EDIT_PLACEMENT_NOT_ON_ANNOUNCEMENTS: false,
+      context_is_not_group: true,
     }
   })
 
@@ -94,6 +100,7 @@ describe('DiscussionTopicForm', () => {
     expect(document.queryByText('Attach')).toBeTruthy()
     expect(document.queryByTestId('section-select')).toBeTruthy()
     expect(document.queryAllByText('Anonymous Discussion')).toBeTruthy()
+    expect(document.queryByLabelText('Disallow threaded replies')).toBeInTheDocument()
     expect(document.queryByTestId('require-initial-post-checkbox')).toBeTruthy()
     expect(document.queryByLabelText('Enable podcast feed')).toBeInTheDocument()
     expect(document.queryByTestId('graded-checkbox')).toBeTruthy()
@@ -104,33 +111,88 @@ describe('DiscussionTopicForm', () => {
     expect(document.queryAllByText('Until')).toBeTruthy()
 
     // Hides announcement options
-    expect(document.queryByLabelText('Delay Posting')).not.toBeInTheDocument()
     expect(document.queryByLabelText('Allow Participants to Comment')).not.toBeInTheDocument()
+  })
+
+  it('renders reset buttons for availability dates when creating/editing a discussion topic', () => {
+    window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MODERATE = true
+    window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MANAGE_CONTENT = true
+
+    const document = setup()
+
+    expect(document.queryAllByTestId('reset-available-from-button').length).toBe(1)
+    expect(document.queryAllByTestId('reset-available-until-button').length).toBe(1)
   })
 
   it('renders expected default teacher announcement options', () => {
     window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MODERATE = true
     window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MANAGE_CONTENT = true
     window.ENV.DISCUSSION_TOPIC.ATTRIBUTES.is_announcement = true
+    window.ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED = true
 
     const document = setup()
     // Default teacher options in order top to bottom
     expect(document.getByText('Topic Title')).toBeInTheDocument()
     expect(document.queryByText('Attach')).toBeTruthy()
     expect(document.queryByTestId('section-select')).toBeTruthy()
-    expect(document.queryByLabelText('Delay Posting')).toBeInTheDocument()
     expect(document.queryByLabelText('Allow Participants to Comment')).toBeInTheDocument()
+    expect(document.queryByLabelText('Disallow threaded replies')).toBeInTheDocument()
     expect(document.queryByTestId('require-initial-post-checkbox')).toBeTruthy()
     expect(document.queryByLabelText('Enable podcast feed')).toBeInTheDocument()
     expect(document.queryByLabelText('Allow liking')).toBeInTheDocument()
+    expect(document.queryByTestId('non-graded-date-options')).toBeTruthy()
+    expect(document.queryAllByText('Available from')).toBeTruthy()
+    expect(document.queryAllByText('Until')).toBeTruthy()
 
     // Hides discussion only options
     expect(document.queryByLabelText('Add to student to-do')).not.toBeInTheDocument()
     expect(document.queryByText('Anonymous Discussion')).not.toBeTruthy()
     expect(document.queryByTestId('graded-checkbox')).not.toBeTruthy()
     expect(document.queryByTestId('group-discussion-checkbox')).not.toBeTruthy()
-    expect(document.queryByText('Available from')).not.toBeTruthy()
-    expect(document.queryByText('Until')).not.toBeTruthy()
+
+    // hides mastery paths
+    expect(document.queryByText('Mastery Paths')).toBeFalsy()
+  })
+
+  it('renders reset buttons for availability dates when creating/editing an announcement', () => {
+    window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MODERATE = true
+    window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MANAGE_CONTENT = true
+    window.ENV.DISCUSSION_TOPIC.ATTRIBUTES.is_announcement = true
+
+    const document = setup()
+
+    expect(document.queryAllByTestId('reset-available-from-button').length).toBe(1)
+    expect(document.queryAllByTestId('reset-available-until-button').length).toBe(1)
+  })
+
+  describe('assignment edit placement', () => {
+    it('renders if the discussion is not an announcement', () => {
+      const {queryByTestId} = setup()
+      expect(queryByTestId('assignment-external-tools')).toBeInTheDocument()
+    })
+
+    it('renders if it is an announcement and the assignment edit placement not on announcements FF is off', () => {
+      window.ENV.DISCUSSION_TOPIC.ATTRIBUTES = {
+        is_announcement: true,
+      }
+      const {queryByTestId} = setup()
+      expect(queryByTestId('assignment-external-tools')).toBeInTheDocument()
+    })
+
+    it('does not render if it is an announcement and the assignment edit placement not on announcements FF is on', () => {
+      window.ENV.DISCUSSION_TOPIC.ATTRIBUTES = {
+        is_announcement: true,
+      }
+      window.ENV.ASSIGNMENT_EDIT_PLACEMENT_NOT_ON_ANNOUNCEMENTS = true
+      const {queryByTestId} = setup()
+      expect(queryByTestId('assignment-external-tools')).not.toBeInTheDocument()
+    })
+
+    it('does not render if the context is not a course', () => {
+      ENV.context_is_not_group = false
+      const {queryByTestId} = setup()
+      expect(queryByTestId('assignment-external-tools')).not.toBeInTheDocument()
+    })
   })
 
   describe('publish indicator', () => {
@@ -190,21 +252,6 @@ describe('DiscussionTopicForm', () => {
       expect(
         document.getByText(
           'Notifications will not be sent retroactively for announcements created before publishing your course or before the course start date. You may consider using the Delay Posting option and set to publish on a future date.'
-        )
-      ).toBeInTheDocument()
-    })
-
-    it('shows an alert when editing an announcement in an published course', () => {
-      window.ENV.DISCUSSION_TOPIC.ATTRIBUTES = {
-        id: 5000,
-        is_announcement: true,
-        course_published: true,
-      }
-
-      const document = setup()
-      expect(
-        document.getByText(
-          'Users do not receive updated notifications when editing an announcement. If you wish to have users notified of this update via their notification settings, you will need to create a new announcement.'
         )
       ).toBeInTheDocument()
     })
@@ -287,6 +334,7 @@ describe('DiscussionTopicForm', () => {
 
     it('hides post to section, student ToDo, and ungraded options when Graded', () => {
       ENV = {
+        FEATURES: {},
         STUDENT_PLANNER_ENABLED: true,
         DISCUSSION_TOPIC: {
           PERMISSIONS: {
@@ -396,7 +444,7 @@ describe('DiscussionTopicForm', () => {
       const document = setup({
         groupCategories: [{_id: '1', name: 'Mutant Power Training Group 1'}],
         isEditing: true,
-        currentDiscussionTopic: DiscussionTopic.mock({groupSet: GroupSet.mock(), canGroup: false}),
+        currentDiscussionTopic: DiscussionTopic.mock({groupSet: GroupSet.mock(), canGroup: false, entryCounts: {repliesCount: 1}}),
       })
 
       expect(document.queryByTestId('group-category-not-editable')).toBeTruthy()
@@ -437,118 +485,333 @@ describe('DiscussionTopicForm', () => {
 
       expect(queryByTestId('checkpoints-checkbox')).not.toBeInTheDocument()
     })
+
+    it('does not display "Allow Participants to Comment" when the setting is turned off', () => {
+      window.ENV.DISCUSSION_TOPIC.ATTRIBUTES.is_announcement = true
+      window.ENV.ANNOUNCEMENTS_COMMENTS_DISABLED = true
+
+      const {queryByText} = setup()
+
+      expect(queryByText('Allow Participants to Comment')).not.toBeInTheDocument()
+    })
+
+    it('displays "Allow Participants to Comment" when the setting is turned on', () => {
+      window.ENV.DISCUSSION_TOPIC.ATTRIBUTES.is_announcement = true
+      window.ENV.ANNOUNCEMENTS_COMMENTS_DISABLED = false
+
+      const {queryByText} = setup()
+
+      expect(queryByText('Allow Participants to Comment')).toBeInTheDocument()
+    })
   })
 
-  describe('Checkpoints', () => {
-    it('toggles the checkpoints checkbox when clicked', () => {
+  describe('Disallow threaded replies', () => {
+    it('disallow threaded replies checkbox is checked when discussion type is side comment and does not has threaded reply', () => {
+      window.ENV.DISCUSSION_TOPIC.ATTRIBUTES.has_threaded_replies = false
+      const {getByTestId} = setup({currentDiscussionTopic: {discussionType: "side_comment"}})
+
+      const checkbox = getByTestId('disallow_threaded_replies')
+      expect(checkbox.checked).toBe(true)
+    })
+
+    it('disallow threaded replies checkbox is disabled when discussion type is side comment and has threaded replies', () => {
+      window.ENV.DISCUSSION_TOPIC.ATTRIBUTES.has_threaded_replies = true
+      const {getByTestId} = setup({currentDiscussionTopic: {discussionType: "side_comment"}})
+
+      const checkbox = getByTestId('disallow_threaded_replies')
+      expect(checkbox.disabled).toBe(true)
+      expect(checkbox.checked).toBe(false)
+    })
+  })
+
+  describe('Graded', () => {
+    it('does not allow the automatic peer review per student input to go below 1', () => {
       const {getByTestId, getByLabelText} = setup()
 
       getByLabelText('Graded').click()
+      getByLabelText('Automatically assign').click()
+      const automaticReviewsInput = getByTestId('peer-review-count-input')
+      expect(automaticReviewsInput.value).toBe('1')
 
-      const checkbox = getByTestId('checkpoints-checkbox')
-      checkbox.click()
-      expect(checkbox.checked).toBe(true)
+      fireEvent.click(automaticReviewsInput)
 
-      checkbox.click()
-      expect(checkbox.checked).toBe(false)
+      fireEvent.keyDown(automaticReviewsInput, {keyCode: 40})
+      expect(automaticReviewsInput.value).toBe('1')
     })
-    describe('Checkpoints Settings', () => {
-      it('increments and decrements the checkpoints settings points possible reply to topic fields', () => {
+
+    describe('validate abGuid for Mastery Connect', () => {
+      it('returns the ab_guid array from the event data', () => {
+        setup()
+
+        const mockEvent = {
+          data: {
+            subject: 'assignment.set_ab_guid',
+            data: ['1E20776E-7053-11DF-8EBF-BE719DFF4B22', '1E20776E-7053-0000-0000-BE719DFF4B22'],
+          },
+        }
+
+        expect(getAbGuidArray(mockEvent)).toEqual([
+          '1E20776E-7053-11DF-8EBF-BE719DFF4B22',
+          '1E20776E-7053-0000-0000-BE719DFF4B22',
+        ])
+      })
+
+      it('isGuidDataValid returns true if ab_guid format and subject are correct', () => {
+        setup()
+
+        const mockEvent = {
+          data: {
+            subject: 'assignment.set_ab_guid',
+            data: ['1E20776E-7053-11DF-8EBF-BE719DFF4B22'],
+          },
+        }
+
+        expect(isGuidDataValid(mockEvent)).toEqual(true)
+      })
+
+      it('isGuidDataValid returns false if subject is not assignment.set_ab_guid', () => {
+        setup()
+
+        const mockEvent = {
+          data: {
+            subject: 'not right subject',
+            data: ['1E20776E-7053-11DF-8EBF-BE719DFF4B22'],
+          },
+        }
+
+        expect(isGuidDataValid(mockEvent)).toBe(false)
+      })
+
+      it('isGuidDataValid returns false if at least one of the ab_guids in the array is not formatted correctly', () => {
+        setup()
+
+        const mockEvent = {
+          data: {
+            subject: 'assignment.set_ab_guid',
+            data: ['not right format', '1E20776E-7053-11DF-8EBF-BE719DFF4B22'],
+          },
+        }
+
+        expect(isGuidDataValid(mockEvent)).toBe(false)
+      })
+    })
+
+    describe('Checkpoints', () => {
+      it('toggles the checkpoints checkbox when clicked', () => {
         const {getByTestId, getByLabelText} = setup()
 
         getByLabelText('Graded').click()
 
         const checkbox = getByTestId('checkpoints-checkbox')
         checkbox.click()
+        expect(checkbox.checked).toBe(true)
 
-        const numberInputReplyToTopic = getByTestId('points-possible-input-reply-to-topic')
-        expect(numberInputReplyToTopic.value).toBe('0')
-
-        fireEvent.click(numberInputReplyToTopic)
-
-        fireEvent.keyDown(numberInputReplyToTopic, {keyCode: 38})
-        expect(numberInputReplyToTopic.value).toBe('1')
-
-        fireEvent.keyDown(numberInputReplyToTopic, {keyCode: 40})
-        expect(numberInputReplyToTopic.value).toBe('0')
+        checkbox.click()
+        expect(checkbox.checked).toBe(false)
       })
-      it('increments and decrements the checkpoints settings points possible reply to entry fields', () => {
+
+      it('unchecks the checkpoints checkbox when graded is unchecked', () => {
         const {getByTestId, getByLabelText} = setup()
 
         getByLabelText('Graded').click()
+        getByTestId('checkpoints-checkbox').click()
+        expect(getByTestId('checkpoints-checkbox').checked).toBe(true)
 
-        const checkbox = getByTestId('checkpoints-checkbox')
-        checkbox.click()
-
-        const numberInputReplyToEntry = getByTestId('points-possible-input-reply-to-entry')
-        expect(numberInputReplyToEntry.value).toBe('0')
-
-        fireEvent.click(numberInputReplyToEntry)
-
-        fireEvent.keyDown(numberInputReplyToEntry, {keyCode: 38})
-        expect(numberInputReplyToEntry.value).toBe('1')
-
-        fireEvent.keyDown(numberInputReplyToEntry, {keyCode: 40})
-        expect(numberInputReplyToEntry.value).toBe('0')
-      })
-      it('increments and decrements the checkpoints settings additional replies required entry field', () => {
-        const {getByTestId, getByLabelText} = setup()
-
+        // 1st graded click will uncheck checkpoints. but it also hides from document.
+        // 2nd graded click will render checkpoints, notice its unchecked.
         getByLabelText('Graded').click()
-
-        const checkbox = getByTestId('checkpoints-checkbox')
-        checkbox.click()
-
-        const numberInputReplyToEntryRequiredCount = getByTestId('reply-to-entry-required-count')
-        expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
-
-        fireEvent.click(numberInputReplyToEntryRequiredCount)
-
-        fireEvent.keyDown(numberInputReplyToEntryRequiredCount, {keyCode: 38})
-        expect(numberInputReplyToEntryRequiredCount.value).toBe('2')
-
-        fireEvent.keyDown(numberInputReplyToEntryRequiredCount, {keyCode: 40})
-        expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
-      })
-      it('does not submit when the required replies count is greater than maximum allowed count', () => {
-        const onSubmit = jest.fn()
-        const {container, getByText, getByLabelText, getByTestId, getByPlaceholderText} = setup({onSubmit})
-
-        fireEvent.input(getByPlaceholderText('Topic Title'), {target: {value: 'a title'}})
-
         getByLabelText('Graded').click()
-
-        const checkbox = getByTestId('checkpoints-checkbox')
-        checkbox.click()
-
-        const numberInputReplyToEntryRequiredCount = getByTestId('reply-to-entry-required-count')
-        fireEvent.change(numberInputReplyToEntryRequiredCount, {target: {value: '11'}})
-
-        expect(container).toHaveTextContent("This number must be between 1 and 10")
-
-        const saveButton = getByText('Save')
-        saveButton.click()
-
-        expect(onSubmit).not.toHaveBeenCalled()
+        expect(getByTestId('checkpoints-checkbox').checked).toBe(false)
       })
-      it('submits when the required replies count is between the minimum and maximum allowed count, inclusive', () => {
-        const onSubmit = jest.fn()
-        const {getByText, getByLabelText, getByTestId, getByPlaceholderText} = setup({onSubmit})
 
-        fireEvent.input(getByPlaceholderText('Topic Title'), {target: {value: 'a title'}})
-
-        getByLabelText('Graded').click()
-
+      it('renders the checkpoints checkbox as selected when there are existing checkpoints', () => {
+        const {getByTestId} = setup({
+          currentDiscussionTopic: DiscussionTopic.mock({
+            assignment: Assignment.mock({hasSubAssignments: true}),
+          }),
+        })
         const checkbox = getByTestId('checkpoints-checkbox')
-        checkbox.click()
+        expect(checkbox.checked).toBe(true)
+      })
+      describe('Checkpoints Settings', () => {
+        let getByTestId, getByLabelText
 
-        const numberInputReplyToEntryRequiredCount = getByTestId('reply-to-entry-required-count')
-        fireEvent.change(numberInputReplyToEntryRequiredCount, {target: {value: '10'}})
+        const setupCheckpoints = setupFunction => {
+          const discussionTopicSetup = setupFunction
 
-        const saveButton = getByText('Save')
-        saveButton.click()
+          getByTestId = discussionTopicSetup.getByTestId
+          getByLabelText = discussionTopicSetup.getByLabelText
 
-        expect(onSubmit).toHaveBeenCalled()
+          getByLabelText('Graded').click()
+
+          const checkbox = getByTestId('checkpoints-checkbox')
+          checkbox.click()
+        }
+
+        describe('Additional Replies Required', () => {
+          it('increments and decrements the checkpoints settings additional replies required entry field', () => {
+            setupCheckpoints(setup())
+
+            const numberInputReplyToEntryRequiredCount = getByTestId(
+              'reply-to-entry-required-count'
+            )
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+
+            fireEvent.click(numberInputReplyToEntryRequiredCount)
+
+            fireEvent.keyDown(numberInputReplyToEntryRequiredCount, {keyCode: 38})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('2')
+
+            fireEvent.keyDown(numberInputReplyToEntryRequiredCount, {keyCode: 40})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+          })
+          it('does not allow incrementing or decrementing if required count is not in the allowed range', () => {
+            setupCheckpoints(setup())
+
+            const numberInputReplyToEntryRequiredCount = getByTestId(
+              'reply-to-entry-required-count'
+            )
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+
+            fireEvent.click(numberInputReplyToEntryRequiredCount)
+
+            fireEvent.keyDown(numberInputReplyToEntryRequiredCount, {keyCode: 40})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+
+            fireEvent.change(numberInputReplyToEntryRequiredCount, {target: {value: '10'}})
+
+            fireEvent.keyDown(numberInputReplyToEntryRequiredCount, {keyCode: 38})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('10')
+          })
+          it('allows input to be changed if the required count falls within the allowed range', () => {
+            setupCheckpoints(setup())
+
+            const numberInputReplyToEntryRequiredCount = getByTestId(
+              'reply-to-entry-required-count'
+            )
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+
+            fireEvent.change(numberInputReplyToEntryRequiredCount, {target: {value: '6'}})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('6')
+          })
+          it('does not allow input to be changed if the required count falls outside the allowed range', () => {
+            setupCheckpoints(setup())
+
+            const numberInputReplyToEntryRequiredCount = getByTestId(
+              'reply-to-entry-required-count'
+            )
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+
+            fireEvent.change(numberInputReplyToEntryRequiredCount, {target: {value: '11'}})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+
+            fireEvent.change(numberInputReplyToEntryRequiredCount, {target: {value: '0'}})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+          })
+          it('reverts to minimum required count value if user has backspaced and leaves the input field', () => {
+            setupCheckpoints(setup())
+
+            const numberInputReplyToEntryRequiredCount = getByTestId(
+              'reply-to-entry-required-count'
+            )
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+
+            fireEvent.change(numberInputReplyToEntryRequiredCount, {target: {value: ''}})
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('0')
+
+            fireEvent.blur(numberInputReplyToEntryRequiredCount)
+            expect(numberInputReplyToEntryRequiredCount.value).toBe('1')
+          })
+        })
+        it('sets the correct checkpoint settings values when there are existing checkpoints', () => {
+          const {getByTestId} = setup({
+            currentDiscussionTopic: DiscussionTopic.mock({
+              replyToEntryRequiredCount: 5,
+              assignment: Assignment.mock({
+                hasSubAssignments: true,
+                checkpoints: [
+                  {
+                    dueAt: null,
+                    name: 'checkpoint discussion',
+                    onlyVisibleToOverrides: false,
+                    pointsPossible: 6,
+                    tag: REPLY_TO_TOPIC,
+                  },
+                  {
+                    dueAt: null,
+                    name: 'checkpoint discussion',
+                    onlyVisibleToOverrides: false,
+                    pointsPossible: 7,
+                    tag: REPLY_TO_ENTRY,
+                  },
+                ],
+              }),
+            }),
+          })
+
+          const numberInputReplyToTopic = getByTestId('points-possible-input-reply-to-topic')
+          expect(numberInputReplyToTopic.value).toBe('6')
+          const numberInputReplyToEntry = getByTestId('points-possible-input-reply-to-entry')
+          expect(numberInputReplyToEntry.value).toBe('7')
+          const numberInputAdditionalRepliesRequired = getByTestId('reply-to-entry-required-count')
+          expect(numberInputAdditionalRepliesRequired.value).toBe('5')
+        })
+      })
+    })
+  })
+
+  describe('Ungraded', () => {
+    describe('selective_release_ui_api flag is ON', () => {
+      beforeAll(() => {
+        window.ENV.FEATURES.selective_release_ui_api = true
+      })
+
+      it('renders expected default teacher discussion options', () => {
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_CREATE_ASSIGNMENT = true
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_UPDATE_ASSIGNMENT = true
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MODERATE = true
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MANAGE_CONTENT = true
+
+        const document = setup()
+        // Default teacher options in order top to bottom
+        expect(document.getByText('Topic Title')).toBeInTheDocument()
+        expect(document.queryByText('Attach')).toBeTruthy()
+        expect(document.queryByTestId('section-select')).toBeTruthy()
+        expect(document.queryAllByText('Anonymous Discussion')).toBeTruthy()
+        expect(document.queryByTestId('require-initial-post-checkbox')).toBeTruthy()
+        expect(document.queryByLabelText('Enable podcast feed')).toBeInTheDocument()
+        expect(document.queryByTestId('graded-checkbox')).toBeTruthy()
+        expect(document.queryByLabelText('Allow liking')).toBeInTheDocument()
+        expect(document.queryByLabelText('Add to student to-do')).toBeInTheDocument()
+        expect(document.queryByTestId('group-discussion-checkbox')).toBeTruthy()
+        expect(document.queryAllByText('Manage Due Dates and Assign To')).toBeTruthy()
+
+        // Hides announcement options
+        expect(document.queryByLabelText('Delay Posting')).not.toBeInTheDocument()
+        expect(document.queryByLabelText('Allow Participants to Comment')).not.toBeInTheDocument()
+      })
+
+      it('renders expected default student discussion options', () => {
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_CREATE_ASSIGNMENT = false
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_UPDATE_ASSIGNMENT = false
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MODERATE = false
+        window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_MANAGE_CONTENT = false
+
+        const document = setup()
+        // Default teacher options in order top to bottom
+        expect(document.getByText('Topic Title')).toBeInTheDocument()
+        expect(document.queryByText('Attach')).toBeTruthy()
+        expect(document.queryByTestId('section-select')).toBeTruthy()
+        expect(document.queryAllByText('Anonymous Discussion')).toBeTruthy()
+        expect(document.queryByTestId('require-initial-post-checkbox')).toBeTruthy()
+        expect(document.queryByLabelText('Allow liking')).toBeInTheDocument()
+        expect(document.queryByTestId('group-discussion-checkbox')).toBeTruthy()
+        expect(document.queryAllByText('Available from')).toBeTruthy()
+        expect(document.queryAllByText('Until')).toBeTruthy()
+
+        // Hides announcement options
+        expect(document.queryByLabelText('Delay Posting')).not.toBeInTheDocument()
+        expect(document.queryByLabelText('Allow Participants to Comment')).not.toBeInTheDocument()
       })
     })
   })

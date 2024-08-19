@@ -439,8 +439,8 @@ function finalGradePointsPossibleText(groupWeightingScheme, scoreWithPointsPossi
 
 function formatScaledPointsGrade(scaledPointsEarned, scaledPointsPossible) {
   return canBeConvertedToGrade(scaledPointsEarned, scaledPointsPossible)
-    ? `${I18n.n(scaledPointsEarned, {precision: 1})} / ${I18n.n(scaledPointsPossible, {
-        precision: 1,
+    ? `${I18n.n(scaledPointsEarned, {precision: 2})} / ${I18n.n(scaledPointsPossible, {
+        precision: 2,
       })}`
     : I18n.t('N/A')
 }
@@ -468,13 +468,22 @@ function calculateTotals(calculatedGrades, currentOrFinal, groupWeightingScheme)
   let finalGrade
   let teaserText
 
-  if (gradingSchemeEnabled() || ENV.restrict_quantitative_data) {
+  if (
+    (gradingSchemeEnabled() || ENV.restrict_quantitative_data) &&
+    !ENV.course_active_grading_scheme?.points_based
+  ) {
     const scoreToUse = overrideScorePresent()
       ? ENV.effective_final_score
       : calculatePercentGrade(finalScore, finalPossible)
 
     const grading_scheme = ENV.course_active_grading_scheme?.data
-    const letterGrade = scoreToLetterGrade(scoreToUse, grading_scheme) || I18n.t('N/A')
+    const letterGrade =
+      scoreToLetterGrade(
+        scoreToUse,
+        grading_scheme,
+        ENV.course_active_grading_scheme?.points_based,
+        ENV.course_active_grading_scheme?.scaling_factor
+      ) || I18n.t('N/A')
 
     $('.final_grade .letter_grade').text(GradeFormatHelper.replaceDashWithMinus(letterGrade))
   }
@@ -489,6 +498,20 @@ function calculateTotals(calculatedGrades, currentOrFinal, groupWeightingScheme)
       )
       finalGrade = formatScaledPointsGrade(scaledPointsOverride, scaledPointsPossible)
       teaserText = scoreAsPoints
+
+      const grading_scheme = ENV.course_active_grading_scheme.data
+      const letterGrade =
+        scoreToLetterGrade(
+          calculatePercentGrade(
+            Number(scaledPointsOverride.toFixed(2)),
+            Number(scaledPointsPossible.toFixed(2))
+          ),
+          grading_scheme,
+          ENV.course_active_grading_scheme.points_based,
+          scaledPointsPossible
+        ) || I18n.t('N/A')
+
+      $('.final_grade .letter_grade').text(GradeFormatHelper.replaceDashWithMinus(letterGrade))
     } else {
       finalGrade = formatPercentGrade(ENV.effective_final_score)
       teaserText = scoreAsPoints
@@ -502,6 +525,19 @@ function calculateTotals(calculatedGrades, currentOrFinal, groupWeightingScheme)
     const scaledPointsPossible = ENV.course_active_grading_scheme.scaling_factor
     finalGrade = formatScaledPointsGrade(scaledPointsEarned, scaledPointsPossible)
     teaserText = scoreAsPoints
+
+    const grading_scheme = ENV.course_active_grading_scheme.data
+    const letterGrade =
+      scoreToLetterGrade(
+        calculatePercentGrade(
+          Number(scaledPointsEarned.toFixed(2)),
+          Number(scaledPointsPossible.toFixed(2))
+        ),
+        grading_scheme,
+        ENV.course_active_grading_scheme.points_based
+      ) || I18n.t('N/A')
+
+    $('.final_grade .letter_grade').text(GradeFormatHelper.replaceDashWithMinus(letterGrade))
   } else if (showTotalGradeAsPoints && groupWeightingScheme !== 'percent') {
     finalGrade = scoreAsPoints
     teaserText = scoreAsPercent
@@ -759,7 +795,7 @@ function setup() {
       $('#grades_summary .revert_score_link').each(function () {
         $(this).trigger('click', {skipEval: true, refocus: false})
       })
-      $('#.show_guess_grades.exists').show()
+      $('.show_guess_grades.exists').show()
       GradeSummary.updateStudentGrades()
       showAllWhatIfButton.focus()
       $.screenReaderFlashMessageExclusive(I18n.t('Grades are now reverted to original scores'))

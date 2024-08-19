@@ -20,7 +20,6 @@
 import {useScope as useI18nScope} from '@canvas/i18n'
 import $ from 'jquery'
 import '@canvas/jquery/jquery.ajaxJSON'
-import '@canvas/datetime/jquery' /* time_field, datetime_field */
 import '@canvas/jquery/jquery.instructure_forms' /* formSubmit, formErrors */
 import 'jqueryui/dialog'
 import '@canvas/jquery/jquery.instructure_misc_helpers' /* replaceTags */
@@ -35,6 +34,7 @@ import enrollmentTemplate from '../jst/enrollment.handlebars'
 import sectionEnrollmentPresenter from '../sectionEnrollmentPresenter'
 import '@canvas/context-cards/react/StudentContextCardTrigger'
 import replaceTags from '@canvas/util/replaceTags'
+import {renderDatetimeField} from '@canvas/datetime/jquery/DatetimeField'
 
 const I18n = useI18nScope('section')
 
@@ -110,7 +110,7 @@ $(document).ready(function () {
         },
       })
   })
-  $('.datetime_field').datetime_field()
+  renderDatetimeField($('.datetime_field'))
   $('.uncrosslist_link').click(event => {
     event.preventDefault()
     $('#uncrosslist_form').dialog({
@@ -141,13 +141,43 @@ $(document).ready(function () {
     $('#course_autocomplete_id_lookup').val('')
     $('#course_id').val('').change()
   })
-  $('#course_autocomplete_id_lookup').autocomplete({
-    source: $('#course_autocomplete_url').attr('href'),
-    select(event, ui) {
-      $('#course_id').val('')
-      $('#crosslist_course_form').triggerHandler('id_entered', ui.item)
-    },
-  })
+  $('#course_autocomplete_id_lookup')
+    .autocomplete({
+      source: $('#course_autocomplete_url').attr('href'),
+      select(event, ui) {
+        $('#course_id').val('')
+        $('#crosslist_course_form').triggerHandler('id_entered', ui.item)
+      },
+    })
+    .data('ui-autocomplete')._renderItem = function (ul, item) {
+    return $('<li>')
+      .data('ui-autocomplete-item', item)
+      .append(
+        $('<a>')
+          .append($('<div>').text(item.label))
+          .append(
+            $('<div>')
+              .addClass('secondary')
+              .append(
+                $('<small>').text(
+                  item.sis_id
+                    ? I18n.t(
+                        'course.sisid_term',
+                        'SIS ID: %{course_sisid} | Term: %{course_term}',
+                        {
+                          course_sisid: item.sis_id,
+                          course_term: item.term,
+                        }
+                      )
+                    : I18n.t('course.term', 'Term: %{course_term}', {
+                        course_term: item.term,
+                      })
+                )
+              )
+          )
+      )
+      .appendTo(ul)
+  }
   $('#course_id').keycodes('return', function (event) {
     event.preventDefault()
     $(this).change()

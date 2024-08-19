@@ -19,7 +19,6 @@
 import {
   addReplyToDiscussionEntry,
   getSpeedGraderUrl,
-  updateDiscussionEntryRootEntryCounts,
   updateDiscussionTopicEntryCounts,
   responsiveQuerySizes,
   isTopicAuthor,
@@ -32,7 +31,6 @@ import {
 import {AlertManagerContext} from '@canvas/alerts/react/AlertManager'
 import {
   DELETE_DISCUSSION_ENTRY,
-  UPDATE_DISCUSSION_THREAD_READ_STATE,
   UPDATE_DISCUSSION_ENTRY_PARTICIPANT,
   UPDATE_DISCUSSION_ENTRY,
 } from '../../../graphql/Mutations'
@@ -59,11 +57,12 @@ import {Responsive} from '@instructure/ui-responsive'
 import theme from '@instructure/canvas-theme'
 import {ThreadActions} from '../../components/ThreadActions/ThreadActions'
 import {ThreadingToolbar} from '../../components/ThreadingToolbar/ThreadingToolbar'
-import {useMutation, useQuery, useApolloClient} from 'react-apollo'
+import {useMutation, useQuery} from 'react-apollo'
 import {View} from '@instructure/ui-view'
 import {ReportReply} from '../../components/ReportReply/ReportReply'
 import {Text} from '@instructure/ui-text'
 import useCreateDiscussionEntry from '../../hooks/useCreateDiscussionEntry'
+import {useUpdateDiscussionThread} from '../../hooks/useUpdateDiscussionThread'
 
 const I18n = useI18nScope('discussion_topics_post')
 
@@ -83,7 +82,9 @@ export const DiscussionThreadContainer = props => {
   const {searchTerm, filter, allThreadsStatus, expandedThreads, setExpandedThreads} =
     useContext(SearchContext)
   const {setOnFailure, setOnSuccess} = useContext(AlertManagerContext)
-  const {replyFromId, setReplyFromId, usedThreadingToolbarChildRef} = useContext(DiscussionManagerUtilityContext)
+  const {replyFromId, setReplyFromId, usedThreadingToolbarChildRef} = useContext(
+    DiscussionManagerUtilityContext
+  )
   const [expandReplies, setExpandReplies] = useState(
     defaultExpandedReplies(props.discussionEntry._id)
   )
@@ -94,40 +95,16 @@ export const DiscussionThreadContainer = props => {
   const [reportModalIsLoading, setReportModalIsLoading] = useState(false)
   const [reportingError, setReportingError] = useState(false)
   const [firstSubReply, setFirstSubReply] = useState(false)
-
-  const updateLoadedSubentry = updatedEntry => {
-    // if it's a subentry then we need to update the loadedSubentry.
-    if (props.setLoadedSubentries) {
-      props.setLoadedSubentries(loadedSubentries => {
-        return loadedSubentries.map(entry =>
-          !!updatedEntry.rootEntryId && entry.id === updatedEntry.id ? updatedEntry : entry
-        )
-      })
-    }
-  }
-
-  const updateDiscussionEntryParticipantCache = (cache, result) => {
-    if (
-      props.discussionEntry.entryParticipant?.read !==
-      result.data.updateDiscussionEntryParticipant.discussionEntry.entryParticipant?.read
-    ) {
-      const discussionUnreadCountChange = result.data.updateDiscussionEntryParticipant
-        .discussionEntry.entryParticipant?.read
-        ? -1
-        : 1
-      updateDiscussionTopicEntryCounts(cache, props.discussionTopic.id, {
-        unreadCountChange: discussionUnreadCountChange,
-      })
-
-      if (result.data.updateDiscussionEntryParticipant.discussionEntry.rootEntryId) {
-        updateDiscussionEntryRootEntryCounts(
-          cache,
-          result.data.updateDiscussionEntryParticipant.discussionEntry,
-          discussionUnreadCountChange
-        )
-      }
-    }
-  }
+  const {
+    updateLoadedSubentry,
+    updateDiscussionEntryParticipant,
+    updateDiscussionThreadReadState,
+    toggleUnread,
+  } = useUpdateDiscussionThread({
+    discussionEntry: props.discussionEntry,
+    discussionTopic: props.discussionTopic,
+    setLoadedSubentries: props.setLoadedSubentries,
+  })
 
   const updateCache = (cache, result) => {
     const newDiscussionEntry = result.data.createDiscussionEntry.discussionEntry
@@ -143,25 +120,27 @@ export const DiscussionThreadContainer = props => {
     addReplyToAllRootEntries(cache, newDiscussionEntry)
     addSubentriesCountToParentEntry(cache, newDiscussionEntry)
     props.setHighlightEntryId(newDiscussionEntry._id)
+  }
 
-    // It is a known issue that the first reply of a sub reply has not initiated the sub query call,
-    // as a result we cannot add an entry to it. Before we had expand buttons for each sub-entry,
-    // now we must manually trigger the first one.
-    // See addReplyToDiscussionEntry definition for more details.
-    if (
-      result.data.createDiscussionEntry.discussionEntry.parentId === props.discussionEntry._id &&
-      !props.discussionEntry.subentriesCount
-    ) {
-      setFirstSubReply(true)
+  const onEntryCreationCompletion = (data, success) => {
+    if (success) {
+      // It is a known issue that the first reply of a sub reply has not initiated the sub query call,
+      // as a result we cannot add an entry to it. Before we had expand buttons for each sub-entry,
+      // now we must manually trigger the first one.
+      // See addReplyToDiscussionEntry definition for more details.
+      if (
+        data.createDiscussionEntry.discussionEntry.parentId === props.discussionEntry._id &&
+        !props.discussionEntry.subentriesCount
+      ) {
+        setFirstSubReply(true)
+      }
+      setExpandReplies(true)
+      props.setHighlightEntryId(data.createDiscussionEntry.discussionEntry._id)
+      setEditorExpanded(false)
     }
   }
 
-  const onEntryCreationCompletion = data => {
-    setExpandReplies(true)
-    props.setHighlightEntryId(data.createDiscussionEntry.discussionEntry._id)
-  }
-
-  const {createDiscussionEntry} = useCreateDiscussionEntry(onEntryCreationCompletion, updateCache)
+  const {createDiscussionEntry, isSubmitting} = useCreateDiscussionEntry(onEntryCreationCompletion, updateCache)
 
   const [deleteDiscussionEntry] = useMutation(DELETE_DISCUSSION_ENTRY, {
     onCompleted: data => {
@@ -189,20 +168,6 @@ export const DiscussionThreadContainer = props => {
     },
     onError: () => {
       setOnFailure(I18n.t('There was an unexpected error while updating the reply.'))
-    },
-  })
-
-  const [updateDiscussionEntryParticipant] = useMutation(UPDATE_DISCUSSION_ENTRY_PARTICIPANT, {
-    update: updateDiscussionEntryParticipantCache,
-    onCompleted: data => {
-      if (!data || !data.updateDiscussionEntryParticipant) {
-        return null
-      }
-      updateLoadedSubentry(data.updateDiscussionEntryParticipant.discussionEntry)
-      setOnSuccess(I18n.t('The reply was successfully updated.'))
-    },
-    onError: () => {
-      setOnFailure(I18n.t('There was an unexpected error updating the reply.'))
     },
   })
 
@@ -234,16 +199,6 @@ export const DiscussionThreadContainer = props => {
     })
   }
 
-  const toggleUnread = () => {
-    updateDiscussionEntryParticipant({
-      variables: {
-        discussionEntryId: props.discussionEntry._id,
-        read: !props.discussionEntry.entryParticipant?.read,
-        forcedReadState: true,
-      },
-    })
-  }
-
   const getReplyLeftMargin = responsiveProp => {
     // If the entry is in threadMode, then we want the RCE to be aligned with the authorInfo
     const threadMode = props.discussionEntry?.depth > 1
@@ -264,15 +219,6 @@ export const DiscussionThreadContainer = props => {
 
     return `calc(${theme.variables.spacing.xxLarge} * ${props.depth} + ${discussionEntryContainerLeftPadding} + ${discussionEditLeftPadding})`
   }
-
-  const client = useApolloClient()
-  const resetDiscussionCache = () => {
-    client.resetStore()
-  }
-
-  const [updateDiscussionThreadReadState] = useMutation(UPDATE_DISCUSSION_THREAD_READ_STATE, {
-    update: resetDiscussionCache,
-  })
 
   // Condense SplitScreen to one variable & link with the SplitScreenButton
   const splitScreenOn = props.userSplitScreenPreference
@@ -314,6 +260,16 @@ export const DiscussionThreadContainer = props => {
     )
   }
 
+  threadActions.push(
+    <ThreadingToolbar.MarkAsRead
+      key={`mark-as-read-${props.discussionEntry._id}`}
+      delimiterKey={`mark-as-read-delimiter-${props.discussionEntry._id}`}
+      isRead={props.discussionEntry.entryParticipant?.read}
+      authorName={getDisplayName(props.discussionEntry)}
+      onClick={toggleUnread}
+    />
+  )
+
   if (props.depth === 0 && props.discussionEntry.lastReply) {
     threadActions.push(
       <ThreadingToolbar.Expansion
@@ -351,13 +307,14 @@ export const DiscussionThreadContainer = props => {
     }
   }
 
-  const onUpdate = (message, _quotedEntryId, file) => {
+  const onUpdate = (message, quotedEntryId, file) => {
     updateDiscussionEntry({
       variables: {
         discussionEntryId: props.discussionEntry._id,
         message,
         fileId: file?._id,
         removeAttachment: !file?._id,
+        quotedEntryId,
       },
     })
   }
@@ -458,7 +415,6 @@ export const DiscussionThreadContainer = props => {
     createDiscussionEntry({variables, optimisticResponse})
 
     props.setHighlightEntryId('DISCUSSION_ENTRY_PLACEHOLDER')
-    setEditorExpanded(false)
   }
 
   return (
@@ -487,6 +443,7 @@ export const DiscussionThreadContainer = props => {
                   <DiscussionEntryContainer
                     discussionTopic={props.discussionTopic}
                     discussionEntry={props.discussionEntry}
+                    toggleUnread={toggleUnread}
                     isTopic={false}
                     postUtilities={
                       !props.discussionEntry.deleted ? (
@@ -518,6 +475,7 @@ export const DiscussionThreadContainer = props => {
                           }
                           goToTopic={props.goToTopic}
                           onReport={
+                            ENV.discussions_reporting &&
                             props.discussionTopic.permissions?.studentReporting
                               ? () => {
                                   setShowReportModal(true)
@@ -537,7 +495,12 @@ export const DiscussionThreadContainer = props => {
                                 }
                               : null
                           }
-                          onMarkThreadAsRead={readState =>
+                          onMarkThreadAsRead={props.discussionTopic.discussionType !== 'threaded' ? undefined : readState => {
+                            window['ENV'].discussions_deep_link = {
+                              root_entry_id: props.discussionEntry.rootEntryId,
+                              parent_id: props.discussionEntry.parentId,
+                              entry_id: props.discussionEntry._id,
+                            }
                             updateDiscussionThreadReadState({
                               variables: {
                                 discussionEntryId: props.discussionEntry.rootEntryId
@@ -546,7 +509,8 @@ export const DiscussionThreadContainer = props => {
                                 read: readState,
                               },
                             })
-                          }
+                            props.setHighlightEntryId(props.discussionEntry._id)
+                          }}
                         />
                       ) : null
                     }
@@ -563,10 +527,7 @@ export const DiscussionThreadContainer = props => {
                     }}
                     isSplitView={false}
                     editor={props.discussionEntry.editor}
-                    isUnread={
-                      !props.discussionEntry.entryParticipant?.read ||
-                      !!props.discussionEntry?.rootEntryParticipantCounts?.unreadCount
-                    }
+                    isUnread={!props.discussionEntry.entryParticipant?.read}
                     isForcedRead={props.discussionEntry.entryParticipant?.forcedReadState}
                     createdAt={props.discussionEntry.createdAt}
                     updatedAt={props.discussionEntry.updatedAt}
@@ -643,6 +604,7 @@ export const DiscussionThreadContainer = props => {
                       replyButtonRef?.current?.focus()
                     }, 0)
                   }}
+                  isSubmitting={isSubmitting}
                   quotedEntry={buildQuotedReply([props.discussionEntry], replyFromId)}
                   value={
                     !!ENV.rce_mentions_in_discussions && props.discussionEntry.depth > 2
@@ -726,11 +688,14 @@ const DiscussionSubentries = props => {
     if (subentries.length > 0 && subentriesIds !== loadedSubentriesIds) {
       if (loadedSubentries.length < subentries.length) {
         setTimeout(() => {
-          setLoadedSubentries(previousloadedSubentries =>
-            previousloadedSubentries.concat(
-              subentries.slice(loadedSubentries.length, loadedSubentries.length + 10)
-            )
-          )
+          setLoadedSubentries(previousLoadedSubentries => {
+            const previousLoadedSubentriesIds = previousLoadedSubentries.map(({_id}) => _id)
+            const newLoadedSubentries = subentries
+              .slice(loadedSubentries.length, loadedSubentries.length + 10)
+              .filter(({_id}) => !previousLoadedSubentriesIds.includes(_id))
+
+            return [...previousLoadedSubentries, ...newLoadedSubentries]
+          })
         }, 500)
       } else {
         // There is a mismatch of IDs, so we need to reset the loadedSubentries

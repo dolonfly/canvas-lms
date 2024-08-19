@@ -36,33 +36,27 @@ import {ThreadActions} from '../../components/ThreadActions/ThreadActions'
 import {ThreadingToolbar} from '../../components/ThreadingToolbar/ThreadingToolbar'
 import {
   UPDATE_SPLIT_SCREEN_VIEW_DEEPLY_NESTED_ALERT,
-  UPDATE_DISCUSSION_THREAD_READ_STATE,
   UPDATE_DISCUSSION_ENTRY_PARTICIPANT,
 } from '../../../graphql/Mutations'
-import {useMutation, useApolloClient} from 'react-apollo'
+import {useMutation} from 'react-apollo'
 import {View} from '@instructure/ui-view'
 import {ReportReply} from '../../components/ReportReply/ReportReply'
 import {AlertManagerContext} from '@canvas/alerts/react/AlertManager'
+import {useUpdateDiscussionThread} from '../../hooks/useUpdateDiscussionThread'
 
 const I18n = useI18nScope('discussion_posts')
 
-export const SplitScreenParent = props => {
+export const SplitScreenParent = ({isEditing, setIsEditing, ...props}) => {
   const [updateSplitScreenViewDeeplyNestedAlert] = useMutation(
     UPDATE_SPLIT_SCREEN_VIEW_DEEPLY_NESTED_ALERT
   )
-
-  const client = useApolloClient()
-  const resetDiscussionCache = () => {
-    client.resetStore()
-  }
-
-  const [updateDiscussionThreadReadState] = useMutation(UPDATE_DISCUSSION_THREAD_READ_STATE, {
-    update: resetDiscussionCache,
+  const {toggleUnread, updateDiscussionThreadReadState} = useUpdateDiscussionThread({
+    discussionEntry: props.discussionEntry,
+    discussionTopic: props.discussionTopic,
   })
 
   const {setOnSuccess} = useContext(AlertManagerContext)
   const {setReplyFromId} = useContext(DiscussionManagerUtilityContext)
-  const [isEditing, setIsEditing] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
   const [reportModalIsLoading, setReportModalIsLoading] = useState(false)
   const [reportingError, setReportingError] = useState(false)
@@ -95,6 +89,7 @@ export const SplitScreenParent = props => {
         onClick={() => props.setRCEOpen(true)}
         isReadOnly={props.RCEOpen}
         replyButtonRef={props.replyButtonRef}
+        isSplitScreenView={true}
       />
     )
   }
@@ -116,9 +111,21 @@ export const SplitScreenParent = props => {
         isLiked={!!props.discussionEntry.entryParticipant?.rating}
         likeCount={props.discussionEntry.ratingSum || 0}
         interaction={props.discussionEntry.permissions.rate ? 'enabled' : 'disabled'}
+        isSplitScreenView={true}
       />
     )
   }
+
+  threadActions.push(
+    <ThreadingToolbar.MarkAsRead
+      key={`mark-as-read-${props.discussionEntry.id}`}
+      delimiterKey={`mark-as-read-delimiter-${props.discussionEntry.id}`}
+      isRead={props.discussionEntry.entryParticipant?.read}
+      authorName={getDisplayName(props.discussionEntry)}
+      onClick={toggleUnread}
+      isSplitScreenView={true}
+    />
+  )
 
   if (props.discussionEntry.lastReply) {
     threadActions.push(
@@ -199,6 +206,7 @@ export const SplitScreenParent = props => {
                     discussionEntry={props.discussionEntry}
                     isTopic={false}
                     threadParent={true}
+                    toggleUnread={toggleUnread}
                     postUtilities={
                       <ThreadActions
                         authorName={getDisplayName(props.discussionEntry)}
@@ -238,6 +246,7 @@ export const SplitScreenParent = props => {
                             : null
                         }
                         onReport={
+                          ENV.discussions_reporting &&
                           props.discussionTopic.permissions?.studentReporting
                             ? () => {
                                 setShowReportModal(true)
@@ -252,10 +261,9 @@ export const SplitScreenParent = props => {
                     anonymousAuthor={props.discussionEntry.anonymousAuthor}
                     message={props.discussionEntry.message}
                     isEditing={isEditing}
-                    onSave={(message, _quotedEntryId, file) => {
+                    onSave={(message, quotedEntryId, file) => {
                       if (props.onSave) {
-                        props.onSave(props.discussionEntry, message, file)
-                        setIsEditing(false)
+                        props.onSave(message, quotedEntryId, file)
                       }
                     }}
                     onCancel={() => {

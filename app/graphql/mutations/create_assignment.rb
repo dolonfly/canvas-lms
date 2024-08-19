@@ -18,7 +18,7 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-class Mutations::CreateAssignment < Mutations::AssignmentBase
+class Mutations::CreateAssignment < Mutations::AssignmentBase::Mutation
   graphql_name "CreateAssignment"
 
   argument :course_id, ID, required: true
@@ -55,6 +55,9 @@ class Mutations::CreateAssignment < Mutations::AssignmentBase
     api_proxy = ApiProxy.new(context[:request], @working_assignment, context[:session], current_user)
 
     validate_for_checkpoints(input_hash)
+    if input_hash[:for_checkpoints]
+      @working_assignment.has_sub_assignments = true
+    end
 
     # modifies input_hash
     prepare_input_params!(input_hash, api_proxy)

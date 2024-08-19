@@ -31,6 +31,7 @@ import {useScope as useI18nScope} from '@canvas/i18n'
 import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import ColumnHeader from './ColumnHeader'
 import {showMessageStudentsWithObserversModal} from '../../../shared/MessageStudentsWithObserversModal'
+import {MSWLaunchContext} from '@canvas/message-students-dialog/react/MessageStudentsWhoDialog'
 
 const I18n = useI18nScope('gradebook')
 
@@ -173,7 +174,8 @@ export default class TotalGradeColumnHeader extends ColumnHeader<Props, State> {
 
     const props = {
       assignment: null,
-      students: students.filter(student => !student.isInactive && !student.isTestStudent),
+      launchContext: MSWLaunchContext.TOTAL_COURSE_GRADE_CONTEXT,
+      students: (students || []).filter(student => !student.isInactive && !student.isTestStudent),
       courseId,
       onClose: () => {},
       onSend: this.handleSendMessageStudentsWho,
@@ -191,7 +193,7 @@ export default class TotalGradeColumnHeader extends ColumnHeader<Props, State> {
     const displayAsPoints = gradeDisplay.currentDisplay === 'points'
     const showSeparator = !gradeDisplay.hidden
     const menuShown = this.state.menuShown
-    const allStudents = this.props.allStudents
+    const allStudents = this.props.getAllStudents()
     const courseId = this.props.courseId
     const classes = `Gradebook__ColumnHeaderAction ${menuShown ? 'menuShown' : ''}`
 

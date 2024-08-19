@@ -671,7 +671,7 @@ describe Assignment do
   describe "#visible_to_students_in_course_with_da" do
     let(:student_enrollment) { @course.enrollments.find_by(user: @student) }
     let(:visible_assignments) do
-      Assignment.visible_to_students_in_course_with_da(@student.id, @course.id)
+      Assignment.visible_to_students_in_course_with_da([@student.id], [@course.id])
     end
 
     it "excludes unpublished assignments" do
@@ -1980,6 +1980,23 @@ describe Assignment do
   end
 
   describe "#representatives" do
+    it "optionally returns group members along with the reps" do
+      @first_student = @student
+      @second_student = student_in_course(active_all: true).user
+      group_category = @course.group_categories.create!(name: "My Category")
+      group = @course.groups.create!(name: "My Group", group_category:)
+      group.add_user(@first_student)
+      group.add_user(@second_student)
+      group.save!
+      assignment = @course.assignments.create!(assignment_valid_attributes.merge(group_category:))
+      rep, others = assignment.representatives(user: @teacher, include_others: true).first
+      aggregate_failures do
+        expect(rep.id).to eq @first_student.id
+        expect(others.count).to eq 1
+        expect(others.first.id).to eq @second_student.id
+      end
+    end
+
     context "when filtering by section" do
       before(:once) do
         @student_enrollment = @enrollment
@@ -4448,34 +4465,34 @@ describe Assignment do
     end
 
     it "determines date from due_at's timezone" do
-      @assignment.due_at = Date.today.in_time_zone("Baghdad") + 1.hour # 01:00:00 AST +03:00 today
+      @assignment.due_at = Time.zone.today.in_time_zone("Baghdad") + 1.hour # 01:00:00 AST +03:00 today
       @assignment.time_zone_edited = "Baghdad"
       @assignment.save!
-      expect(@assignment.all_day_date).to eq Date.today
+      expect(@assignment.all_day_date).to eq Time.zone.today
 
       @assignment.due_at = @assignment.due_at.in_time_zone("Alaska") - 2.hours # 12:00:00 AKDT -08:00 previous day
       @assignment.time_zone_edited = "Alaska"
       @assignment.save!
-      expect(@assignment.all_day_date).to eq Date.today - 1.day
+      expect(@assignment.all_day_date).to eq Time.zone.today - 1.day
     end
 
     it "preserves all-day date when only changing time zone" do
-      @assignment.due_at = Date.today.in_time_zone("Baghdad") # 00:00:00 AST +03:00 today
+      @assignment.due_at = Time.zone.today.in_time_zone("Baghdad") # 00:00:00 AST +03:00 today
       @assignment.time_zone_edited = "Baghdad"
       @assignment.save!
       @assignment.due_at = @assignment.due_at.in_time_zone("Alaska") # 13:00:00 AKDT -08:00 previous day
       @assignment.time_zone_edited = "Alaska"
       @assignment.save!
-      expect(@assignment.all_day_date).to eq Date.today
+      expect(@assignment.all_day_date).to eq Time.zone.today
     end
 
     it "preserves non-all-day date when only changing time zone" do
-      @assignment.due_at = Date.today.in_time_zone("Alaska") - 11.hours # 13:00:00 AKDT -08:00 previous day
+      @assignment.due_at = Time.zone.today.in_time_zone("Alaska") - 11.hours # 13:00:00 AKDT -08:00 previous day
       @assignment.save!
       @assignment.due_at = @assignment.due_at.in_time_zone("Baghdad") # 00:00:00 AST +03:00 today
       @assignment.time_zone_edited = "Baghdad"
       @assignment.save!
-      expect(@assignment.all_day_date).to eq Date.today - 1.day
+      expect(@assignment.all_day_date).to eq Time.zone.today - 1.day
     end
   end
 
@@ -4574,23 +4591,46 @@ describe Assignment do
   end
 
   describe "#peer_reviews_assigned" do
-    before :once do
+    before do
       @assignment = assignment_model(course: @course)
       @assignment.peer_reviews = true
       @assignment.automatic_peer_reviews = true
-      @assignment.due_at = 1.day.ago
-      @assignment.peer_reviews_assigned = true
-      @assignment.save!
+      @assignment.peer_review_count = 1
+      @assignment.peer_reviews_assign_at = nil
     end
 
     it "is set to `true` when all peer reviews have been assigned" do
+      @assignment.due_at = 1.day.ago
+      @assignment.peer_reviews_assigned = true
+      @assignment.save!
       @assignment.assign_peer_reviews
       expect(@assignment.peer_reviews_assigned).to be true
     end
 
     it "is set to `false` when the #assign_at time changes" do
+      @assignment.due_at = 1.day.ago
+      @assignment.peer_reviews_assigned = true
+      @assignment.save!
       @assignment.assign_peer_reviews
       @assignment.peer_reviews_assign_at = 1.day.from_now
+      @assignment.save!
+      expect(@assignment.peer_reviews_assigned).to be false
+    end
+
+    it "is set to 'false' when the due_date passes even though peer_reviews_assign_at did not change" do
+      @assignment.due_at = 1.day.from_now
+      @assignment.peer_reviews_assigned = true
+      @assignment.save!
+      @assignment.due_at = 1.day.ago
+      @assignment.save!
+      expect(@assignment.peer_reviews_assigned).to be false
+    end
+
+    it "is set to 'false' when the due_date passes with initial peer_reviews_assigned as false" do
+      @assignment.due_at = 1.day.from_now
+      @assignment.peer_reviews_assigned = false
+      @assignment.save!
+      @assignment.due_at = 1.day.ago
       @assignment.save!
       expect(@assignment.peer_reviews_assigned).to be false
     end
@@ -4795,6 +4835,7 @@ describe Assignment do
       end
 
       it "disabling intra group peer review shouldn't gum things up if some people don't have a group" do
+        srand(1) # this isn't really necessary but given the random nature i wanted to make it fail consistently without the code fix
         # i.e. people with no group shouldn't be considered by the selection algorithm to be in the same group
         @submissions = []
         gc = @course.group_categories.create! name: "Groupy McGroupface"
@@ -4812,7 +4853,7 @@ describe Assignment do
         end
 
         @a.peer_review_count = 2
-        srand(1) # this isn't really necessary but given the random nature i wanted to make it fail consistently without the code fix
+
         res = @a.assign_peer_reviews
         expect(res.group_by(&:user_id).values.map(&:count).uniq).to eq [2] # everybody should get 2 reviews
       end
@@ -5269,6 +5310,13 @@ describe Assignment do
         @assignment.submission_types = "online_quiz"
         @assignment.save!
         expect(@assignment.grants_right?(@student, :attach_submission_comment_files)).to be true
+      end
+
+      it "is false when user is student in a limited access account" do
+        @course.account.root_account.enable_feature!(:allow_limited_access_for_students)
+        @course.account.settings[:enable_limited_access_for_students] = true
+        @course.account.save!
+        expect(@assignment.grants_right?(@student, :attach_submission_comment_files)).to be false
       end
     end
 
@@ -9228,7 +9276,7 @@ describe Assignment do
       )
     end
 
-    it "returns false when the course does not allow speed grader" do
+    it "returns false when the course does not allow SpeedGrader" do
       expect(@assignment.context).to receive(:allows_speed_grader?).and_return false
       expect(@assignment.can_view_speed_grader?(@teacher)).to be false
     end
@@ -9240,7 +9288,7 @@ describe Assignment do
       expect(@assignment.can_view_speed_grader?(@teacher)).to be false
     end
 
-    it "returns true when the course allows speed grader and user can manage grades" do
+    it "returns true when the course allows SpeedGrader and user can manage grades" do
       expect(@assignment.context).to receive(:allows_speed_grader?).and_return true
       expect(@assignment.can_view_speed_grader?(@teacher)).to be true
     end
@@ -9436,7 +9484,7 @@ describe Assignment do
 
       describe "refresh unread_count for content participation counts" do
         def student_unread_count_counts
-          @course.reload.content_participation_counts.where(user_id: student1.id, content_type: "Submission").take&.unread_count
+          @course.reload.content_participation_counts.find_by(user_id: student1.id, content_type: "Submission")&.unread_count
         end
 
         context "when posting submissions" do
@@ -11368,8 +11416,10 @@ describe Assignment do
 
   describe "checkpointed assignments" do
     before do
-      @parent = @course.assignments.create!(has_sub_assignments: true)
-      @child = @parent.sub_assignments.create!(context: @course, sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC)
+      @course.root_account.enable_feature!(:discussion_checkpoints)
+      @parent = @course.assignments.create!(has_sub_assignments: true, workflow_state: "published")
+      @first_checkpoint = @parent.sub_assignments.create!(context: @course, sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC)
+      @second_checkpoint = @parent.sub_assignments.create!(context: @course, sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY)
     end
 
     it "does not allow assignments to have parent assignments (only sub assignments can have parent assignments)" do
@@ -11380,11 +11430,30 @@ describe Assignment do
     end
 
     it "excludes soft-deleted child assignments from the sub_assignments association" do
-      expect { @child.destroy }.to change { @parent.sub_assignments.exists? }.from(true).to(false)
+      expect do
+        @first_checkpoint.destroy
+        @second_checkpoint.destroy
+      end.to change { @parent.sub_assignments.count }.from(2).to(0)
     end
 
     it "soft-deletes child assignments when the parent assignment is soft-deleted" do
-      expect { @parent.destroy }.to change { @child.reload.deleted? }.from(false).to(true)
+      expect { @parent.destroy }.to(
+        change { @first_checkpoint.reload.deleted? }.from(false).to(true)
+        .and(change { @second_checkpoint.reload.deleted? }.from(false).to(true))
+      )
+    end
+
+    it "has correct values for is_checkpoints_parent?" do
+      expect(@parent.checkpoints_parent?).to be true
+      expect(@first_checkpoint.checkpoints_parent?).to be false
+    end
+
+    it "will update the sub_assignment workflow_state when parent updates" do
+      expect(@first_checkpoint.reload.workflow_state).to eq "published"
+      expect(@second_checkpoint.reload.workflow_state).to eq "published"
+      @parent.update!(workflow_state: "unpublished")
+      expect(@first_checkpoint.reload.workflow_state).to eq "unpublished"
+      expect(@second_checkpoint.reload.workflow_state).to eq "unpublished"
     end
   end
 
@@ -11668,6 +11737,91 @@ describe Assignment do
         assignments = []
         Assignment.fetch_indirect_batch(old_tool.id, new_tool.id, [indirect_assignment.id, invalid_assign.id]) { |a| assignments << a }
         expect(assignments).to contain_exactly(indirect_assignment)
+      end
+    end
+  end
+
+  describe "common_cartridge_qti_new_quizzes_import" do
+    subject(:assignment) { Assignment.new }
+
+    describe ".ready_to_migrate_to_quiz_next?" do
+      it "returns false when .settings is nil" do
+        expect(subject.settings).to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_falsey
+      end
+
+      it "returns false when .settings is {}" do
+        subject.settings = {}
+        expect(subject.settings).to eq({})
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_falsey
+      end
+
+      it "returns true when .settings contains the migrate_to_quizzes_next" do
+        subject.settings = { "common_cartridge_import" => { "migrate_to_quizzes_next" => true } }
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_truthy
+      end
+    end
+
+    describe ".mark_as_ready_to_migrate_to_quiz_next" do
+      it "generates migrate_to_quizzes_next when .settings is nil" do
+        expect(subject.settings).to be_nil
+        subject.mark_as_ready_to_migrate_to_quiz_next
+        expect(subject.settings).not_to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_truthy
+      end
+
+      it "generates migrate_to_quizzes_next when .settings is {}" do
+        subject.settings = {}
+        expect(subject.settings).not_to be_nil
+        subject.mark_as_ready_to_migrate_to_quiz_next
+        expect(subject.settings).not_to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_truthy
+      end
+
+      it "generates migrate_to_quizzes_next when .settings is populated" do
+        subject.settings = { "another" => 123 }
+        expect(subject.settings).not_to be_nil
+        subject.mark_as_ready_to_migrate_to_quiz_next
+        expect(subject.settings).not_to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_truthy
+        expect(subject.settings).to eq({ "another" => 123, "common_cartridge_import" => { "migrate_to_quizzes_next" => true } })
+      end
+    end
+
+    describe ".unmark_as_ready_to_migrate_to_quiz_next" do
+      it "leaves .settings as nil .settings is nil" do
+        expect(subject.settings).to be_nil
+        subject.unmark_as_ready_to_migrate_to_quiz_next
+        expect(subject.settings).to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_falsey
+      end
+
+      it "leaves .settings as it is when .settings is {}" do
+        subject.settings = {}
+        expect(subject.settings).not_to be_nil
+        subject.unmark_as_ready_to_migrate_to_quiz_next
+        expect(subject.settings).not_to be_nil
+        expect(subject.settings).to eq({})
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_falsey
+      end
+
+      it "leaves .settings as it is when .settings is populated" do
+        subject.settings = { "another" => 123 }
+        expect(subject.settings).not_to be_nil
+        subject.unmark_as_ready_to_migrate_to_quiz_next
+        expect(subject.settings).not_to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_falsey
+        expect(subject.settings).to eq({ "another" => 123 })
+      end
+
+      it "preserves other elements in .settings as it is when .settings is populated and contains migrate_to_quizzes_next" do
+        subject.settings = { "another" => 123, "common_cartridge_import" => { "migrate_to_quizzes_next" => true } }
+        expect(subject.settings).not_to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_truthy
+        subject.unmark_as_ready_to_migrate_to_quiz_next
+        expect(subject.settings).not_to be_nil
+        expect(subject.ready_to_migrate_to_quiz_next?).to be_falsey
+        expect(subject.settings).to eq({ "another" => 123 })
       end
     end
   end

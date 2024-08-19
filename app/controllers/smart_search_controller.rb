@@ -89,6 +89,12 @@ class SmartSearchController < ApplicationController
       results: []
     }
 
+    ready, progress = SmartSearch.check_course(@context)
+    unless ready
+      response[:status] = "index_incomplete"
+      response[:indexing_progress] = progress
+    end
+
     if params[:q].present?
       scope = SmartSearch.perform_search(@context, @current_user, params[:q], Array(params[:filter]))
       items = Api.paginate(scope, self, api_v1_course_smart_search_query_url(@context))
@@ -117,9 +123,18 @@ class SmartSearchController < ApplicationController
 
     set_active_tab("search")
     @show_left_side = true
-    add_crumb(t("#crumbs.search", "Search"), named_context_url(@context, :course_search_url)) unless @skip_crumb
+    add_crumb(@context.name, named_context_url(@context, :course_url)) unless @skip_crumb
+    add_crumb(t("#crumbs.search", "Smart Search"), named_context_url(@context, :course_search_url)) unless @skip_crumb
     js_env({
              COURSE_ID: @context.id.to_s
            })
+  end
+
+  def index_status
+    @context = Course.find(params[:course_id])
+    return render_unauthorized_action unless SmartSearch.smart_search_available?(@context)
+
+    ready, progress = SmartSearch.check_course(@context)
+    render json: { status: (ready ? "indexed" : "indexing"), progress: }
   end
 end

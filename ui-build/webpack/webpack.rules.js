@@ -139,6 +139,19 @@ exports.swc = [
         env: {
           targets: browserTargets,
         },
+        // Our coverage plugin gets really upset about the transform field, even
+        // if it's just react: {development: false, refresh: false}, so we only
+        // include it in development mode when crystalball is disabled.
+        ...(process.env.NODE_ENV === 'development' && !isCrystalballEnabled
+          ? {
+              transform: {
+                react: {
+                  development: process.env.NODE_ENV === 'development',
+                  refresh: process.env.NODE_ENV === 'development',
+                },
+              },
+            }
+          : {}),
       },
     },
   },
@@ -169,12 +182,7 @@ exports.emberHandlebars = {
 // i.e. process.env.CRYSTALBALL_MAP === '1'
 exports.istanbul = {
   test: /\.(js|jsx|ts|tsx)$/,
-  include: [
-    resolve(canvasDir, 'ui'),
-    resolve(canvasDir, 'spec/javascripts/jsx'),
-    resolve(canvasDir, 'spec/coffeescripts'),
-    ...globPlugins('app/{jsx,coffeescripts}/'),
-  ],
+  include: [resolve(canvasDir, 'ui'), ...globPlugins('app/{jsx,coffeescripts}/')],
   exclude: [/test\//, /spec/],
   use: {
     loader: 'coverage-istanbul-loader',

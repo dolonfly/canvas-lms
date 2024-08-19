@@ -48,6 +48,7 @@ class ContentExport < ActiveRecord::Base
   COMMON_CARTRIDGE = "common_cartridge"
   COURSE_COPY = "course_copy"
   MASTER_COURSE_COPY = "master_course_copy"
+  COURSE_TEMPLATE_COPY = "course_template_copy"
   QTI = "qti"
   USER_DATA = "user_data"
   ZIP = "zip"
@@ -393,11 +394,15 @@ class ContentExport < ActiveRecord::Base
   end
 
   def for_course_copy?
-    export_type == COURSE_COPY || export_type == MASTER_COURSE_COPY
+    export_type == COURSE_COPY || export_type == MASTER_COURSE_COPY || export_type == COURSE_TEMPLATE_COPY
   end
 
   def for_master_migration?
     export_type == MASTER_COURSE_COPY
+  end
+
+  def for_course_template?
+    export_type == COURSE_TEMPLATE_COPY
   end
 
   def master_migration
@@ -602,14 +607,23 @@ class ContentExport < ActiveRecord::Base
     end
   end
 
+  def prepare_new_quizzes_export
+    set_contains_new_quizzes_settings
+    mark_waiting_for_external_tool if contains_new_quizzes_setting?
+  end
+
   def set_contains_new_quizzes_settings
-    settings[:contains_new_quizzes] = contains_new_quizzes?
+    settings[:contains_new_quizzes] = !selective_export? && contains_new_quizzes?
   end
 
   def contains_new_quizzes?
     return false unless new_quizzes_common_cartridge_enabled?
 
     context.assignments.active.type_quiz_lti.count.positive?
+  end
+
+  def contains_new_quizzes_setting?
+    settings[:contains_new_quizzes] == true
   end
 
   def include_new_quizzes_in_export?
@@ -644,7 +658,7 @@ class ContentExport < ActiveRecord::Base
   scope :without_epub, -> { eager_load(:epub_export).where(epub_exports: { id: nil }) }
   scope :expired, lambda {
     if ContentExport.expire?
-      where("created_at < ?", ContentExport.expire_days.days.ago)
+      where(created_at: ...ContentExport.expire_days.days.ago)
     else
       none
     end
@@ -676,6 +690,6 @@ class ContentExport < ActiveRecord::Base
   end
 
   def new_quizzes_common_cartridge_enabled?
-    context_type == "Course" && NewQuizzesFeaturesHelper.new_quizzes_common_cartridge_enabled?(context)
+    context_type == "Course" && NewQuizzesFeaturesHelper.new_quizzes_common_cartridge_enabled?
   end
 end

@@ -197,12 +197,13 @@
 #           "type": "string"
 #         },
 #         "discussion_type": {
-#           "description": "The type of discussion. Values are 'side_comment', for discussions that only allow one level of nested comments, and 'threaded' for fully threaded discussions.",
+#           "description": "The type of discussion. Values are 'side_comment' or 'not_threaded', for discussions that only allow one level of nested comments, and 'threaded' for fully threaded discussions.",
 #           "example": "side_comment",
 #           "type": "string",
 #           "allowableValues": {
 #             "values": [
 #               "side_comment",
+#               "not_threaded",
 #               "threaded"
 #             ]
 #           }
@@ -353,7 +354,7 @@ class DiscussionTopicsController < ApplicationController
     end
 
     if params[:only_announcements] && !@context.grants_any_right?(@current_user, :manage, :read_course_content)
-      scope = scope.active.where("delayed_post_at IS NULL OR delayed_post_at<?", Time.now.utc)
+      scope = scope.active.where("((unlock_at IS NULL AND delayed_post_at IS NULL) OR (unlock_at<? OR delayed_post_at<?)) AND ( lock_at IS NULL OR lock_at>?)", Time.now.utc, Time.now.utc, Time.now.utc)
     end
 
     per_page = params[:per_page] || 100
@@ -428,7 +429,7 @@ class DiscussionTopicsController < ApplicationController
             read_as_admin: @context.grants_right?(@current_user, session, :read_as_admin),
           },
           discussion_topic_menu_tools: external_tools_display_hashes(:discussion_topic_menu),
-          student_reporting_enabled: @context.feature_enabled?(:react_discussions_post),
+          student_reporting_enabled: @domain_root_account.feature_enabled?(:discussions_reporting),
           discussion_anonymity_enabled: @context.feature_enabled?(:react_discussions_post),
           discussion_topic_index_menu_tools: external_tools_display_hashes(:discussion_topic_index_menu),
           show_additional_speed_grader_links: Account.site_admin.feature_enabled?(:additional_speedgrader_links),
@@ -527,7 +528,9 @@ class DiscussionTopicsController < ApplicationController
         CAN_SET_GROUP: can_set_group_category,
         CAN_EDIT_GRADES: can_do(@context, @current_user, :manage_grades),
         # if not a course content manager, or if topic is graded, do not show add to todo list checkbox
-        CAN_MANAGE_CONTENT: @context.grants_any_right?(@current_user, session, :manage_content, :manage_course_content_add)
+        CAN_MANAGE_CONTENT: @context.grants_any_right?(@current_user, session, :manage_content, :manage_course_content_add),
+        CAN_MANAGE_ASSIGN_TO_GRADED: @context.discussion_topics.temp_record(assignment_id: 0).grants_right?(@current_user, session, @topic.new_record? ? :create_assign_to : :manage_assign_to),
+        CAN_MANAGE_ASSIGN_TO_UNGRADED: @context.discussion_topics.temp_record(assignment_id: nil).grants_right?(@current_user, session, @topic.new_record? ? :create_assign_to : :manage_assign_to),
       }
     }
 
@@ -557,6 +560,7 @@ class DiscussionTopicsController < ApplicationController
         override_dates: false,
         include_usage_rights:
       )
+      hash[:ATTRIBUTES][:has_threaded_replies] = @topic.discussion_entries.where.not(parent_id: nil).where.not(workflow_state: "deleted").exists?
     end
     (hash[:ATTRIBUTES] ||= {})[:is_announcement] = @topic.is_announcement
     hash[:ATTRIBUTES][:can_group] = @topic.can_group?
@@ -599,6 +603,7 @@ class DiscussionTopicsController < ApplicationController
       end
 
     js_hash = {
+      ASSIGNMENT_ID: @topic.assignment_id,
       CONTEXT_ACTION_SOURCE: :discussion_topic,
       CONTEXT_ID: @context.id,
       DISCUSSION_TOPIC: hash,
@@ -619,7 +624,10 @@ class DiscussionTopicsController < ApplicationController
       allow_student_anonymous_discussion_topics: @context.allow_student_anonymous_discussion_topics,
       context_is_not_group: !@context.is_a?(Group),
       GRADING_SCHEME_UPDATES_ENABLED: Account.site_admin.feature_enabled?(:grading_scheme_updates),
-      DISCUSSION_CHECKPOINTS_ENABLED: @context.root_account.feature_enabled?(:discussion_checkpoints)
+      ARCHIVED_GRADING_SCHEMES_ENABLED: Account.site_admin.feature_enabled?(:archived_grading_schemes),
+      DISCUSSION_CHECKPOINTS_ENABLED: @context.root_account.feature_enabled?(:discussion_checkpoints),
+      ASSIGNMENT_EDIT_PLACEMENT_NOT_ON_ANNOUNCEMENTS: Account.site_admin.feature_enabled?(:assignment_edit_placement_not_on_announcements),
+      ANNOUNCEMENTS_COMMENTS_DISABLED: Announcement.new(context: @context).comments_disabled?,
     }
 
     post_to_sis = Assignment.sis_grade_export_enabled?(@context)
@@ -693,7 +701,7 @@ class DiscussionTopicsController < ApplicationController
       @page_title = topic_page_title(@topic)
 
       js_bundle :discussion_topic_edit_v2
-      css_bundle :discussions_index, :learning_outcomes
+      css_bundle :discussions_index, :learning_outcomes, :conditional_release_editor
       render html: "", layout: (params[:embed] == "true") ? "mobile_embed" : true
     else
       render :edit, layout: (params[:embed] == "true") ? "mobile_embed" : true
@@ -758,8 +766,7 @@ class DiscussionTopicsController < ApplicationController
         current_page: 0
       }
       env_hash[:context_rubric_associations_url] = context_url(@context, :context_rubric_associations_url) rescue nil
-      if params[:entry_id]
-        entry = @topic.discussion_entries.find(params[:entry_id])
+      if params[:entry_id] && (entry = @topic.discussion_entries.find_by(id: params[:entry_id]))
         env_hash[:discussions_deep_link] = {
           root_entry_id: entry.root_entry_id,
           parent_id: entry.parent_id,
@@ -828,6 +835,8 @@ class DiscussionTopicsController < ApplicationController
       edit_url += "?embed=true" if params[:embed] == "true"
       js_env({
                course_id: params[:course_id] || @context.course&.id,
+               context_type: @topic.context_type,
+               context_id: @context.id,
                EDIT_URL: edit_url,
                PEER_REVIEWS_URL: @topic.assignment ? context_url(@topic.assignment.context, :context_assignment_peer_reviews_url, @topic.assignment.id) : nil,
                discussion_topic_id: params[:id],
@@ -837,7 +846,11 @@ class DiscussionTopicsController < ApplicationController
                discussion_grading_view: Account.site_admin.feature_enabled?(:discussion_grading_view),
                draft_discussions: Account.site_admin.feature_enabled?(:draft_discussions),
                discussion_entry_version_history: Account.site_admin.feature_enabled?(:discussion_entry_version_history),
+               discussion_translation_available: Translation.available?(@domain_root_account, :translation), # Is translation enabled on the course.
+               discussion_translation_languages: Translation.available?(@domain_root_account, :translation) ? Translation.translated_languages(@current_user) : [],
                discussion_anonymity_enabled: @context.feature_enabled?(:react_discussions_post),
+               user_can_summarize: @topic.user_can_summarize?(@current_user),
+               discussion_summary_enabled: @topic.summary_enabled,
                should_show_deeply_nested_alert: @current_user&.should_show_deeply_nested_alert?,
                # although there is a permissions object in DiscussionEntry type, it's only accessible if a discussion entry
                # is being replied to. We need this env var so that replying to the topic can use this
@@ -1030,8 +1043,8 @@ class DiscussionTopicsController < ApplicationController
   #
   # @argument message [String]
   #
-  # @argument discussion_type [String, "side_comment"|"threaded"]
-  #   The type of discussion. Defaults to side_comment if not value is given. Accepted values are 'side_comment', for discussions that only allow one level of nested comments, and 'threaded' for fully threaded discussions.
+  # @argument discussion_type [String, "side_comment"|"threaded"|"not_threaded"]
+  #   The type of discussion. Defaults to side_comment or not_threaded if not value is given. Accepted values are 'side_comment', 'not_threaded' for discussions that only allow one level of nested comments, and 'threaded' for fully threaded discussions.
   #
   # @argument published [Boolean]
   #   Whether this topic is published (true) or draft state (false). Only
@@ -1128,8 +1141,8 @@ class DiscussionTopicsController < ApplicationController
   #
   # @argument message [String]
   #
-  # @argument discussion_type [String, "side_comment"|"threaded"]
-  #   The type of discussion. Defaults to side_comment if not value is given. Accepted values are 'side_comment', for discussions that only allow one level of nested comments, and 'threaded' for fully threaded discussions.
+  # @argument discussion_type [String, "side_comment"|"threaded"|"not_threaded"]
+  #   The type of discussion. Defaults to side_comment or not_threaded if not value is given. Accepted values are 'side_comment', 'not_threaded' for discussions that only allow one level of nested comments, and 'threaded' for fully threaded discussions.
   #
   # @argument published [Boolean]
   #   Whether this topic is published (true) or draft state (false). Only
@@ -1391,6 +1404,19 @@ class DiscussionTopicsController < ApplicationController
       end
     end
 
+    attachment = params[:attachment]
+
+    if is_new && attachment
+      get_quota(@context)
+      if attachment.size + @quota_used > @quota
+        error = t "#application.errors.quota_exceeded_course", "Course storage quota exceeded"
+        respond_to do |format|
+          format.json { render json: { errors: { base: error } }, status: :bad_request }
+        end
+        return
+      end
+    end
+
     # Groups do not have settings like courses do, so only run this for Course contexts
     if is_new &&
        !params[:anonymous_state].nil? &&
@@ -1417,15 +1443,16 @@ class DiscussionTopicsController < ApplicationController
       end
     else
       @topic = @context.send(model_type).active.find(params[:id] || params[:topic_id])
-      if params.include?(:anonymous_state) && @topic.anonymous_state != params[:anonymous_state]
-        @errors[:anonymous_state] = t(:error_anonymous_state_unauthorized_update,
-                                      "You are not able to update the anonymous state of a discussion")
+
+      prior_version = DiscussionTopic.find(@topic.id)
+      if params.include?(:anonymous_state) && prior_version.anonymous_state != params[:anonymous_state] && prior_version.discussion_subentry_count > 0
+        @errors[:anonymous_state] = { "message" => t(:error_anonymous_state_unauthorized_update,
+                                                     "Anonymity settings are locked due to a posted reply") }
       end
       if ANONYMOUS_STATES.include?(@topic.anonymous_state) && params[:group_category_id]
         @errors[:anonymous_state] = t(:error_anonymous_state_groups_update,
                                       "Group discussions cannot be anonymous.")
       end
-      prior_version = DiscussionTopic.find(@topic.id)
       verify_specific_section_visibilities # Make sure user actually has perms to modify this
     end
 
@@ -1634,7 +1661,7 @@ class DiscussionTopicsController < ApplicationController
     end
     @topic.lock_at = discussion_topic_hash[:lock_at] if params.key? :lock_at
 
-    if @topic.delayed_post_at_changed? || @topic.lock_at_changed?
+    if @topic.unlock_at_changed? || @topic.delayed_post_at_changed? || @topic.lock_at_changed?
       @topic.workflow_state = @topic.should_not_post_yet ? "post_delayed" : "active"
       if @topic.should_lock_yet
         @topic.lock(without_save: true)

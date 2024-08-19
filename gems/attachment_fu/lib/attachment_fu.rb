@@ -365,10 +365,13 @@ module AttachmentFu # :nodoc:
         # a new unique filename for this file so any children of this attachment
         # will still be able to get at the original.
         unless new_record?
+          # if the file doesn't have a filename for some reason, it often pulls from the root attachment
+          # but if you remove the root attachment, you lose the filename, so we're saving it first
+          orig_filename = filename
           self.root_attachment = nil
           self.root_attachment_id = nil
           self.workflow_state = nil
-          self.filename = filename.sub(/\A\d+_\d+__/, "")
+          self.filename = orig_filename.sub(/\A\d+_\d+__/, "")
           self.filename = "#{Time.now.to_i}_#{rand(999)}__#{filename}" if filename
         end
         unless attachment_options[:skip_sis]
@@ -426,14 +429,14 @@ module AttachmentFu # :nodoc:
     def detect_mimetype(file_data)
       if file_data.respond_to?(:content_type) && (file_data.content_type.blank? || file_data.content_type.strip == "application/octet-stream")
         res = nil
-        res ||= File.mime_type?(file_data.original_filename) if file_data.respond_to?(:original_filename)
-        res ||= File.mime_type?(file_data)
+        res ||= File.mime_type(file_data.original_filename) if file_data.respond_to?(:original_filename)
+        res ||= File.mime_type(file_data)
         res ||= "text/plain" unless file_data.respond_to?(:path)
         res || "unknown/unknown"
       elsif file_data.respond_to?(:content_type)
         file_data.content_type
       else
-        File.mime_type?(file_data)
+        File.mime_type(file_data)
       end
     end
 

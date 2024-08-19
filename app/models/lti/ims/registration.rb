@@ -18,32 +18,36 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 
 class Lti::IMS::Registration < ApplicationRecord
-  CANVAS_EXTENSION_LABEL = "canvas.instructure.com"
+  include Canvas::SoftDeletable
+  extend RootAccountResolver
   self.table_name = "lti_ims_registrations"
 
   REQUIRED_GRANT_TYPES = ["client_credentials", "implicit"].freeze
   REQUIRED_RESPONSE_TYPES = ["id_token"].freeze
   REQUIRED_APPLICATION_TYPE = "web"
   REQUIRED_TOKEN_ENDPOINT_AUTH_METHOD = "private_key_jwt"
-  COURSE_NAV_DEFAULT_ENABLED_EXTENSION = "https://canvas.instructure.com/lti/course_navigation/default_enabled"
-  PLACEMENT_VISIBILITY_EXTENSION = "https://canvas.instructure.com/lti/visibility"
-
   PLACEMENT_VISIBILITY_OPTIONS = %(admins members public)
 
-  validates :application_type,
-            :grant_types,
-            :response_types,
-            :redirect_uris,
+  CANVAS_EXTENSION_LABEL = "canvas.instructure.com"
+  CANVAS_EXTENSION_PREFIX = "https://#{CANVAS_EXTENSION_LABEL}/lti".freeze
+  COURSE_NAV_DEFAULT_ENABLED_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/course_navigation/default_enabled".freeze
+  PLACEMENT_VISIBILITY_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/visibility".freeze
+  DISPLAY_TYPE_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/display_type".freeze
+  PRIVACY_LEVEL_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/privacy_level".freeze
+  LAUNCH_WIDTH_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/launch_width".freeze
+  LAUNCH_HEIGHT_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/launch_height".freeze
+  TOOL_ID_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/tool_id".freeze
+
+  self.ignored_columns += %i[application_type grant_types response_types token_endpoint_auth_method]
+
+  validates :redirect_uris,
             :initiate_login_uri,
             :client_name,
             :jwks_uri,
-            :token_endpoint_auth_method,
             :lti_tool_configuration,
-            :developer_key,
             presence: true
 
-  validate :required_values_are_present,
-           :redirect_uris_contains_uris,
+  validate :redirect_uris_contains_uris,
            :lti_tool_configuration_is_valid,
            :scopes_are_valid
 
@@ -56,7 +60,10 @@ class Lti::IMS::Registration < ApplicationRecord
             format: { with: URI::DEFAULT_PARSER.make_regexp(["http", "https"]) },
             allow_blank: true
 
-  belongs_to :developer_key, inverse_of: :lti_registration
+  belongs_to :developer_key, inverse_of: :ims_registration, optional: false
+  belongs_to :lti_registration, inverse_of: :ims_registration, optional: true, class_name: "Lti::Registration"
+
+  resolves_root_account through: :developer_key
 
   def settings
     canvas_configuration
@@ -66,7 +73,7 @@ class Lti::IMS::Registration < ApplicationRecord
     canvas_configuration
   end
 
-  # A Registration (this class) denotes a registration of a tool with a platform. This
+  # An IMS::Registration (this class) denotes a registration of a tool with a platform. This
   # follows the IMS Dynamic Registration specification. A "Tool Configuration" is
   # Canvas' proprietary representation of a tool's configuration, which predates
   # the dynamic registration specification. This method converts an ims registration
@@ -74,13 +81,9 @@ class Lti::IMS::Registration < ApplicationRecord
   def canvas_configuration(apply_overlay: true)
     config = lti_tool_configuration
 
-    overlay = registration_overlay
-
     {
       title: client_name,
-      scopes: scopes.reject do |s|
-        apply_overlay ? (overlay["disabledScopes"]&.include?(s) || false) : false
-      end,
+      scopes: overlaid_scopes(apply_overlay:),
       public_jwk_url: jwks_uri,
       description: config["description"],
       custom_fields: config["custom_parameters"],
@@ -91,15 +94,38 @@ class Lti::IMS::Registration < ApplicationRecord
       extensions: [{
         domain: config["domain"],
         platform: "canvas.instructure.com",
-        tool_id: client_name,
+        tool_id:,
         privacy_level:,
         settings: {
           text: client_name,
-          icon_url: config["icon_uri"],
+          icon_url: logo_uri,
           platform: "canvas.instructure.com",
           placements: placements(apply_overlay:)
         }
       }]
+    }.with_indifferent_access
+  end
+
+  # This method converts an IMS Registration into a "Tool Configuration V2",
+  # the flattened and standardized version of the Canvas proprietary configuration
+  # format meant for internal use with LTI Registrations.
+  def registration_configuration
+    config = lti_tool_configuration
+
+    {
+      name: client_name,
+      description: config["description"],
+      domain: config["domain"],
+      custom_fields: config["custom_parameters"],
+      target_link_uri: config["target_link_uri"],
+      privacy_level:,
+      icon_url: logo_uri,
+      oidc_initiation_url: initiate_login_uri,
+      redirect_uris:,
+      public_jwk_url: jwks_uri,
+      scopes: overlaid_scopes,
+      placements:,
+      tool_id:
     }.with_indifferent_access
   end
 
@@ -108,13 +134,19 @@ class Lti::IMS::Registration < ApplicationRecord
   end
 
   def configuration_to_cet_settings_map
-    { url: configuration["target_link_uri"], lti_version: "1.3" }
+    { url: configuration["target_link_uri"], lti_version: "1.3", unified_tool_id: }
   end
 
   def privacy_level
     claims = lti_tool_configuration["claims"] || []
     infered_privacy_level = infer_privacy_level_from(claims)
-    registration_overlay["privacy_level"] || lti_tool_configuration["https://#{CANVAS_EXTENSION_LABEL}/lti/privacy_level"] || infered_privacy_level
+    registration_overlay["privacy_level"] || lti_tool_configuration[PRIVACY_LEVEL_EXTENSION] || infered_privacy_level
+  end
+
+  def overlaid_scopes(apply_overlay: true)
+    return scopes unless apply_overlay
+
+    scopes.reject { |s| registration_overlay["disabledScopes"]&.include?(s) || false }
   end
 
   def update_external_tools?
@@ -147,18 +179,26 @@ class Lti::IMS::Registration < ApplicationRecord
       return []
     end
 
-    display_type = message["https://#{CANVAS_EXTENSION_LABEL}/lti/display_type"]
+    display_type = message[DISPLAY_TYPE_EXTENSION]
     window_target = nil
     if display_type == "new_window"
       display_type = "default"
       window_target = "_blank"
     end
 
-    placement_overlay = lookup_placement_overlay(placement_type) || {}
+    placement_overlay = lookup_placement_overlay(placement_name) || {}
 
     text = apply_overlay ? (placement_overlay["label"] || message["label"]) : message["label"]
     icon_url = apply_overlay ? (placement_overlay["icon_url"] || message["icon_uri"]) : message["icon_uri"]
     enabled = apply_overlay ? !placement_disabled?(placement_type) : true
+    default = if apply_overlay && placement_name == "course_navigation"
+                # The placement overlay stores everything in the Canvas proprietary format, in which
+                # default is either 'enabled' or 'disabled', so we can fetch the
+                # default value directly from the overlay
+                placement_overlay["default"] || fetch_default_enabled_setting(message, placement_name)
+              else
+                fetch_default_enabled_setting(message, placement_name)
+              end
 
     [
       {
@@ -171,10 +211,7 @@ class Lti::IMS::Registration < ApplicationRecord
         custom_fields: message["custom_parameters"],
         display_type:,
         windowTarget: window_target,
-        # This supports a very old parameter (hence the obtuse name) that only applies to the course navigation placement. It hides the
-        # tool from the course navigation by default. Teachers can still add the tool to the course navigation using the course
-        # settings page if they'd like.
-        default: (message[COURSE_NAV_DEFAULT_ENABLED_EXTENSION] == false && placement_name == "course_navigation") ? "disabled" : nil,
+        default:,
         visibility: placement_visibility(message),
       }.merge(width_and_height_settings(message, placement_name)).compact
     ]
@@ -187,6 +224,14 @@ class Lti::IMS::Registration < ApplicationRecord
     else
       nil
     end
+  end
+
+  # This supports a very old parameter (hence the obtuse name) that *only* applies to the course navigation placement. It hides the
+  # tool from the course navigation by default. Teachers can still add the tool to the course navigation using the course
+  # settings page if they'd like. The IMS Message stores this value as a boolean, but the Canvas config expects a string
+  # value of "enabled" or "disabled" (nil/not present is equivalent to "enabled").
+  def fetch_default_enabled_setting(message, placement_name)
+    (message[COURSE_NAV_DEFAULT_ENABLED_EXTENSION] == false && placement_name == "course_navigation") ? "disabled" : nil
   end
 
   def lookup_placement_overlay(placement_type)
@@ -232,18 +277,19 @@ class Lti::IMS::Registration < ApplicationRecord
   def as_json(options = {})
     {
       id: global_id.to_s,
-      developer_key_id: developer_key.global_id.to_s,
+      lti_registration_id: Shard.global_id_for(lti_registration_id).to_s,
+      developer_key_id: Shard.global_id_for(developer_key_id).to_s,
       overlay: registration_overlay,
       lti_tool_configuration:,
-      application_type:,
-      grant_types:,
-      response_types:,
+      application_type: REQUIRED_APPLICATION_TYPE,
+      grant_types: REQUIRED_GRANT_TYPES,
+      response_types: REQUIRED_RESPONSE_TYPES,
       redirect_uris:,
       initiate_login_uri:,
       client_name:,
       jwks_uri:,
       logo_uri:,
-      token_endpoint_auth_method:,
+      token_endpoint_auth_method: REQUIRED_TOKEN_ENDPOINT_AUTH_METHOD,
       contacts:,
       client_uri:,
       policy_uri:,
@@ -258,23 +304,6 @@ class Lti::IMS::Registration < ApplicationRecord
   end
 
   private
-
-  def required_values_are_present
-    if (REQUIRED_GRANT_TYPES - grant_types).present?
-      errors.add(:grant_types, "Must include #{REQUIRED_GRANT_TYPES.join(", ")}")
-    end
-    if (REQUIRED_RESPONSE_TYPES - response_types).present?
-      errors.add(:response_types, "Must include #{REQUIRED_RESPONSE_TYPES.join(", ")}")
-    end
-
-    if token_endpoint_auth_method != REQUIRED_TOKEN_ENDPOINT_AUTH_METHOD
-      errors.add(:token_endpoint_auth_method, "Must be 'private_key_jwt'")
-    end
-
-    if application_type != REQUIRED_APPLICATION_TYPE
-      errors.add(:application_type, "Must be 'web'")
-    end
-  end
 
   def redirect_uris_contains_uris
     return if redirect_uris.all? { |uri| uri.match? URI::DEFAULT_PARSER.make_regexp(["http", "https"]) }
@@ -309,7 +338,7 @@ class Lti::IMS::Registration < ApplicationRecord
     return "editor_button" if placement == "RichTextEditor"
 
     # Otherwise, remove our URL prefix from the Canvas-specific placements
-    canvas_extension = "https://#{CANVAS_EXTENSION_LABEL}/lti/"
+    canvas_extension = CANVAS_EXTENSION_PREFIX + "/"
     placement.start_with?(canvas_extension) ? placement.sub(canvas_extension, "") : placement
   end
 
@@ -321,8 +350,8 @@ class Lti::IMS::Registration < ApplicationRecord
     keys = ["launch_width", "launch_height"] if uses_launch_width.include?(placement)
 
     values = [
-      message["https://#{CANVAS_EXTENSION_LABEL}/lti/launch_width"]&.to_i,
-      message["https://#{CANVAS_EXTENSION_LABEL}/lti/launch_height"]&.to_i,
+      message[LAUNCH_WIDTH_EXTENSION]&.to_i,
+      message[LAUNCH_HEIGHT_EXTENSION]&.to_i,
     ]
 
     {
@@ -345,5 +374,9 @@ class Lti::IMS::Registration < ApplicationRecord
     else
       "anonymous"
     end
+  end
+
+  def tool_id
+    lti_tool_configuration[TOOL_ID_EXTENSION]
   end
 end

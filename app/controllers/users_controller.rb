@@ -176,6 +176,11 @@
 #           "description": "Optional: The user's bio.",
 #           "example": "I like the Muppets.",
 #           "type": "string"
+#         },
+#         "pronouns": {
+#           "description": "Optional: This field is only returned if pronouns are enabled, and will return the pronouns of the user.",
+#           "example": "he/him",
+#           "type": "string"
 #         }
 #       }
 #     }
@@ -222,6 +227,7 @@ class UsersController < ApplicationController
                                                        masquerade]
   skip_before_action :load_user, only: [:create_self_registered_user]
   before_action :require_self_registration, only: %i[new create create_self_registered_user]
+  before_action :check_limited_access_for_students, only: %i[create_file set_custom_color]
 
   def grades
     @user = User.where(id: params[:user_id]).first if params[:user_id].present?
@@ -277,8 +283,11 @@ class UsersController < ApplicationController
     else
       grade_data[:grade] = enrollment.effective_current_score(opts)
     end
+    grading_standard = enrollment.course.grading_standard_or_default
     grade_data[:restrict_quantitative_data] = enrollment.course.restrict_quantitative_data?(@current_user)
-    grade_data[:grading_scheme] = enrollment.course.grading_standard_or_default.data
+    grade_data[:grading_scheme] = grading_standard.data
+    grade_data[:points_based_grading_scheme] = grading_standard.points_based?
+    grade_data[:scaling_factor] = grading_standard.scaling_factor
 
     render json: grade_data
   end
@@ -380,17 +389,17 @@ class UsersController < ApplicationController
         )
         oauth_request.destroy
 
-        flash[:notice] = t("twitter_added", "Twitter access authorized!")
+        flash[:notice] = t("twitter_added", "X.com access authorized!")
       rescue => e
         Canvas::Errors.capture_exception(:oauth, e)
-        flash[:error] = t("twitter_fail_whale", "Twitter authorization failed. Please try again")
+        flash[:error] = t("twitter_fail_whale", "X.com authorization failed. Please try again")
       end
       return_to(oauth_request.return_url, user_profile_url(@current_user))
     end
   end
 
   # @API List users in account
-  # A paginated list of of users associated with this account.
+  # A paginated list of users associated with this account.
   #
   # @argument search_term [String]
   #   The partial name or full ID of the users to match and return in the
@@ -1209,6 +1218,7 @@ class UsersController < ApplicationController
       planner_overrides = includes.include?("planner_overrides")
       include_course = includes.include?("course")
       ActiveRecord::Associations.preload(assignments, :context) if include_course
+      DatesOverridable.preload_override_data_for_objects(assignments)
 
       json = assignments.map do |as|
         assmt_json = assignment_json(as, user, session, include_planner_override: planner_overrides)
@@ -1396,13 +1406,36 @@ class UsersController < ApplicationController
       respond_to do |format|
         format.html do
           @body_classes << "full-width"
-          js_env(
-            CONTEXT_USER_DISPLAY_NAME: @user.short_name,
-            USER_ID: @user.id,
-            PERMISSIONS: {
-              can_manage_sis_pseudonyms: @context_account.root_account.grants_right?(@current_user, :manage_sis)
-            }
-          )
+
+          js_permissions = {
+            can_manage_sis_pseudonyms: @context_account.root_account.grants_right?(@current_user, :manage_sis),
+          }
+          if @context_account.root_account.feature_enabled?(:temporary_enrollments)
+            js_permissions[:can_read_sis] = @context_account.grants_right?(@current_user, session, :read_sis)
+            js_permissions[:can_add_temporary_enrollments] = @context_account.grants_right?(@current_user, session, :temporary_enrollments_add)
+            js_permissions[:can_edit_temporary_enrollments] = @context_account.grants_right?(@current_user, session, :temporary_enrollments_edit)
+            js_permissions[:can_delete_temporary_enrollments] = @context_account.grants_right?(@current_user, session, :temporary_enrollments_delete)
+            js_permissions[:can_view_temporary_enrollments] =
+              @context_account.grants_any_right?(@current_user, session, *RoleOverride::MANAGE_TEMPORARY_ENROLLMENT_PERMISSIONS)
+            if @context_account.root_account.feature_enabled?(:granular_permissions_manage_users)
+              js_permissions[:can_allow_course_admin_actions] = @context_account.grants_right?(@current_user, session, :allow_course_admin_actions)
+              js_permissions[:can_add_ta] = @context_account.grants_right?(@current_user, session, :add_ta_to_course)
+              js_permissions[:can_add_student] = @context_account.grants_right?(@current_user, session, :add_student_to_course)
+              js_permissions[:can_add_teacher] = @context_account.grants_right?(@current_user, session, :add_teacher_to_course)
+              js_permissions[:can_add_designer] = @context_account.grants_right?(@current_user, session, :add_designer_to_course)
+              js_permissions[:can_add_observer] = @context_account.grants_right?(@current_user, session, :add_observer_to_course)
+            else
+              js_permissions[:can_manage_admin_users] = @context_account.grants_right?(@current_user, session, :manage_admin_users)
+            end
+          end
+
+          js_env({
+                   CONTEXT_USER_DISPLAY_NAME: @user.short_name,
+                   USER_ID: @user.id,
+                   COURSE_ROLES: Role.course_role_data_for_account(@context_account, @current_user),
+                   PERMISSIONS: js_permissions,
+                   ROOT_ACCOUNT_ID: @context_account.root_account.id,
+                 })
           render status:
         end
         format.json do
@@ -1518,7 +1551,7 @@ class UsersController < ApplicationController
     @lti_launch.resource_url = @tool.login_or_launch_url(extension_type: placement)
     @lti_launch.link_text = @tool.label_for(placement, I18n.locale)
     @lti_launch.analytics_id = @tool.tool_id
-    Lti::LogService.new(tool: @tool, context: @domain_root_account, user: @current_user, placement:, launch_type: :direct_link).call
+    Lti::LogService.new(tool: @tool, context: @domain_root_account, user: @current_user, session_id: session[:session_id], placement:, launch_type: :direct_link).call
 
     set_active_tab @tool.asset_string
     add_crumb(@current_user.short_name, user_profile_path(@current_user))
@@ -2077,6 +2110,10 @@ class UsersController < ApplicationController
   #   Sets a bio on the user profile. (See {api:ProfileController#settings Get user profile}.)
   #   Profiles must be enabled on the root account.
   #
+  # @argument user[pronunciation] [String]
+  #   Sets name pronunciation on the user profile. (See {api:ProfileController#settings Get user profile}.)
+  #   Profiles and name pronunciation must be enabled on the root account.
+  #
   # @argument user[pronouns] [String]
   #   Sets pronouns on the user profile.
   #   Passing an empty string will empty the user's pronouns
@@ -2123,9 +2160,11 @@ class UsersController < ApplicationController
     if @domain_root_account.enable_profiles?
       managed_attributes << :bio if @user.grants_right?(@current_user, :manage_user_details)
       managed_attributes << :title if @user.grants_right?(@current_user, :rename)
+      managed_attributes << :pronunciation if @domain_root_account.enable_name_pronunciation? && @user.grants_right?(@current_user, :manage_user_details)
     end
 
-    if @domain_root_account.can_change_pronouns? && @user.grants_right?(@current_user, :manage_user_details)
+    can_admin_change_pronouns = @domain_root_account.can_add_pronouns? && @user.grants_right?(@current_user, :manage_user_details)
+    if can_admin_change_pronouns || (@domain_root_account.can_change_pronouns? && @user.grants_right?(@current_user, :change_pronoun))
       managed_attributes << :pronouns
     end
 
@@ -2174,13 +2213,20 @@ class UsersController < ApplicationController
 
     includes = %w[locale avatar_url email time_zone]
     includes << "avatar_state" if @user.grants_right?(@current_user, :manage_user_details)
+
     if (title = user_params.delete(:title))
       @user.profile.title = title
       includes << "title"
     end
+
     if (bio = user_params.delete(:bio))
       @user.profile.bio = bio
       includes << "bio"
+    end
+
+    if (pronunciation = user_params.delete(:pronunciation))
+      @user.profile.pronunciation = pronunciation
+      includes << "pronunciation"
     end
 
     if (pronouns = user_params.delete(:pronouns))
@@ -2263,11 +2309,17 @@ class UsersController < ApplicationController
 
   # @API Log users out of all mobile apps
   #
-  # Permanently expires any active mobile sessions for _all_ users, forcing them to re-authorize.
+  # Permanently expires any active mobile sessions, forcing them to re-authorize.
+  #
+  # The route that takes a user id will expire mobile sessions for that user.
+  # The route that doesn't take a user id will expire mobile sessions for *all* users
+  # in the institution.
+  #
   def expire_mobile_sessions
     return unless authorized_action(@domain_root_account, @current_user, :manage_user_logins)
 
-    AccessToken.delay_if_production.invalidate_mobile_tokens!(@domain_root_account)
+    user = api_find(User, params[:id]) if params.key?(:id)
+    AccessToken.delay_if_production.invalidate_mobile_tokens!(@domain_root_account, user:)
 
     render json: "ok"
   end

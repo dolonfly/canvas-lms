@@ -17,7 +17,7 @@
  */
 
 import React, {useState} from 'react'
-import {useNavigate, useParams} from 'react-router-dom'
+import {useParams} from 'react-router-dom'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import type {Rubric} from '@canvas/rubrics/react/types/rubric'
 import {Table} from '@instructure/ui-table'
@@ -31,11 +31,22 @@ const I18n = useI18nScope('rubrics-list-table')
 const {Head, Row, Cell, ColHeader, Body} = Table
 
 export type RubricTableProps = {
+  canManageRubrics: boolean
   rubrics: Rubric[]
+  onLocationsClick: (rubricId: string) => void
   onPreviewClick: (rubricId: string) => void
+  handleArchiveRubricChange: (rubricId: string) => void
+  active: boolean
 }
 
-export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
+export const RubricTable = ({
+  canManageRubrics,
+  rubrics,
+  handleArchiveRubricChange,
+  active,
+  onLocationsClick,
+  onPreviewClick,
+}: RubricTableProps) => {
   const {accountId, courseId} = useParams()
   const [sortDirection, setSortDirection] = useState<'ascending' | 'descending' | 'none'>('none')
   const [sortedColumn, setSortedColumn] = useState<string>() // Track the column being sorted
@@ -77,7 +88,7 @@ export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
   })
 
   return (
-    <Table caption="Set text-align for columns">
+    <Table caption={I18n.t('Rubrics')}>
       <Head renderSortLabel={<ScreenReaderContent>{I18n.t('Sort by')}</ScreenReaderContent>}>
         <Row>
           <ColHeader
@@ -85,6 +96,7 @@ export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
             stackedSortByLabel={I18n.t('Rubric Name')}
             onRequestSort={() => handleSort('Title')}
             sortDirection={sortedColumn === 'Title' ? sortDirection : undefined}
+            data-testid="rubric-name-header"
           >
             {I18n.t('Rubric Name')}
           </ColHeader>
@@ -93,6 +105,7 @@ export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
             stackedSortByLabel={I18n.t('Total Points')}
             onRequestSort={() => handleSort('TotalPoints')}
             sortDirection={sortedColumn === 'TotalPoints' ? sortDirection : undefined}
+            data-testid="rubric-points-header"
           >
             {I18n.t('Total Points')}
           </ColHeader>
@@ -101,6 +114,7 @@ export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
             stackedSortByLabel={I18n.t('Criterion')}
             onRequestSort={() => handleSort('Criterion')}
             sortDirection={sortedColumn === 'Criterion' ? sortDirection : undefined}
+            data-testid="rubric-criterion-header"
           >
             {I18n.t('Criterion')}
           </ColHeader>
@@ -109,15 +123,18 @@ export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
             stackedSortByLabel={I18n.t('Location Used')}
             onRequestSort={() => handleSort('LocationUsed')}
             sortDirection={sortedColumn === 'LocationUsed' ? sortDirection : undefined}
+            data-testid="rubric-locations-header"
           >
             {I18n.t('Location Used')}
           </ColHeader>
-          <ColHeader id="Rating" />
+          <ColHeader id="Actions" tabIndex={0} data-testid="rubric-actions-header">
+            {I18n.t('Actions')}
+          </ColHeader>
         </Row>
       </Head>
       <Body>
         {sortedRubrics.map((rubric, index) => (
-          <Row key={rubric.id}>
+          <Row key={rubric.id} data-testid={`rubric-row-${rubric.id}`}>
             <Cell data-testid={`rubric-title-${index}`}>
               <Link
                 forceButtonRole={true}
@@ -133,7 +150,11 @@ export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
             <Cell data-testid={`rubric-criterion-count-${index}`}>{rubric.criteriaCount}</Cell>
             <Cell data-testid={`rubric-locations-${index}`}>
               {rubric.hasRubricAssociations ? (
-                <Link forceButtonRole={true} isWithinText={false} onClick={() => {}}>
+                <Link
+                  forceButtonRole={true}
+                  isWithinText={false}
+                  onClick={() => onLocationsClick(rubric.id)}
+                >
                   {I18n.t('courses and assignments')}
                 </Link>
               ) : (
@@ -141,18 +162,23 @@ export const RubricTable = ({rubrics, onPreviewClick}: RubricTableProps) => {
               )}
             </Cell>
             <Cell data-testid={`rubric-options-${rubric.id}`}>
-              <RubricPopover
-                id={rubric.id}
-                title={rubric.title}
-                accountId={accountId}
-                courseId={courseId}
-                hidePoints={rubric.hidePoints}
-                criteria={rubric.criteria}
-                pointsPossible={rubric.pointsPossible}
-                buttonDisplay={rubric.buttonDisplay}
-                ratingOrder={rubric.ratingOrder}
-                hasRubricAssociations={rubric.hasRubricAssociations}
-              />
+              {canManageRubrics && (
+                <RubricPopover
+                  id={rubric.id}
+                  title={rubric.title}
+                  accountId={accountId}
+                  courseId={courseId}
+                  hidePoints={rubric.hidePoints}
+                  criteria={rubric.criteria}
+                  pointsPossible={rubric.pointsPossible}
+                  buttonDisplay={rubric.buttonDisplay}
+                  ratingOrder={rubric.ratingOrder}
+                  freeFormCriterionComments={rubric.freeFormCriterionComments}
+                  hasRubricAssociations={rubric.hasRubricAssociations}
+                  onArchiveRubricChange={() => handleArchiveRubricChange(rubric.id)}
+                  active={active}
+                />
+              )}
             </Cell>
           </Row>
         ))}

@@ -944,6 +944,131 @@ describe ContentMigration do
     end
   end
 
+  context "common_cartridge_qti_new_quizzes_import" do
+    let(:importer) { double }
+
+    before do
+      allow(importer)
+        .to receive(:import_content)
+        .with(any_args)
+        .and_return(true)
+      allow(@cm.migration_settings)
+        .to receive(:[])
+        .with("migration_type")
+        .and_return("common_cartridge_importer")
+      allow(QuizzesNext::Importers::CourseContentImporter)
+        .to receive(:new)
+        .with(any_args)
+        .and_return(importer)
+    end
+
+    context "FF enabled" do
+      before do
+        allow(NewQuizzesFeaturesHelper)
+          .to receive(:common_cartridge_qti_new_quizzes_import_enabled?)
+          .with(instance_of(Course))
+          .and_return(true)
+      end
+
+      describe "not Quizzes.Next CC import" do
+        before do
+          allow(@cm.migration_settings)
+            .to receive(:[])
+            .with(:import_quizzes_next)
+            .and_return(false)
+        end
+
+        it "calls QuizzesNext::Importers" do
+          expect(@cm.migration_settings)
+            .to receive(:[])
+            .with(:migration_ids_to_import)
+          expect(Importers).not_to receive(:content_importer_for)
+          expect(QuizzesNext::Importers::CourseContentImporter)
+            .to receive(:new).and_return(importer)
+          expect(importer).to receive(:import_content)
+          @cm.import!({})
+        end
+      end
+
+      describe "Quizzes.Next CC import" do
+        before do
+          allow(@cm.migration_settings)
+            .to receive(:[])
+            .with(:import_quizzes_next)
+            .and_return(true)
+        end
+
+        it "calls QuizzesNext::Importers" do
+          expect(@cm.migration_settings)
+            .to receive(:[])
+            .with(:migration_ids_to_import)
+          expect(Importers).not_to receive(:content_importer_for)
+          expect(QuizzesNext::Importers::CourseContentImporter)
+            .to receive(:new).and_return(importer)
+          expect(importer).to receive(:import_content)
+          @cm.import!({})
+        end
+      end
+    end
+
+    context "FF disabled" do
+      before do
+        allow(NewQuizzesFeaturesHelper)
+          .to receive(:common_cartridge_qti_new_quizzes_import_enabled?)
+          .with(instance_of(Course))
+          .and_return(false)
+        allow(Importers)
+          .to receive(:content_importer_for)
+          .with("Course")
+          .and_return(importer)
+      end
+
+      describe "not Quizzes.Next CC import" do
+        before do
+          allow(@cm.migration_settings)
+            .to receive(:[])
+            .with(:import_quizzes_next)
+            .and_return(false)
+        end
+
+        it "does not call QuizzesNext::Importers" do
+          expect(@cm.migration_settings)
+            .to receive(:[])
+            .with(:migration_ids_to_import)
+          expect(Importers).to receive(:content_importer_for)
+          expect(QuizzesNext::Importers::CourseContentImporter)
+            .not_to receive(:new)
+          expect(importer).to receive(:import_content)
+          @cm.import!({})
+        end
+      end
+
+      describe "Quizzes.Next CC import" do
+        before do
+          allow(@cm.context)
+            .to receive(:feature_enabled?)
+            .with(:quizzes_next)
+            .and_return(true)
+          allow(@cm.migration_settings)
+            .to receive(:[])
+            .with(:import_quizzes_next)
+            .and_return(true)
+        end
+
+        it "calls QuizzesNext::Importers" do
+          expect(@cm.migration_settings)
+            .to receive(:[])
+            .with(:migration_ids_to_import)
+          expect(Importers).not_to receive(:content_importer_for)
+          expect(QuizzesNext::Importers::CourseContentImporter)
+            .to receive(:new).and_return(importer)
+          expect(importer).to receive(:import_content)
+          @cm.import!({})
+        end
+      end
+    end
+  end
+
   context "importing to NQ with the new_quizzes_bank_migrations FF enabled" do
     before do
       allow_any_instance_of(ContentMigration).to receive(:quizzes_next_banks_migration?).and_return(true)
@@ -1243,7 +1368,7 @@ describe ContentMigration do
           title: "bar",
           migration_id: CC::CCHelper.create_key(@old_wp, global: true)
         )
-        @cm = @dst.content_migrations.build(migration_type: "course_copy_importer")
+        @cm = @dst.content_migrations.build(migration_type: "course_copy_importer", user: @teacher)
         @cm.workflow_state = "imported"
         @cm.source_course = @src
         @cm.save!
@@ -1260,6 +1385,7 @@ describe ContentMigration do
         expect(json).to eq({ "source_course" => @src.id.to_s,
                              "source_host" => "pineapple.edu",
                              "contains_migration_ids" => false,
+                             "migration_user_uuid" => @cm.user.uuid,
                              "resource_mapping" => {
                                "assignments" => { @old.id.to_s => @new.id.to_s },
                                "pages" => { @old_wp.id.to_s => @new_wp.id.to_s }
@@ -1339,7 +1465,7 @@ describe ContentMigration do
           migration_id: CC::CCHelper.create_key(@old_wp, global: true)
         )
 
-        @cm = @dst.content_migrations.build(migration_type: "course_copy_importer")
+        @cm = @dst.content_migrations.build(migration_type: "course_copy_importer", user: @teacher)
         @cm.workflow_state = "imported"
         @cm.source_course = @src
         @cm.save!
@@ -1370,6 +1496,7 @@ describe ContentMigration do
                              "destination_course" => @dst.id.to_s,
                              "destination_hosts" => ["apple.edu", "kiwi.edu"],
                              "destination_root_folder" => Folder.root_folders(@dst).first.name + "/",
+                             "migration_user_uuid" => @cm.user.uuid,
                              "resource_mapping" => {
                                "assignments" => {
                                  @old.id.to_s => @new.id.to_s,
@@ -1417,6 +1544,7 @@ describe ContentMigration do
                              "destination_course" => @dst.id.to_s,
                              "destination_hosts" => ["apple.edu", "kiwi.edu"],
                              "destination_root_folder" => Folder.root_folders(@dst).first.name + "/",
+                             "migration_user_uuid" => @cm.user.uuid,
                              "resource_mapping" => {
                                "assignments" => {
                                  old_migration_id => {
@@ -1463,6 +1591,7 @@ describe ContentMigration do
                                "destination_course" => @dst.id.to_s,
                                "destination_hosts" => ["apple.edu", "kiwi.edu"],
                                "destination_root_folder" => Folder.root_folders(@dst).first.name + "/",
+                               "migration_user_uuid" => @cm.user.uuid,
                                "resource_mapping" => {
                                  "assignments" => {
                                    @old.id.to_s => @new.id.to_s,
@@ -1510,6 +1639,7 @@ describe ContentMigration do
                                "destination_course" => @dst.id.to_s,
                                "destination_hosts" => ["apple.edu", "kiwi.edu"],
                                "destination_root_folder" => Folder.root_folders(@dst).first.name + "/",
+                               "migration_user_uuid" => @cm.user.uuid,
                                "resource_mapping" => {
                                  "assignments" => {
                                    old_migration_id => {
@@ -1927,6 +2057,127 @@ describe ContentMigration do
       cm_to_a_more_recent = ContentMigration.create!(source_course: @source_course, context: @other_course_a, finished_at: 1.day.ago)
 
       expect(ContentMigration.find_most_recent_by_course_ids(@source_course.id, @other_course_a)&.id).to eq cm_to_a_more_recent.id
+    end
+  end
+
+  context "media catridge migration" do
+    include_context "course copy"
+
+    let(:success_response) { Net::HTTPSuccess.new(Net::HTTPOK, "200", "OK") }
+
+    def mig_id(obj)
+      CC::CCHelper.create_key(obj, global: true)
+    end
+
+    def og_asset(id)
+      {
+        isOriginal: 1,
+        containerFormat: "mp4",
+        fileExt: "mp4",
+        id:,
+        status: "2",
+        size: 15,
+      }
+    end
+
+    before do
+      @copy_to = @course
+      course_with_teacher(active_all: true)
+      @copy_from = @course
+      root = Folder.root_folders(@copy_from).first
+      uploaded_media_folder = root.sub_folders.create!(name: "Uploaded Media", context: @copy_from)
+      @att1 = Attachment.create!(filename: "first.webm", uploaded_data: stub_file_data("first.webm", "asdf", "video/mp4"), folder: uploaded_media_folder, context: @copy_from, media_entry_id: "m-media_id_1")
+      @att2 = Attachment.create!(filename: "second.webm", uploaded_data: stub_file_data("second.webm", "asdf", "video/mp4"), folder: uploaded_media_folder, context: @copy_from, media_entry_id: "m-media_id_2")
+      MediaObject.create!(attachment_id: @att1.id, media_id: "m-media_id_1")
+      MediaObject.create!(attachment_id: @att2.id, media_id: "m-media_id_2")
+      @copy_from.wiki_pages.create! title: "wp1", body: "<iframe data-media-type=\"audio\" data-media-id=\"#{@att1.media_entry_id}\" src=\"/media_attachments_iframe/#{@att1.id}?type=audio\"></iframe>"
+      @copy_from.wiki_pages.create! title: "wp2", body: "<iframe data-media-type=\"video\" data-media-id=\"#{@att2.media_entry_id}\" src=\"/media_attachments_iframe/#{@att2.id}?type=video\"></iframe>"
+      @kaltura = double("CanvasKaltura::ClientV3")
+      @kaltura_media_handler = instance_double("KalturaMediaFileHandler")
+      expect(@kaltura_media_handler).to receive(:add_media_files) do |_attachments, _wait_for_completion|
+        att3 = @copy_to.attachments.where(migration_id: mig_id(@att1)).first.id
+        att4 = @copy_to.attachments.where(migration_id: mig_id(@att2)).first.id
+        bulk_upload_response = {
+          entries: [
+            {
+              name: att3.filename,
+              originalId: att3.id,
+              entryId: "m-media_id_3"
+            },
+            {
+              name: att4.filename,
+              originalId: att4.id,
+              entryId: "m-media_id_4"
+            }
+          ]
+        }
+        MediaObject.build_media_objects(bulk_upload_response, @course.root_account_id)
+      end
+      expect(KalturaMediaFileHandler).to receive(:new).and_return(@kaltura_media_handler)
+      expect(CanvasKaltura::ClientV3).to receive(:config).and_return({})
+    end
+
+    it "properly migrates webm embeds" do
+      run_export_and_import
+      destination_att1 = @copy_to.attachments.find_by(migration_id: mig_id(@att1))
+      destination_att2 = @copy_to.attachments.find_by(migration_id: mig_id(@att2))
+      expect(destination_att1.media_entry_id).to be_truthy
+      expect(destination_att2.media_entry_id).to be_truthy
+      @zip_file = Zip::File.open(@copy_from.content_exports.last.attachment.open.path)
+      expect(@copy_to.wiki_pages.first.body).to eq("<iframe data-media-type=\"audio\" data-media-id=\"#{destination_att1.media_entry_id}\" src=\"/media_attachments_iframe/#{destination_att1.id}?embedded=true&amp;type=audio\"></iframe>")
+      expect(@copy_to.wiki_pages.last.body).to eq("<iframe data-media-type=\"video\" data-media-id=\"#{destination_att2.media_entry_id}\" src=\"/media_attachments_iframe/#{destination_att2.id}?embedded=true&amp;type=video\"></iframe>")
+      expect(@zip_file.find_entry("web_resources/Uploaded Media/first.webm")).not_to be_nil
+      expect(@zip_file.find_entry("web_resources/Uploaded Media/second.webm")).not_to be_nil
+    end
+  end
+
+  context "old media exports with deleted assignments" do
+    let(:success_response) { Net::HTTPSuccess.new(Net::HTTPOK, "200", "OK") }
+
+    def og_asset(id)
+      {
+        isOriginal: 1,
+        containerFormat: "mp4",
+        fileExt: "mp4",
+        id:,
+        status: "2",
+        size: 15,
+      }
+    end
+
+    before do
+      @kaltura_media_handler = instance_double("KalturaMediaFileHandler")
+      expect(@kaltura_media_handler).to receive(:add_media_files) do |attachments, _wait_for_completion|
+        MediaObject.build_media_objects({
+                                          entries: [
+                                            {
+                                              name: "m-5JxJzd136Gk3nSPn9G5e5b46s4xRXz2m.mp4",
+                                              originalId: attachments.last.id,
+                                              entryId: "m-2t1CXfzgyJh3qEpM9CqMAPNFnwQTXNyM"
+                                            }
+                                          ]
+                                        },
+                                        @course.root_account_id)
+      end
+      expect(KalturaMediaFileHandler).to receive(:new).and_return(@kaltura_media_handler)
+      expect(CanvasKaltura::ClientV3).to receive(:config).at_least(3).times.and_return({})
+    end
+
+    it "retains the destination media object attachment" do
+      archive_file_path = File.join(File.dirname(__FILE__) + "/../fixtures/migration/rcx-1949.imscc")
+      unzipped_file_path = create_temp_dir!
+      converter = CC::Importer::Canvas::Converter.new(export_archive_path: archive_file_path, course_name: "oi", base_download_dir: unzipped_file_path)
+      converter.export
+      @course_data = converter.course.with_indifferent_access
+
+      @course = course_factory
+      @migration = ContentMigration.create(context: @course)
+      @migration.migration_type = "canvas_cartridge_importer"
+      @migration.migration_settings[:migration_ids_to_import] = { copy: {} }
+      Importers::CourseContentImporter.import_content(@course, @course_data, nil, @migration)
+      run_jobs
+      expect(@course.attachments.last.media_entry_id).not_to eq("maybe")
+      expect(@course.attachments.last.file_state).not_to eq("deleted")
     end
   end
 end
