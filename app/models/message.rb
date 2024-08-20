@@ -732,7 +732,7 @@ self.user,
       logger.warn "Could not find a path type for #{inspect}"
       return nil
     end
-
+    logger.info "735 Delivering path_type: #{path_type}"
     if path_type == "slack" && !context_root_account.settings[:encrypted_slack_key]
       logger.warn("Could not send slack message without configured key")
       return nil
