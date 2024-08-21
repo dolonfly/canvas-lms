@@ -764,6 +764,7 @@ self.user,
         logger.warn("Could not set delivery_method from #{path_type}")
         return nil
       end
+      logger.info(">> will delivery by delivery_method #{delivery_method}")
       send(delivery_method)
     end
   end
@@ -1118,6 +1119,7 @@ self.user,
   end
 
   def deliver_via_wecom
+    logger.info(">> come in deliver_via_wecom")
     msg_id = AssetSignature.generate(self)
     ZhjxMessageApi::Messenger.new(self, msg_id, "wecom").deliver
     complete_dispatch
