@@ -167,6 +167,7 @@ path "../gems" do
   gem "stringify_ids"
   gem "turnitin_api"
   gem "twitter"
+  gem "zhjx_message_api"
   gem "utf8_cleaner"
   gem "workflow"
 end
