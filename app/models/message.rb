@@ -1119,10 +1119,18 @@ self.user,
   end
 
   def deliver_via_wecom
+    logger.info(">> --------------------------------- 1")
     logger.info(">> come in deliver_via_wecom")
     msg_id = AssetSignature.generate(self)
+    logger.info(">> --------------------------------- 2")
     ZhjxMessageApi::Messenger.new(self, msg_id, "wecom").deliver
+    logger.info(">> --------------------------------- 3")
     complete_dispatch
+    logger.info(">> --------------------------------- 4")
+  rescue => e
+    logger.error "Exception: #{e.class}: #{e.message}\n\t#{e.backtrace.join("\n\t")}"
+    cancel
+    raise e
   end
 
   # Internal: Send the message through SMS. This currently sends it via Twilio if the recipient is a E.164 phone
