@@ -65,8 +65,9 @@ class CommunicationChannel < ActiveRecord::Base
   TYPE_SLACK          = "slack"
   TYPE_TWITTER        = "twitter"
   TYPE_PERSONAL_EMAIL = "personal_email"
+  TYPE_WeCom = "wecom" # 企业微信
 
-  VALID_TYPES = [TYPE_EMAIL, TYPE_SMS, TYPE_TWITTER, TYPE_PUSH, TYPE_SLACK, TYPE_PERSONAL_EMAIL].freeze
+  VALID_TYPES = [TYPE_EMAIL, TYPE_SMS, TYPE_TWITTER, TYPE_PUSH, TYPE_SLACK, TYPE_PERSONAL_EMAIL, TYPE_WeCom].freeze
 
   RETIRE_THRESHOLD = 1
 

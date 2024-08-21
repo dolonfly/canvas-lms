@@ -1117,6 +1117,12 @@ self.user,
     complete_dispatch
   end
 
+  def deliver_via_wecom
+    msg_id = AssetSignature.generate(self)
+    ZhjxMessageApi::Messenger.new(self, msg_id, "wecom").deliver
+    complete_dispatch
+  end
+
   # Internal: Send the message through SMS. This currently sends it via Twilio if the recipient is a E.164 phone
   # number, or via email otherwise.
   #
