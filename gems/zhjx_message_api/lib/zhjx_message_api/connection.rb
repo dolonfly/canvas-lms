@@ -1,4 +1,6 @@
 # frozen_string_literal: true
+require "faraday/follow_redirects"
+require "faraday/multipart"
 
 module ZhjxMessageApi
   class Connection
@@ -28,6 +30,44 @@ module ZhjxMessageApi
       Rails.logger.info("message.to_s #{message.to_s}")
       Rails.logger.info("message.to_json #{message.to_json}")
       Rails.logger.info("================end send_direct_message(zhjx_message_api.connection.rb)==========================")
+
+      reqBody = {
+        type: '课程通知',
+        title: '课程平台通知',
+        templateCode: 'canvas',
+        senderId: 'admin',
+        senderName: '课程平台',
+        receiveObjs: [
+          {
+            receiverId: '1234',
+            sourceCode: 'canvas',
+            sourceParams: '',
+            variables: {
+              body: message.subject
+            }
+          }
+        ]
+      }
+
+      make_call reqBody
+    end
+
+
+    def connection
+      @connection ||= Faraday.new do |conn|
+        conn.request :json
+        conn.request :url_encoded
+        conn.response :json, preserve_raw: true
+        conn.response :follow_redirects
+        conn.adapter :net_http
+      end
+    end
+
+    def make_call(body)
+      conn.post('http://222.22.91.70:8041/api/send') do |req|
+        req.headers['Content-Type'] = 'application/json'
+        req.body = body.to_json
+      end
     end
 
   end

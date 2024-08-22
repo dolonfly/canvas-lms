@@ -14,7 +14,11 @@ module ZhjxMessageApi
 
     def deliver
       msg_api = ZhjxMessageApi::Connection.new(channel)
-      msg_api.send_direct_message("你好呀", "测试洗一下爱", message)
+      msg_api.send_direct_message("你好呀", to_id, message)
+    end
+
+    def to_id
+      message.to
     end
 
   end
