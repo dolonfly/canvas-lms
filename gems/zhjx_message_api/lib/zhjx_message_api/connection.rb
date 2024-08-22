@@ -26,6 +26,7 @@ module ZhjxMessageApi
       Rails.logger.info("user_id #{user_id}")
       Rails.logger.info("message #{message}")
       Rails.logger.info("message.to_s #{message.to_s}")
+      Rails.logger.info("message.to_json #{message.to_json}")
       Rails.logger.info("================end send_direct_message(zhjx_message_api.connection.rb)==========================")
     end
 
