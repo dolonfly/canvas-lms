@@ -33,7 +33,7 @@ module ZhjxMessageApi
 
       reqBody = {
         type: '课程通知',
-        title: '课程平台通知',
+        title: '课程平台通知' + message.subject,
         templateCode: 'canvas',
         senderId: 'admin',
         senderName: '课程平台',
@@ -43,7 +43,8 @@ module ZhjxMessageApi
             sourceCode: 'canvas',
             sourceParams: '',
             variables: {
-              body: message.subject
+              body: message.body,
+              url: 'https://lms.zut.edu.cn'
             }
           }
         ]
