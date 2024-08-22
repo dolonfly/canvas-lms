@@ -39,7 +39,7 @@ module ZhjxMessageApi
         senderName: '课程平台',
         receiveObjs: [
           {
-            receiverId: '1234',
+            receiverId: message.to,
             sourceCode: 'canvas',
             sourceParams: '',
             variables: {
