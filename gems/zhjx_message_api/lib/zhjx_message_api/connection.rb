@@ -64,10 +64,11 @@ module ZhjxMessageApi
     end
 
     def make_call(body)
-      conn.post('http://222.22.91.70:8041/api/send') do |req|
+      response = connection.post('http://222.22.91.70:8041/api/send') do |req|
         req.headers['Content-Type'] = 'application/json'
         req.body = body.to_json
       end
+      Rails.logger.info("#{response.to_json}")
     end
 
   end
