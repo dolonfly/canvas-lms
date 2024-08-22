@@ -37,6 +37,7 @@ module ZhjxMessageApi
         templateCode: 'canvas',
         senderId: 'admin',
         senderName: '课程平台',
+        isChannelSend: 1,
         receiveObjs: [
           {
             receiverId: message.to,
