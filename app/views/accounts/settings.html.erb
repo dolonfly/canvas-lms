@@ -454,6 +454,15 @@
             <% end %>
           </fieldset>
         <% end %>
+        <% if !@account.site_admin? && @account.primary_settings_root_account? %>
+          <fieldset>
+            <legend>智慧教学消息服务配置</legend>
+            <%= f.fields_for :settings do |settings| %>
+              <%= settings.label      :zhjx_message_api_endpoint, 'API 地址' %>
+              <%= settings.text_field :zhjx_message_api_endpoint, placeholder: 'api地址', value: @account.settings[:zhjx_message_api_endpoint] %>
+            <% end %>
+          </fieldset>
+        <% end %>
         <% if @account.primary_settings_root_account? %>
           <fieldset>
             <legend><%= t("Personal Profile Settings") %></legend>

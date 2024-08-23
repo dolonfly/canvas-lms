@@ -5,18 +5,20 @@ require "faraday/multipart"
 module ZhjxMessageApi
   class Connection
     attr_reader :channel
+    attr_reader :api_endpoint
 
     TYPE_MESSAGE_CHANNEL_Portal = "portal"
     TYPE_MESSAGE_CHANNEL_WeCom = "wecom" # 企业微信
 
     VALID_MESSAGE_CHANNEL = [TYPE_MESSAGE_CHANNEL_Portal, TYPE_MESSAGE_CHANNEL_WeCom].freeze
 
-    def self.from_channel(msg_channel)
+    def self.from_channel(api_endpoint, msg_channel)
       channel = TYPE_MESSAGE_CHANNEL_Portal unless VALID_MESSAGE_CHANNEL.include?(msg_channel)
-      ZhjxMessageApi::Connection.new(channel)
+      ZhjxMessageApi::Connection.new(api_endpoint, channel)
     end
 
-    def initialize(channel)
+    def initialize(api_endpoint,channel)
+      @api_endpoint = api_endpoint
       @channel = channel
     end
 

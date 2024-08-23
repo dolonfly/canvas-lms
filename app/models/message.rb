@@ -738,6 +738,11 @@ self.user,
       return nil
     end
 
+    if path_type == "wecom" && !context_root_account.settings[:zhjx_message_api_endpoint]
+      logger.warn("Could not send wecome message without api endpoint")
+      return nil
+    end
+
     check_acct = infer_feature_account
 
     return skip_and_cancel if path_type == "sms"
@@ -1123,7 +1128,8 @@ self.user,
     logger.info(">> come in deliver_via_wecom")
     msg_id = AssetSignature.generate(self)
     logger.info(">> --------------------------------- 2")
-    ZhjxMessageApi::Messenger.new(self, msg_id, "wecom").deliver
+    api_endpoint = context_root_account.settings[:zhjx_message_api_endpoint]
+    ZhjxMessageApi::Messenger.new(api_endpoint, self, msg_id, "wecom").deliver
     logger.info(">> --------------------------------- 3")
     complete_dispatch
     logger.info(">> --------------------------------- 4")
