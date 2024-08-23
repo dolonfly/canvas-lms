@@ -415,6 +415,7 @@ class Account < ActiveRecord::Base
 
   add_setting :enable_limited_access_for_students, boolean: true, root_only: false, default: false, inheritable: false
 
+  add_setting :zhjx_message_api_endpoint, root_only: true
   def settings=(hash)
     if hash.is_a?(Hash) || hash.is_a?(ActionController::Parameters)
       hash.each do |key, val|
