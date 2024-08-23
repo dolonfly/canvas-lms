@@ -2049,7 +2049,8 @@ class AccountsController < ApplicationController
                                    :enable_inbox_auto_response,
                                    :disable_inbox_auto_response_for_students,
                                    :enable_name_pronunciation,
-                                   :enable_limited_access_for_students].freeze
+                                   :enable_limited_access_for_students,
+                                   :zhjx_message_api_endpoint].freeze
 
   def permitted_account_attributes
     [:name,
