@@ -68,7 +68,7 @@ module ZhjxMessageApi
     end
 
     def make_call(body)
-      response = connection.post('http://222.22.91.70:8041/api/send') do |req|
+      response = connection.post(api_endpoint) do |req|
         req.headers['Content-Type'] = 'application/json'
         req.body = body.to_json
       end
