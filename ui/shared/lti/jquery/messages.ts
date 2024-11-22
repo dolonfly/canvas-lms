@@ -53,6 +53,8 @@ const SUBJECT_ALLOW_LIST = [
   'lti.getPageSettings',
   'requestFullWindowLaunch',
   'toggleCourseNavigationMenu',
+  'showNavigationMenu',
+  'hideNavigationMenu',
 ] as const
 
 /**
@@ -62,10 +64,7 @@ const SUBJECT_ALLOW_LIST = [
  * If a subject is not listed here, it is assumed to be allowed for all tools.
  */
 const SCOPE_REQUIRED_SUBJECTS: {[key: string]: string[]} = {
-  'lti.getPageContent': [
-    'https://canvas.instructure.com/lti/page_content/show',
-    'http://canvas.instructure.com/lti/page_content/show',
-  ],
+  'lti.getPageContent': ['https://canvas.instructure.com/lti/page_content/show'],
 }
 
 type SubjectId = (typeof SUBJECT_ALLOW_LIST)[number]
@@ -155,6 +154,8 @@ const handlers: Record<
   'lti.getPageSettings': () => import(`./subjects/lti.getPageSettings`),
   requestFullWindowLaunch: () => import(`./subjects/requestFullWindowLaunch`),
   toggleCourseNavigationMenu: () => import(`./subjects/toggleCourseNavigationMenu`),
+  showNavigationMenu: () => import(`./subjects/showNavigationMenu`),
+  hideNavigationMenu: () => import(`./subjects/hideNavigationMenu`),
 }
 
 /**

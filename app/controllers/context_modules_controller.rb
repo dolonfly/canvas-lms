@@ -83,7 +83,7 @@ class ContextModulesController < ApplicationController
       @can_view_grades = can_do(@context, @current_user, :view_all_grades)
       @is_student = @context.grants_right?(@current_user, session, :participate_as_student)
       @can_view_unpublished = @context.grants_right?(@current_user, session, :read_as_admin)
-      @viewable_module_ids = @context.modules_visible_to(@current_user).pluck(:id)
+      @viewable_module_ids = @modules.pluck(:id)
 
       if Account.site_admin.feature_enabled?(:selective_release_backend)
         @module_ids_with_overrides = AssignmentOverride.where(context_module_id: @modules).active.distinct.pluck(:context_module_id)
@@ -145,13 +145,33 @@ class ContextModulesController < ApplicationController
       }
 
       is_master_course = MasterCourses::MasterTemplate.is_master_course?(@context)
-      is_child_course = MasterCourses::ChildSubscription.is_child_course?(@context)
-      if is_master_course || is_child_course
+      @is_child_course = MasterCourses::ChildSubscription.is_child_course?(@context)
+      if is_master_course || @is_child_course
         hash[:MASTER_COURSE_SETTINGS] = {
           IS_MASTER_COURSE: is_master_course,
-          IS_CHILD_COURSE: is_child_course,
+          IS_CHILD_COURSE: @is_child_course,
           MASTER_COURSE_DATA_URL: context_url(@context, :context_context_modules_master_course_info_url)
         }
+      end
+      if !@is_student && @is_child_course &&
+         @context.account.feature_enabled?(:modules_page_hide_blueprint_lock_icon_for_children)
+        hash[:HIDE_BLUEPRINT_LOCK_ICON_FOR_CHILDREN] = true
+      end
+
+      @feature_student_module_selection = @context.account.feature_enabled?(:modules_student_module_selection)
+      @feature_teacher_module_selection = @context.account.feature_enabled?(:modules_teacher_module_selection)
+      if @feature_student_module_selection || @feature_teacher_module_selection
+        @module_show_setting = if @is_student && @feature_student_module_selection
+                                 @context.show_student_only_module_id
+                               elsif !@is_student && @feature_teacher_module_selection
+                                 @context.show_teacher_only_module_id
+                               end&.to_i
+        @module_show_setting = nil if @module_show_setting&.zero?
+        unless @is_student
+          hash[:MODULE_FEATURES] = {}
+          hash[:MODULE_FEATURES][:STUDENT_MODULE_SELECTION] = true if @feature_student_module_selection
+          hash[:MODULE_FEATURES][:TEACHER_MODULE_SELECTION] = true if @feature_teacher_module_selection
+        end
       end
 
       append_default_due_time_js_env(@context, hash)
@@ -408,7 +428,9 @@ class ContextModulesController < ApplicationController
       all_tags = GuardRail.activate(:secondary) { @context.module_items_visible_to(@current_user).to_a }
       user_is_admin = @context.grants_right?(@current_user, session, :read_as_admin)
 
-      ActiveRecord::Associations.preload(all_tags, :content)
+      all_tags.each_slice(1000) do |tags|
+        ActiveRecord::Associations.preload(tags, content: [:context, :external_tool_tag])
+      end
 
       preload_assignments_and_quizzes(all_tags, user_is_admin)
 
@@ -666,7 +688,7 @@ class ContextModulesController < ApplicationController
           end
         end
       end
-      result[:current_item].evaluate_for(@current_user) rescue nil
+      result[:current_item].try(:evaluate_for, @current_user)
       if result[:current_item]&.position
         result[:previous_item] = @tags.reverse.detect { |t| t.id != result[:current_item].id && t.context_module_id == result[:current_item].context_module_id && t.position && t.position <= result[:current_item].position && t.content_type != "ContextModuleSubHeader" }
         result[:next_item] = @tags.detect { |t| t.id != result[:current_item].id && t.context_module_id == result[:current_item].context_module_id && t.position && t.position >= result[:current_item].position && t.content_type != "ContextModuleSubHeader" }
@@ -702,6 +724,7 @@ class ContextModulesController < ApplicationController
         graded: @tag.graded?,
         content_details: content_details(@tag, @current_user),
         assignment_id: @tag.assignment.try(:id),
+        is_checkpointed: @tag.assignment.try(:has_sub_assignments),
         is_cyoe_able: cyoe_able?(@tag),
         is_duplicate_able: @tag.duplicate_able?,
         can_manage_assign_to: @tag.content&.grants_right?(@current_user, session, :manage_assign_to)
@@ -815,7 +838,8 @@ class ContextModulesController < ApplicationController
                                .select { |ct| ct.content_type != "Assignment" && ct.content.assignment_id }.map(&:content)
     ActiveRecord::Associations.preload(content_with_assignments, :assignment) if content_with_assignments.any?
     DatesOverridable.preload_override_data_for_objects(content_with_assignments.map(&:assignment))
-    DatesOverridable.preload_override_data_for_objects(tags.select { |ct| %w[Assignment Quizzes::Quiz WikiPage DiscussionTopic].include?(ct.content_type) }.map(&:content))
+    override_preload_types = %w[Assignment Quizzes::Quiz WikiPage DiscussionTopic].freeze
+    DatesOverridable.preload_override_data_for_objects(tags.select { |ct| override_preload_types.include?(ct.content_type) }.map(&:content))
 
     if user_is_admin && should_preload_override_data?
       assignments = assignment_tags.filter_map(&:assignment)

@@ -98,53 +98,6 @@ describe ProfileController do
       end
     end
 
-    describe "personal pronouns" do
-      before :once do
-        @user.account.settings = { can_add_pronouns: true }
-        @user.account.save!
-      end
-
-      it "allows changing pronouns" do
-        user_session(@user, @pseudonym)
-        expect(@user.pronouns).to be_nil
-        put "update", params: { user: { pronouns: "  He/Him " } }, format: "json"
-        expect(response).to be_successful
-        @user.reload
-        expect(@user.read_attribute(:pronouns)).to eq "he_him"
-        expect(@user.pronouns).to eq "He/Him"
-      end
-
-      it "allows unsetting pronouns" do
-        user_session(@user, @pseudonym)
-        @user.pronouns = " Dude/Guy  "
-        @user.save!
-        expect(@user.pronouns).to eq "Dude/Guy"
-        put "update", params: { user: { pronouns: "" } }, format: "json"
-        expect(response).to be_successful
-        @user.reload
-        expect(@user.pronouns).to be_nil
-      end
-
-      it "does not allow setting pronouns not on the approved list" do
-        user_session(@user, @pseudonym)
-        expect(@user.pronouns).to be_nil
-        put "update", params: { user: { pronouns: "Pro/Noun" } }, format: "json"
-        expect(response).to be_successful
-        @user.reload
-        expect(@user.pronouns).to be_nil
-      end
-
-      it "does not allow setting pronouns if the setting is disabled" do
-        @user.account.settings[:can_change_pronouns] = false
-        @user.account.save!
-        user_session(@user, @pseudonym)
-        put "update", params: { user: { pronouns: "Pro/Noun" } }, format: "json"
-        expect(response).to be_successful
-        @user.reload
-        expect(@user.pronouns).to be_nil
-      end
-    end
-
     it "allows changing the default e-mail address and nothing else (name changing disabled)" do
       @account = Account.default
       @account.settings = { users_can_edit_name: false }
@@ -178,6 +131,74 @@ describe ProfileController do
     end
   end
 
+  describe "personal pronouns" do
+    before :once do
+      @user.account.settings = { can_add_pronouns: true }
+      @user.account.save!
+    end
+
+    describe "settings" do
+      specs_require_sharding
+
+      it "returns pronouns based on settings of the active account" do
+        @user.update!(pronouns: "he_him")
+        shard_one_account = @shard1.activate { Account.create!(name: "Shard1 Acc", settings: { can_add_pronouns: true }) }
+        # other tests for pronouns don't use this because pronouns falls back on user.account
+        allow(Account).to receive(:current_domain_root_account).and_return(shard_one_account)
+        @shard1.activate do
+          user_session(@user)
+          get "settings", params: { user_id: @user.id }, format: "json"
+
+          expect(response).to be_successful
+          json = json_parse(response.body)
+          expect(json["pronouns"]).to eq "He/Him"
+        end
+      end
+    end
+
+    describe "update" do
+      it "allows changing pronouns" do
+        user_session(@user, @pseudonym)
+        expect(@user.pronouns).to be_nil
+        put "update", params: { user: { pronouns: "  He/Him " } }, format: "json"
+        expect(response).to be_successful
+        @user.reload
+        expect(@user["pronouns"]).to eq "he_him"
+        expect(@user.pronouns).to eq "He/Him"
+      end
+
+      it "allows unsetting pronouns" do
+        user_session(@user, @pseudonym)
+        @user.pronouns = " Dude/Guy  "
+        @user.save!
+        expect(@user.pronouns).to eq "Dude/Guy"
+        put "update", params: { user: { pronouns: "" } }, format: "json"
+        expect(response).to be_successful
+        @user.reload
+        expect(@user.pronouns).to be_nil
+      end
+
+      it "does not allow setting pronouns not on the approved list" do
+        user_session(@user, @pseudonym)
+        expect(@user.pronouns).to be_nil
+        put "update", params: { user: { pronouns: "Pro/Noun" } }, format: "json"
+        expect(response).to be_successful
+        @user.reload
+        expect(@user.pronouns).to be_nil
+      end
+
+      it "does not allow setting pronouns if the setting is disabled" do
+        @user.account.settings[:can_change_pronouns] = false
+        @user.account.save!
+        user_session(@user, @pseudonym)
+        put "update", params: { user: { pronouns: "Pro/Noun" } }, format: "json"
+        expect(response).to be_successful
+        @user.reload
+        expect(@user.pronouns).to be_nil
+      end
+    end
+  end
+
   describe "update_profile" do
     before :once do
       user_with_pseudonym
@@ -208,7 +229,11 @@ describe ProfileController do
 
     it "alert is set to failed when user profile validation fails" do
       Account.default.settings[:enable_name_pronunciation] = true
+      Account.default.settings[:allow_name_pronunciation_edit_for_students] = true
       Account.default.save!
+      # requires base role of student to edit
+      student_in_course(active_all: true)
+      user_session(@student)
       pronunciation = "a" * 1000
       put "update_profile",
           params: { user: { short_name: "Monsturd", name: "Jenkins" },
@@ -299,11 +324,12 @@ describe ProfileController do
 
     it "lets you remove set pronouns" do
       @user.update(pronouns: "he_him")
-      expect do
-        put "update_profile", params: { pronouns: nil }, format: "json"
-      end.to change {
-        @user.reload.pronouns
-      }.from("He/Him").to(nil)
+      @user.account.settings[:can_add_pronouns] = true
+      @user.account.save!
+
+      expect(@user.pronouns).to eq("He/Him")
+      put "update_profile", params: { pronouns: nil }, format: "json"
+      expect(@user.reload.pronouns).to be_nil
       expect(response).to be_successful
     end
   end

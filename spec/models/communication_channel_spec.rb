@@ -30,7 +30,7 @@ describe CommunicationChannel do
   end
 
   it "creates a new instance given valid attributes" do
-    factory_with_protected_attributes(CommunicationChannel, communication_channel_valid_attributes)
+    CommunicationChannel.create!(communication_channel_valid_attributes)
   end
 
   describe "::trusted_confirmation_redirect?" do
@@ -635,6 +635,7 @@ describe CommunicationChannel do
           set_root_account_ids
           after_save_flag_old_microsoft_sync_user_mappings
           consider_building_notification_policies
+          initialize_synced_with_identity
         ]
         expect(CommunicationChannel._save_callbacks.collect(&:filter).select { |k| k.is_a? Symbol } - accounted_for_callbacks).to eq []
       end

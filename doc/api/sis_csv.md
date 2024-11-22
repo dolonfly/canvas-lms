@@ -276,7 +276,7 @@ recommended to omit this field over using fake email addresses for testing.</td>
 <td>text</td>
 <td></td>
 <td>✓</td>
-<td>User's preferred pronouns. Can pass "&lt;delete>" to remove the pronoun from the user.</td>
+<td>User's preferred pronouns. Can pass "&lt;delete>" to remove the pronoun from the user. This column will be ignored unless the "Enable Personal Pronouns" account setting is enabled.</td>
 </tr>
 <tr>
 <td>declared_user_type</td>
@@ -605,7 +605,7 @@ To remove the Blueprint Course link you can pass 'dissociate' in place of the id
 <p>If the start_date is set, it will override the term start date. If the end_date is set, it will
 override the term end date.</p>
 <p>To view the current status of a course that has already been imported into Canvas, please fetch the course data using the
-<a href="/doc/api/courses.html#method.courses.show" target="_blank">get a single course</a> API endpoint and refer to the workflow_state value returned in the <a href="/doc/api/courses.html#Course" target="_blank">Course</a> object.</p>
+<a href="courses.html#method.courses.show" target="_blank">get a single course</a> API endpoint and refer to the workflow_state value returned in the <a href="courses.html#Course" target="_blank">Course</a> object.</p>
 
 Sample:
 

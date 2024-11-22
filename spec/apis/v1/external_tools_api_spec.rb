@@ -454,6 +454,7 @@ describe ExternalToolsController, type: :request do
       ContextExternalTool.create!(
         context: account,
         consumer_key: "key",
+        developer_key: dev_key_model_1_3,
         shared_secret: "secret",
         name: "test tool",
         url: "http://www.tool.com/launch",
@@ -531,6 +532,28 @@ describe ExternalToolsController, type: :request do
                         {},
                         { expected_status: 400 })
         expect(json["message"]).to eq "Cannot have more than 2 favorited tools"
+      end
+
+      it "allows adding on_by_default tools even if there are already 2 favorited tools" do
+        tool2 = create_editor_tool(Account.default)
+        tool3 = create_editor_tool(Account.default)
+        Account.default.tap do |ra|
+          ra.settings[:rce_favorite_tool_ids] = { value: [tool2.global_id, tool3.global_id] }
+          ra.save!
+        end
+        Setting.set("rce_always_on_developer_key_ids", @root_tool.developer_key.global_id.to_s)
+
+        json = api_call(:post,
+                        "/api/v1/accounts/#{Account.default.id}/external_tools/rce_favorites/#{@root_tool.id}",
+                        { controller: "external_tools",
+                          action: "add_rce_favorite",
+                          format: "json",
+                          account_id: Account.default.id.to_s,
+                          id: @root_tool.id.to_s },
+                        {},
+                        {},
+                        { expected_status: 200 })
+        expect(json["rce_favorite_tool_ids"]).to include(@root_tool.id)
       end
 
       describe "handling deleted tools" do
@@ -911,6 +934,7 @@ describe ExternalToolsController, type: :request do
     et.custom_fields = { key1: "val1", key2: "val2" }
     et.course_navigation = { :url => "http://www.example.com/ims/lti/course", :visibility => "admins", :text => "Course nav", "default" => "disabled" }
     et.account_navigation = { url: "http://www.example.com/ims/lti/account", text: "Account nav", custom_fields: { "key" => "value" } }
+    et.analytics_hub = { url: "http://www.example.com/ims/lti/resource", text: "analytics hub", display_type: "full_width", visibility: "admins" }
     et.user_navigation = { url: "http://www.example.com/ims/lti/user", text: "User nav" }
     et.editor_button = { url: "http://www.example.com/ims/lti/editor", icon_url: "/images/delete.png", selection_width: 50, selection_height: 50, text: "editor button" }
     et.homework_submission = { url: "http://www.example.com/ims/lti/editor", selection_width: 50, selection_height: 50, text: "homework submission" }
@@ -1023,7 +1047,7 @@ describe ExternalToolsController, type: :request do
         "url" => "http://www.example.com/ims/lti/resource",
         "selection_height" => 50,
         "selection_width" => 50,
-        "label" => ""
+        "label" => "External Tool Eh"
       },
       "privacy_level" => "public",
       "editor_button" => {
@@ -1069,6 +1093,16 @@ describe ExternalToolsController, type: :request do
         "url" => "http://www.example.com/ims/lti/account",
         "custom_fields" => { "key" => "value" },
         "label" => "Account nav",
+        "selection_height" => 400,
+        "selection_width" => 800
+      },
+      "analytics_hub" => {
+        "enabled" => true,
+        "text" => "analytics hub",
+        "url" => "http://www.example.com/ims/lti/resource",
+        "visibility" => "admins",
+        "label" => "analytics hub",
+        "display_type" => "full_width",
         "selection_height" => 400,
         "selection_width" => 800
       },

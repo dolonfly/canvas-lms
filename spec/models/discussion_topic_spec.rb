@@ -282,6 +282,17 @@ describe DiscussionTopic do
     expect(topic.discussion_type).to eq "threaded"
   end
 
+  it "parent topic is threaded when children has threaded replies" do
+    group_discussion_assignment
+    @topic.refresh_subtopics
+    subtopic = @topic.child_topics.first
+    entry = subtopic.discussion_entries.create!(message: "test")
+    @course.groups.first.add_user(@student)
+
+    entry.reply_from(user: @student, html: "reply 1")
+    expect(@topic.threaded?).to be true
+  end
+
   it "requires a valid discussion_type" do
     @topic = @course.discussion_topics.build(message: "test", discussion_type: "gesundheit")
     expect(@topic.save).to be false
@@ -512,7 +523,7 @@ describe DiscussionTopic do
     end
 
     it "is visible to teachers not locked to a section in the course" do
-      @topic.update_attribute(:delayed_post_at, Time.now + 1.day)
+      @topic.update_attribute(:delayed_post_at, 1.day.from_now)
       new_teacher = user_factory
       @course.enroll_teacher(new_teacher).accept!
       expect(@topic.visible_for?(new_teacher)).to be_truthy
@@ -649,6 +660,17 @@ describe DiscussionTopic do
             expect(@topic.visible_for?(@student2)).to be_falsey
 
             expect(@topic.visible_for?(@teacher1)).to be_truthy
+            expect(@topic.visible_for?(@teacher2_limited_to_section)).to be_truthy
+          end
+
+          it "is visible to teachers with section limited access" do
+            account_admin = account_admin_user(account: @course.root_account)
+            @course.enroll_teacher(@teacher2_limited_to_section, section: @course_section, allow_multiple_enrollments: true).accept!
+            Enrollment.limit_privileges_to_course_section!(@course, @teacher2_limited_to_section, true)
+            @topic = discussion_topic_model(user: account_admin, context: @course)
+            @topic.update!(only_visible_to_overrides: true)
+            @topic.assignment_overrides.create!(set: @course_section)
+
             expect(@topic.visible_for?(@teacher2_limited_to_section)).to be_truthy
           end
         end
@@ -964,7 +986,7 @@ describe DiscussionTopic do
       it "is active when delayed_post_at is in the past" do
         topic = delayed_discussion_topic(title: "title",
                                          message: "content here",
-                                         delayed_post_at: Time.now - 1.day,
+                                         delayed_post_at: 1.day.ago,
                                          lock_at: nil)
         topic.update_based_on_date
         expect(topic.workflow_state).to eql "active"
@@ -974,7 +996,7 @@ describe DiscussionTopic do
       it "is post_delayed and remains like than even after publishing when delayed_post_at is in the future" do
         topic = delayed_discussion_topic(title: "title",
                                          message: "content here",
-                                         delayed_post_at: Time.now + 1.day,
+                                         delayed_post_at: 1.day.from_now,
                                          lock_at: nil)
         topic.update_based_on_date
         expect(topic.workflow_state).to eql "post_delayed"
@@ -983,20 +1005,11 @@ describe DiscussionTopic do
         expect(topic.workflow_state).to eql "post_delayed"
       end
 
-      it "is locked when lock_at is in the past" do
-        topic = delayed_discussion_topic(title: "title",
-                                         message: "content here",
-                                         delayed_post_at: nil,
-                                         lock_at: Time.now - 1.day)
-        topic.update_based_on_date
-        expect(topic.locked?).to be_truthy
-      end
-
       it "is active when lock_at is in the future" do
         topic = delayed_discussion_topic(title: "title",
                                          message: "content here",
                                          delayed_post_at: nil,
-                                         lock_at: Time.now + 1.day)
+                                         lock_at: 1.day.from_now)
         topic.update_based_on_date
         expect(topic.workflow_state).to eql "active"
         expect(topic.locked?).to be_falsey
@@ -1005,8 +1018,8 @@ describe DiscussionTopic do
       it "is active when now is between delayed_post_at and lock_at" do
         topic = delayed_discussion_topic(title: "title",
                                          message: "content here",
-                                         delayed_post_at: Time.now - 1.day,
-                                         lock_at: Time.now + 1.day)
+                                         delayed_post_at: 1.day.ago,
+                                         lock_at: 1.day.from_now)
         topic.update_based_on_date
         expect(topic.workflow_state).to eql "active"
         expect(topic.locked?).to be_falsey
@@ -1015,21 +1028,11 @@ describe DiscussionTopic do
       it "is post_delayed when delayed_post_at and lock_at are in the future" do
         topic = delayed_discussion_topic(title: "title",
                                          message: "content here",
-                                         delayed_post_at: Time.now + 1.day,
-                                         lock_at: Time.now + 3.days)
+                                         delayed_post_at: 1.day.from_now,
+                                         lock_at: 3.days.from_now)
         topic.update_based_on_date
         expect(topic.workflow_state).to eql "post_delayed"
         expect(topic.locked?).to be_falsey
-      end
-
-      it "is locked when delayed_post_at and lock_at are in the past" do
-        topic = delayed_discussion_topic(title: "title",
-                                         message: "content here",
-                                         delayed_post_at: Time.now - 3.days,
-                                         lock_at: Time.now - 1.day)
-        topic.update_based_on_date
-        expect(topic.workflow_state).to eql "active"
-        expect(topic.locked?).to be_truthy
       end
 
       it "does not unlock a topic even if the lock date is in the future" do
@@ -1038,7 +1041,7 @@ describe DiscussionTopic do
                                  workflow_state: "locked",
                                  locked: true,
                                  delayed_post_at: nil,
-                                 lock_at: Time.now + 1.day)
+                                 lock_at: 1.day.from_now)
         topic.update_based_on_date
         expect(topic.locked?).to be_truthy
       end
@@ -1047,7 +1050,7 @@ describe DiscussionTopic do
         topic = discussion_topic(title: "title",
                                  message: "content here",
                                  workflow_state: "active",
-                                 delayed_post_at: Time.now + 1.day,
+                                 delayed_post_at: 1.day.from_now,
                                  lock_at: nil)
         topic.update_based_on_date
         expect(topic.workflow_state).to eql "active"
@@ -1234,7 +1237,7 @@ describe DiscussionTopic do
     end
   end
 
-  context "#discussion_subentry_count" do
+  describe "#discussion_subentry_count" do
     it "returns the count of all active discussion_entries" do
       @topic = @course.discussion_topics.create(title: "topic")
       @topic.reply_from(user: @teacher, text: "entry 1").destroy  # no count
@@ -1318,7 +1321,7 @@ describe DiscussionTopic do
       )
 
       context_module = @course.context_modules.create!(name: "some module")
-      context_module.unlock_at = Time.now + 1.day
+      context_module.unlock_at = 1.day.from_now
       context_module.add_item(type: "discussion_topic", id: topic.id)
       context_module.save!
       topic.publish!
@@ -1381,7 +1384,7 @@ describe DiscussionTopic do
       expect(@student.stream_item_instances.count).to eq 1
 
       context_module = @course.context_modules.create!(name: "some module")
-      context_module.unlock_at = Time.now + 1.day
+      context_module.unlock_at = 1.day.from_now
       context_module.add_item(type: "discussion_topic", id: topic.id)
       context_module.save!
       topic.save!
@@ -1702,12 +1705,16 @@ describe DiscussionTopic do
 
           expect(DiscussionTopic.visible_to_students_in_course_with_da([@student1.id], [@course.id])).to include(@topic)
           expect(DiscussionTopic.visible_to_students_in_course_with_da([@student2.id], [@course.id])).not_to include(@topic)
+          expect(@topic.active_participants_with_visibility).to include(@student1)
+          expect(@topic.active_participants_with_visibility).not_to include(@student2)
         end
 
         it "is visible only to users who can access the assigned section" do
           @topic.assignment_overrides.create!(set: @course_section)
           expect(DiscussionTopic.visible_to_students_in_course_with_da([@student1.id], [@course.id])).not_to include(@topic)
           expect(DiscussionTopic.visible_to_students_in_course_with_da([@student2.id], [@course.id])).to include(@topic)
+          expect(@topic.active_participants_with_visibility).not_to include(@student1)
+          expect(@topic.active_participants_with_visibility).to include(@student2)
         end
 
         it "is visible only to students in module override section" do
@@ -2505,13 +2512,13 @@ describe DiscussionTopic do
 
     it "does not allow replies from students to discussion topic before unlock date" do
       @topic = @course.discussion_topics.create!(user: @teacher)
-      @topic.update_attribute(:delayed_post_at, Time.now + 1.day)
+      @topic.update_attribute(:delayed_post_at, 1.day.from_now)
       expect { @topic.reply_from(user: @student, text: "reply") }.to raise_error(IncomingMail::Errors::ReplyToLockedTopic)
     end
 
     it "does not allow replies from students to discussion topic after lock date" do
       @topic = @course.discussion_topics.create!(user: @teacher)
-      @topic.update_attribute(:lock_at, Time.now - 1.day)
+      @topic.update_attribute(:lock_at, 1.day.ago)
       expect { @topic.reply_from(user: @student, text: "reply") }.to raise_error(IncomingMail::Errors::ReplyToLockedTopic)
     end
 
@@ -3293,14 +3300,14 @@ describe DiscussionTopic do
     end
 
     it "prefers unlock_at to delayed_post_at" do
-      @topic[:delayed_post_at] = Time.now + 5.days
+      @topic[:delayed_post_at] = 5.days.from_now
       @topic[:unlock_at] = Time.now
       expect(@topic.delayed_post_at).to equal @topic[:unlock_at]
       expect(@topic.unlock_at).to equal @topic[:unlock_at]
     end
 
     it "defaults to delayed_post_at if unlock_at is nil" do
-      @topic[:delayed_post_at] = Time.now + 5.days
+      @topic[:delayed_post_at] = 5.days.from_now
       @topic[:unlock_at] = nil
       expect(@topic.delayed_post_at).to equal @topic[:delayed_post_at]
       expect(@topic.unlock_at).to equal @topic[:delayed_post_at]
@@ -3312,9 +3319,9 @@ describe DiscussionTopic do
       expect(@topic[:unlock_at]).to eq @topic.delayed_post_at
       expect(@topic.delayed_post_at).to eq @topic.unlock_at
 
-      @topic[:delayed_post_at] = Time.now + 5.days
+      @topic[:delayed_post_at] = 5.days.from_now
       @topic[:unlock_at] = nil
-      @topic.unlock_at = Time.now + 1.day
+      @topic.unlock_at = 1.day.from_now
       expect(@topic[:delayed_post_at]).to eq @topic[:unlock_at]
       expect(@topic[:unlock_at]).to eq @topic.delayed_post_at
       expect(@topic.delayed_post_at).to eq @topic.unlock_at
@@ -3590,6 +3597,20 @@ describe DiscussionTopic do
       expect(@topic.user_can_summarize?(@observer)).to be false
       expect(@topic.user_can_summarize?(@student)).to be false
     end
+
+    it "does not crash if the topic is in the context of a group with account context" do
+      account = @course.root_account
+      account.enable_feature!(:discussion_summary)
+      group = account.groups.create!
+      topic = group.discussion_topics.create!(title: "topic")
+
+      expect(topic.user_can_summarize?(@teacher)).to be false
+      expect(topic.user_can_summarize?(@ta)).to be false
+      expect(topic.user_can_summarize?(@admin)).to be false
+      expect(topic.user_can_summarize?(@designer)).to be false
+      expect(topic.user_can_summarize?(@observer)).to be false
+      expect(topic.user_can_summarize?(@student)).to be false
+    end
   end
 
   describe "low_level_locked_for?" do
@@ -3696,9 +3717,9 @@ describe DiscussionTopic do
         expect(@topic.locked_for?(@student)).to be_falsey
       end
 
-      it "still enforces the topic's dates" do
+      it "prefers the assignment's dates" do
         @topic.update(unlock_at: 1.week.from_now)
-        expect(@topic.locked_for?(@student)).to be_truthy
+        expect(@topic.locked_for?(@student)).to be_falsey
       end
 
       it "does not enforce the topic's overrides" do
@@ -3730,6 +3751,132 @@ describe DiscussionTopic do
         lock_info = @topic.locked_for?(@student)
         expect(lock_info).to be_truthy
         expect(lock_info[:unlock_at]).to eq timestamp
+      end
+
+      it "respects assignment's overrides when discussion is locked for everyone else" do
+        timestamp = 1.week.from_now
+        @topic.update!(lock_at: 1.week.ago)
+        ao = @assignment.assignment_overrides.create!(lock_at: timestamp, lock_at_overridden: true)
+        ao.assignment_override_students.create!(user: @student)
+        lock_info = @topic.locked_for?(@student)
+        expect(lock_info).to be_falsey
+      end
+    end
+  end
+
+  describe "edited_at" do
+    it "returns null if no change to the title or message occurred" do
+      topic = discussion_topic_model
+      expect(topic.edited_at).to be_nil
+      topic.context_code = "other context"
+      topic.save!
+      expect(topic.edited_at).to be_nil
+    end
+
+    it "returns not null if a change to the title occured" do
+      topic = discussion_topic_model
+      expect(topic.edited_at).to be_nil
+      topic.title = "Brand new shinny title"
+      topic.save!
+      expect(topic.edited_at).not_to be_nil
+    end
+
+    it "returns not null if a change to the message occured" do
+      topic = discussion_topic_model
+      expect(topic.edited_at).to be_nil
+      topic.message = "Brand new shinny message"
+      topic.save!
+      expect(topic.edited_at).not_to be_nil
+    end
+  end
+
+  describe "show_in_search_for_user?" do
+    shared_examples_for "expected_values_for_teacher_student" do |teacher_expected, student_expected|
+      it "is #{teacher_expected} for teacher" do
+        expect(topic.show_in_search_for_user?(@teacher)).to eq(teacher_expected)
+      end
+
+      it "is #{student_expected} for student" do
+        expect(topic.show_in_search_for_user?(@student)).to eq(student_expected)
+      end
+    end
+
+    let(:topic) { @course.discussion_topics.create!(title: "topic") }
+
+    before(:once) do
+      course_with_teacher(active_all: true)
+      student_in_course(active_all: true)
+    end
+
+    include_examples "expected_values_for_teacher_student", true, true
+
+    context "topic is locked" do
+      let(:topic) { @course.discussion_topics.create!(title: "locked topic", unlock_at: 1.week.from_now) }
+
+      include_examples "expected_values_for_teacher_student", true, false
+
+      context "and was previously unlocked" do
+        before { topic.update!(lock_at: 1.week.ago, unlock_at: 2.weeks.ago) }
+
+        include_examples "expected_values_for_teacher_student", true, true
+      end
+    end
+
+    context "topic is delayed" do
+      let(:topic) { @course.discussion_topics.create!(title: "delayed topic", delayed_post_at: 1.week.from_now) }
+
+      include_examples "expected_values_for_teacher_student", true, false
+    end
+
+    context "topic is unpublished" do
+      let(:topic) { @course.discussion_topics.create!(title: "unpublished topic", workflow_state: "unpublished") }
+
+      include_examples "expected_values_for_teacher_student", true, false
+    end
+
+    context "topic is deleted" do
+      let(:topic) do
+        topic = @course.discussion_topics.create!(title: "deleted topic", workflow_state: "deleted")
+        topic.destroy!
+        topic
+      end
+
+      include_examples "expected_values_for_teacher_student", false, false
+    end
+
+    context "topic is in a module" do
+      let(:topic) { @course.discussion_topics.create!(title: "module topic") }
+
+      before do
+        @context_module = @course.context_modules.create!(name: "module")
+        @context_module.add_item(type: "discussion_topic", id: topic.id)
+        @context_module.save!
+
+        second_module = @course.context_modules.create!(name: "module", workflow_state: "unpublished")
+        second_module.add_item(type: "discussion_topic", id: topic.id)
+        second_module.save!
+      end
+
+      after do
+        @course.context_modules.destroy_all
+      end
+
+      include_examples "expected_values_for_teacher_student", true, true
+
+      context "and the module is unpublished" do
+        before do
+          @context_module.unpublish!
+        end
+
+        include_examples "expected_values_for_teacher_student", true, false
+      end
+
+      context "and the module is locked" do
+        before do
+          @context_module.update!(unlock_at: 1.week.from_now)
+        end
+
+        include_examples "expected_values_for_teacher_student", true, false
       end
     end
   end

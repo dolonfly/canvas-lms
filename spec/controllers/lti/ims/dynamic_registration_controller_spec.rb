@@ -162,6 +162,22 @@ describe Lti::IMS::DynamicRegistrationController do
           expect(created_registration.registration_url).to eq("https://example.com/registration")
         end
 
+        it "validates using the schema's to_model_attrs" do
+          expect(Schemas::Lti::IMS::OidcRegistration).to receive(:to_model_attrs).and_call_original
+          subject
+          expect(response).to have_http_status(:ok)
+        end
+
+        it "returns the errors if to_model_attrs returns errors" do
+          to_model_attrs_result = { errors: ["oopsy"], registration_attrs: nil }
+          expect(Schemas::Lti::IMS::OidcRegistration).to \
+            receive(:to_model_attrs).and_return(to_model_attrs_result)
+
+          subject
+          expect(response).to have_http_status(:unprocessable_entity)
+          expect(response.body).to match(/oopsy/)
+        end
+
         it "fills in values on the developer key" do
           subject
           dk = DeveloperKey.last
@@ -192,7 +208,7 @@ describe Lti::IMS::DynamicRegistrationController do
           it "returns a 422 with validation errors" do
             subject
             expect(response).to have_http_status(:unprocessable_entity)
-            expect(response.body).to include("Must include client_credentials, implicit")
+            expect(response.body).to match(/grant_types.*client_credentials/)
           end
 
           it "doesn't create a stray developer key" do
@@ -210,7 +226,7 @@ describe Lti::IMS::DynamicRegistrationController do
           it "returns a 422 with validation errors" do
             subject
             expect(response).to have_http_status(:unprocessable_entity)
-            expect(response.body).to include("Must include id_token")
+            expect(response.body).to match(/response_types.*id_token/)
           end
 
           it "doesn't create a stray developer key" do
@@ -228,7 +244,7 @@ describe Lti::IMS::DynamicRegistrationController do
           it "returns a 422 with validation errors" do
             subject
             expect(response).to have_http_status(:unprocessable_entity)
-            expect(response.body).to include("Must be 'private_key_jwt'")
+            expect(response.body).to match(/token_endpoint_auth_method.*private_key_jwt/)
           end
 
           it "doesn't create a stray developer key" do
@@ -278,6 +294,73 @@ describe Lti::IMS::DynamicRegistrationController do
           expect(response).to have_http_status(:unauthorized)
         end
       end
+    end
+  end
+
+  describe "#show" do
+    subject do
+      get :show, params: { registration_id: registration.id, account_id: account.id }
+    end
+
+    let(:response_data) { response.parsed_body }
+    let(:account) { Account.default }
+    let(:registration) { lti_ims_registration_model(account:) }
+
+    before do
+      account.enable_feature!(:lti_dynamic_registration)
+    end
+
+    context "with a user session" do
+      let(:user) { account_admin_user(account:) }
+
+      before do
+        user_session(user)
+      end
+
+      it { is_expected.to be_successful }
+
+      it "returns the expected fields" do
+        subject
+        expected = %w[
+          id
+          lti_registration_id
+          developer_key_id
+          overlay
+          lti_tool_configuration
+          application_type
+          grant_types
+          response_types
+          redirect_uris
+          initiate_login_uri
+          client_name
+          jwks_uri
+          logo_uri
+          token_endpoint_auth_method
+          contacts
+          client_uri
+          policy_uri
+          tos_uri
+          scopes
+          created_at
+          updated_at
+          guid
+          tool_configuration
+          default_configuration
+        ]
+        expect(response_data).to include(*expected)
+      end
+    end
+
+    context "without a user session" do
+      it { is_expected.to be_redirect }
+    end
+
+    context "without the feature flag enabled" do
+      before do
+        account.disable_feature!(:lti_dynamic_registration)
+      end
+
+      it { is_expected.to be_not_found }
     end
   end
 
@@ -416,6 +499,35 @@ describe Lti::IMS::DynamicRegistrationController do
       get :dr_iframe, params: { account_id: Account.default.id, url: "http://testexample.com?registration_token=#{valid_jwt}" }
       expect(response).to be_successful
       expect(response.headers["Content-Security-Policy"]).to include("testexample.com")
+    end
+  end
+
+  describe "#update_registration_overlay" do
+    let(:overlay) do
+      {
+        disabledPlacements: ["course_navigation"],
+        placements: [
+          {
+            type: "account_navigation",
+            icon_url: "https://example.com/icon.jpg"
+          }
+        ]
+      }
+    end
+
+    it "updates the registration_overlay on the registration" do
+      registration = lti_ims_registration_model(account: Account.default)
+      user_session(account_admin_user(account: Account.default))
+      put :update_registration_overlay, params: { account_id: Account.default.id, registration_id: registration.id }, body: overlay.to_json
+      expect(response).to be_successful
+      expect(Lti::IMS::Registration.find(registration.id).registration_overlay).to eq(overlay.deep_stringify_keys)
+    end
+
+    it "returns a 422 if the request body does not meet the schema" do
+      registration = lti_ims_registration_model(account: Account.default)
+      user_session(account_admin_user(account: Account.default))
+      put :update_registration_overlay, params: { account_id: Account.default.id, registration_id: registration.id }, body: overlay.merge({ invalid: "data" }).to_json
+      expect(response).to have_http_status(:unprocessable_entity)
     end
   end
 end

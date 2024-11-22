@@ -27,7 +27,8 @@ describe DataFixup::CreateLtiRegistrationsFromDeveloperKeys do
       key = dev_key_model_1_3(account: second_account)
       reg = key.lti_registration
       key.update(lti_registration: nil, skip_lti_sync: true)
-      reg.destroy_permanently!
+      key.tool_configuration.update(lti_registration: nil)
+      reg.delete
       key
     end
 
@@ -37,7 +38,8 @@ describe DataFixup::CreateLtiRegistrationsFromDeveloperKeys do
         # dev_key_model factory creates reg automatically and ignores the skip_lti_sync param
         reg = key.lti_registration
         key.update(lti_registration: nil, skip_lti_sync: true)
-        reg.destroy_permanently!
+        key.tool_configuration.update(lti_registration: nil)
+        reg.delete
       end
     end
 
@@ -76,11 +78,27 @@ describe DataFixup::CreateLtiRegistrationsFromDeveloperKeys do
       end
     end
 
+    context "and with a site admin developer key" do
+      before do
+        key = dev_key_model_1_3(account: Account.site_admin)
+        # dev_key_model factory creates reg automatically and ignores the skip_lti_sync param
+        reg = key.lti_registration
+        key.update(lti_registration: nil, skip_lti_sync: true)
+        key.tool_configuration.update(lti_registration: nil)
+        reg.delete
+      end
+
+      it "creates a site admin registration" do
+        expect { described_class.run }
+          .to change { Lti::Registration.where(account: Account.site_admin).count }.by(1)
+      end
+    end
+
     context "when the registraton can't be saved" do
       let(:scope) { double("scope") }
 
       before do
-        second_account_key.update_attribute!("account_id", nil)
+        second_account_key.update_attribute!("account_id", Account.last.id + 1)
       end
 
       it "sends an error to sentry" do

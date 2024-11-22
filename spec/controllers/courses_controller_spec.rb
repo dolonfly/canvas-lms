@@ -59,7 +59,7 @@ describe CoursesController do
     it "does not duplicate enrollments in variables" do
       course_with_student_logged_in(active_all: true)
       course_factory
-      @course.start_at = Time.now + 2.weeks
+      @course.start_at = 2.weeks.from_now
       @course.restrict_enrollments_to_course_dates = true
       @course.save!
       @course.offer!
@@ -1209,7 +1209,7 @@ describe CoursesController do
       course_with_student_logged_in(active_all: true)
 
       @course.update(restrict_enrollments_to_course_dates: true,
-                     start_at: Time.now + 2.weeks)
+                     start_at: 2.weeks.from_now)
       @enrollment.update(workflow_state: "invited", last_activity_at: nil)
 
       post "enrollment_invitation", params: { course_id: @course.id,
@@ -1331,7 +1331,7 @@ describe CoursesController do
     it "shows unauthorized/authorized to a student for a future course depending on restrict_student_future_view setting" do
       course_with_student_logged_in(active_course: 1)
 
-      @course.start_at = Time.now + 2.weeks
+      @course.start_at = 2.weeks.from_now
       @course.restrict_enrollments_to_course_dates = true
       @course.restrict_student_future_view = true
       @course.save!
@@ -1451,6 +1451,14 @@ describe CoursesController do
           later_assignment = @course1.assignments.create!(due_at: 2.days.from_now)
           get "show", params: { id: @course1.id }
           expect(assigns(:upcoming_assignments)).to eq [@assignment, later_assignment]
+        end
+
+        it "includes discussion checkpoints if discussion checkpoints enabled" do
+          @course1.root_account.enable_feature!(:discussion_checkpoints)
+          @reply_to_topic, @reply_to_entry = graded_discussion_topic_with_checkpoints(context: @course1)
+          get "show", params: { id: @course1.id }
+          expect(assigns(:upcoming_assignments)).to include @reply_to_topic
+          expect(assigns(:upcoming_assignments)).to include @reply_to_entry
         end
       end
 
@@ -2519,6 +2527,38 @@ describe CoursesController do
       expect(Course.find(json["id"]).grade_passback_setting).to eq "nightly_sync"
     end
 
+    describe "post policy" do
+      it "sets to true" do
+        post "create",
+             params: {
+               account_id: @account.id,
+               course: {
+                 name: "new course with post policy set to true",
+                 post_manually: true
+               }
+             },
+             format: :json
+
+        json = response.parsed_body
+        expect(Course.find(json["id"]).post_manually?).to be true
+      end
+
+      it "sets to false" do
+        post "create",
+             params: {
+               account_id: @account.id,
+               course: {
+                 name: "new course with post policy set to false",
+                 post_manually: false
+               }
+             },
+             format: :json
+
+        json = response.parsed_body
+        expect(Course.find(json["id"]).post_manually?).to be false
+      end
+    end
+
     it "does not allow visibility to be set when we don't have permission" do
       @visperm.enabled = false
       @visperm.save
@@ -2926,7 +2966,7 @@ describe CoursesController do
       deleted_announcement = @course.announcements.create!(title: "deleted", message: "test")
 
       delayed_announcement.workflow_state  = "post_delayed"
-      delayed_announcement.delayed_post_at = Time.now + 3.weeks
+      delayed_announcement.delayed_post_at = 3.weeks.from_now
       delayed_announcement.save!
 
       deleted_announcement.destroy
@@ -3015,6 +3055,24 @@ describe CoursesController do
 
       @course.reload
       expect(@course.account_id).to eq account2.id
+    end
+
+    describe "post policy" do
+      before do
+        user_session(@teacher)
+      end
+
+      it "updates to true" do
+        put "update", params: { id: @course.id, course: { post_manually: true } }
+        @course.reload
+        expect(@course.post_manually?).to be true
+      end
+
+      it "updates to false" do
+        put "update", params: { id: @course.id, course: { post_manually: false } }
+        @course.reload
+        expect(@course.post_manually?).to be false
+      end
     end
 
     describe "touching content when public visibility changes" do
@@ -3519,6 +3577,7 @@ describe CoursesController do
       init_course_name = @course.name
 
       put "update", params: { id: @course.id, course: { name: "123456" }, override_sis_stickiness: false, format: :json }
+      expect(response).to be_successful
 
       @course.reload
       expect(@course.name).to eq init_course_name

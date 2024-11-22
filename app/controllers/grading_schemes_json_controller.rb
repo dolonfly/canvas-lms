@@ -22,13 +22,13 @@ class GradingSchemesJsonController < ApplicationController
   extend GradingSchemeSerializer
 
   GRADING_SCHEMES_LIMIT = 100
-  USED_LOCATIONS_PER_PAGE = 100
+  USED_LOCATIONS_PER_PAGE = 50
   before_action :require_context
   before_action :require_user
   before_action :validate_read_permission, only: %i[grouped_list detail_list summary_list show]
 
   def grouped_list
-    standards = grading_standards_for_context.preload(:assignments, :courses, :accounts).sorted.limit(GRADING_SCHEMES_LIMIT)
+    standards = grading_standards_for_context.sorted.limit(GRADING_SCHEMES_LIMIT)
     render json: {
       archived: standards.select(&:archived?).map do |grading_standard|
         GradingSchemesJsonController.to_grading_scheme_json(grading_standard, @current_user)
@@ -41,7 +41,6 @@ class GradingSchemesJsonController < ApplicationController
 
   def detail_list
     grading_standards = grading_standards_for_context(include_parent_accounts: false)
-                        .preload(:assignments, :courses, :accounts)
                         .sorted.limit(GRADING_SCHEMES_LIMIT)
     respond_to do |format|
       format.json do
@@ -79,6 +78,71 @@ class GradingSchemesJsonController < ApplicationController
     end
   end
 
+  def regrade_affected_assignments(assignments, grading_standard)
+    regrade_affected_submissions(assignments, grading_standard)
+    regrade_affected_submission_versions(assignments, grading_standard)
+  end
+
+  def regrade_affected_submissions(assignments, grading_standard)
+    submissions_with_grades = Submission.where.not(grade: nil).where(assignment_id: assignments.select(:id))
+    submissions_with_grades.preload(assignment: [:grading_standard, { context: :grading_standard }]).find_in_batches(batch_size: 1000) do |submissions_batch|
+      batched_updates = submissions_batch.each_with_object([]) do |submission, acc|
+        next if submission.assignment.points_possible.zero?
+
+        score = BigDecimal(submission.score.to_s.presence || "0.0") / BigDecimal(submission.assignment.points_possible.to_s)
+        new_grade = grading_standard.score_to_grade((score * 100).to_f)
+        grade_has_changed = new_grade != submission.grade || new_grade != submission.published_grade
+        if grade_has_changed
+          acc << submission.attributes.merge("grade" => new_grade, "published_grade" => new_grade, "updated_at" => Time.now)
+        end
+      end
+
+      Submission.upsert_all(
+        batched_updates,
+        unique_by: :id,
+        update_only: %i[grade published_grade updated_at],
+        record_timestamps: false,
+        returning: false
+      )
+    end
+  end
+
+  def regrade_affected_submission_versions(assignments, grading_standard)
+    current_versions_for_submissions = Version
+                                       .where(versionable: Submission.where(assignment: assignments))
+                                       .order(versionable_id: :asc, number: :desc)
+                                       .distinct_on(:versionable_id) # we only want the _most recent_ version associated with each submission
+    ActiveRecord::Base.transaction do
+      current_versions_for_submissions.preload(versionable: { assignment: [:grading_standard, { context: :grading_standard }] }).find_each do |version|
+        model = version.model
+        next unless model.grade.present? && version.versionable.assignment.points_possible.positive?
+
+        score = BigDecimal(model.score.to_s.presence || "0.0") / BigDecimal(model.assignment.points_possible.to_s)
+        new_grade = grading_standard.score_to_grade((score * 100).to_f)
+        grade_has_changed = new_grade != model.grade || new_grade != model.published_grade
+        next unless grade_has_changed
+
+        model.grade = new_grade
+        model.published_grade = new_grade
+        yaml = model.attributes.to_yaml
+        # We can't use the same upsert_all approach that we used in regrade_affected_submissions
+        # because the versions table is partitioned.
+        version.update_columns(yaml:)
+      end
+    end
+  end
+
+  def recompute_assignments_using_account_default(account, grading_standard)
+    account.courses.where(grading_standard_id: nil).where.not(workflow_state: "completed").where.not(workflow_state: "deleted").find_each do |course|
+      affected_assignments = course.assignments.where(grading_type: ["letter_grade", "gpa_scale"], grading_standard_id: nil)
+      delay_if_production(priority: Delayed::LOWER_PRIORITY, strand: ["recalc_account_default", Shard.current.database_server.id], singleton: "recalc_account_default:#{course.global_id}").regrade_affected_assignments(affected_assignments, grading_standard)
+    end
+
+    account.sub_accounts.where(grading_standard: nil).find_each do |sub_account|
+      recompute_assignments_using_account_default(sub_account, grading_standard)
+    end
+  end
+
   def update_account_default_grading_scheme
     return unless Account.site_admin.feature_enabled?(:default_account_grading_scheme)
     return unless @context.is_a?(Account)
@@ -99,6 +163,7 @@ class GradingSchemesJsonController < ApplicationController
 
     respond_to do |format|
       if @context.save
+        recompute_assignments_using_account_default(@context, @context.grading_standard || GradingStandard.default_instance)
         format.json { render json: response }
       else
         format.json { render json: @context.errors, status: :bad_request }
@@ -159,7 +224,36 @@ class GradingSchemesJsonController < ApplicationController
     grading_standard = grading_standards_for_context.find(params[:id])
     return unless authorized_action(grading_standard, @current_user, :manage)
 
-    render json: used_locations_for(grading_standard)
+    render json: courses_using(grading_standard)
+  end
+
+  def used_locations_for_course
+    grading_standard = grading_standards_for_context.find(params[:id])
+    return unless authorized_action(grading_standard, @current_user, :manage)
+
+    scope = grading_standard.assignments
+                            .where(context_id: params[:course_id], context_type: Course.to_s)
+                            .active
+                            .select(:title, :context_id, :id)
+                            .order(:title)
+
+    assignments = Api.paginate(
+      scope,
+      self,
+      account_grading_schemes_used_locations_for_course_path(
+        account_id: @context.id, id: grading_standard.id, course_id: params[:course_id]
+      ),
+      per_page: USED_LOCATIONS_PER_PAGE
+    )
+
+    render json: assignments.map { |assignment| assignment.as_json(only: [:id, :title], include_root: false) }
+  end
+
+  def account_used_locations
+    grading_standard = grading_standards_for_context.find(params[:id])
+    return unless authorized_action(grading_standard, @current_user, :manage)
+
+    render json: accounts_using(grading_standard)
   end
 
   def archive
@@ -211,13 +305,23 @@ class GradingSchemesJsonController < ApplicationController
     end
   end
 
-  def used_locations_for(grading_standard)
+  def accounts_using(grading_standard)
     GuardRail.activate(:secondary) do
-      scope = grading_standard.used_locations
-                              .joins("INNER JOIN #{Course.quoted_table_name} ON assignments.context_type = 'Course' AND assignments.context_id = courses.id")
-                              .order("courses.name ASC, title ASC")
+      grading_standard.accounts.order(:name).select(:id, :name).map do |account|
+        account.as_json(only: [:id, :name], include_root: false)
+      end
+    end
+  end
 
-      used_locations = Api.paginate(
+  def courses_using(grading_standard)
+    GuardRail.activate(:secondary) do
+      courses_ids = grading_standard.courses.active.pluck(:id)
+      assignments_courses_ids = grading_standard.assignments.active.pluck(:context_id)
+      all_courses_ids = (assignments_courses_ids + courses_ids).compact.uniq
+
+      scope = Course.where(id: all_courses_ids).active.order(:name)
+
+      courses = Api.paginate(
         scope,
         self,
         account_grading_schemes_used_locations_path(
@@ -226,15 +330,12 @@ class GradingSchemesJsonController < ApplicationController
         per_page: USED_LOCATIONS_PER_PAGE
       )
 
-      used_locations_to_json(used_locations)
-    end
-  end
-
-  def used_locations_to_json(used_locations)
-    used_locations.group_by(&:context).map do |course, assignments|
-      course_json = course.as_json(only: [:id, :name], methods: [:concluded?], include_root: false)
-      course_json[:assignments] = assignments.as_json(only: [:id, :title], include_root: false)
-      course_json
+      courses.map do |course|
+        course_json = course.as_json(only: [:id, :name], methods: [:concluded?], include_root: false)
+        course_json[:with_assignments] = assignments_courses_ids.include?(course.id)
+        course_json[:assignments] = []
+        course_json
+      end
     end
   end
 

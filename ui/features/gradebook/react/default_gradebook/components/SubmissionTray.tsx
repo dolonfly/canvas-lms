@@ -19,6 +19,7 @@
 
 import React from 'react'
 import {useScope as useI18nScope} from '@canvas/i18n'
+import SubmissionSticker, {stickersAvailable} from '@canvas/submission-sticker'
 import {ApolloProvider, createClient} from '@canvas/apollo'
 import FriendlyDatetime from '@canvas/datetime/react/components/FriendlyDatetime'
 import type {GradeStatus} from '@canvas/grading/accountGradingStatus'
@@ -28,6 +29,7 @@ import {Text} from '@instructure/ui-text'
 import {Heading} from '@instructure/ui-heading'
 import {Avatar} from '@instructure/ui-avatar'
 import {Spinner} from '@instructure/ui-spinner'
+import {Flex} from '@instructure/ui-flex'
 import {Button, CloseButton} from '@instructure/ui-buttons'
 import {View} from '@instructure/ui-view'
 import {Tray} from '@instructure/ui-tray'
@@ -80,6 +82,7 @@ function renderTraySubHeading(headingText: string) {
 
 export type SubmissionTrayProps = {
   assignment: CamelizedAssignment
+  assignmentEnhancementsEnabled: boolean
   currentUserId: string
   editedCommentId: string | null
   gradingDisabled: boolean
@@ -104,6 +107,7 @@ export type SubmissionTrayProps = {
   speedGraderEnabled: boolean
   submissionUpdating: boolean
   submissionCommentsLoaded: boolean
+  stickersEnabled: boolean
   processing: boolean
   isInOtherGradingPeriod: boolean
   isInClosedGradingPeriod: boolean
@@ -117,6 +121,7 @@ export type SubmissionTrayProps = {
   locale: string
   editSubmissionComment: (commentId: string | null) => void
   onClose: () => void
+  onStickerChange: (submission: any, sticker: string | null) => void
   requireStudentGroupForSpeedGrader: boolean
   gradingScheme: null | GradingStandard[]
   pointsBasedGradingScheme: boolean
@@ -218,7 +223,6 @@ export default class SubmissionTray extends React.Component<
         } else if (subSubmission.excused) {
           status = EXCUSED
         }
-
         return {
           label: subSubmission.sub_assignment_tag,
           status,
@@ -508,6 +512,32 @@ export default class SubmissionTray extends React.Component<
       }
     }
 
+    const checkLatePolicyStatus = (submission, gradeInfo) => {
+      const {status, secondsLate} = this.state.checkpointStates.find(
+        e => e.label === gradeInfo.subAssignmentTag
+      )
+      const subAssignmentFromProps = this.props.submission.subAssignmentSubmissions.find(
+        e => e.sub_assignment_tag === gradeInfo.subAssignmentTag
+      )
+      if (status !== subAssignmentFromProps.late_policy_status) {
+        const data: PendingUpdateData = {
+          subAssignmentTag: gradeInfo.subAssignmentTag,
+          postedGrade: gradeInfo.grade,
+        }
+        if (status === EXCUSED) {
+          data.excuse = true
+        } else {
+          data.excuse = false
+          data.latePolicyStatus = status
+        }
+        if (secondsLate !== 0) data.secondsLateOverride = secondsLate
+
+        this.props.updateSubmission(data)
+      } else {
+        this.props.onGradeSubmission(submission, gradeInfo)
+      }
+    }
+
     const renderInputsForCheckpoints = (
       hasCheckpoints,
       props,
@@ -526,7 +556,7 @@ export default class SubmissionTray extends React.Component<
           gradingScheme={props.gradingScheme}
           pointsBasedGradingScheme={props.pointsBasedGradingScheme}
           pendingGradeInfo={props.pendingGradeInfo}
-          onGradeSubmission={props.onGradeSubmission}
+          onGradeSubmission={checkLatePolicyStatus}
           scalingFactor={props.scalingFactor}
           submission={submission}
           submissionUpdating={props.submissionUpdating}
@@ -579,6 +609,14 @@ export default class SubmissionTray extends React.Component<
     const onClose = () => {
       this.props.onClose()
     }
+
+    const showSticker = stickersAvailable(
+      {
+        assignmentEnhancementsEnabled: this.props.assignmentEnhancementsEnabled,
+        stickersEnabled: this.props.stickersEnabled,
+      },
+      this.props.assignment
+    )
 
     return (
       <ApolloProvider client={createClient()}>
@@ -677,19 +715,42 @@ export default class SubmissionTray extends React.Component<
                   replyToEntrySubmission,
                   I18n.t('Required Replies')
                 )}
-                <GradeInput
-                  assignment={this.props.assignment}
-                  disabled={this.props.gradingDisabled || hasCheckpoints}
-                  enterGradesAs={this.props.enterGradesAs}
-                  gradingScheme={this.props.gradingScheme}
-                  pointsBasedGradingScheme={this.props.pointsBasedGradingScheme}
-                  pendingGradeInfo={this.props.pendingGradeInfo}
-                  onSubmissionUpdate={this.props.onGradeSubmission}
-                  scalingFactor={this.props.scalingFactor}
-                  submission={this.props.submission}
-                  submissionUpdating={this.props.submissionUpdating}
-                  header={hasCheckpoints ? I18n.t('Current Total') : undefined}
-                />
+                <Flex
+                  margin="none small none xx-small"
+                  gap="none x-large"
+                  alignItems="start"
+                  justifyItems="space-between"
+                >
+                  <Flex.Item flex="2" shouldShrink={true}>
+                    <GradeInput
+                      assignment={this.props.assignment}
+                      disabled={this.props.gradingDisabled || hasCheckpoints}
+                      enterGradesAs={this.props.enterGradesAs}
+                      gradingScheme={this.props.gradingScheme}
+                      pointsBasedGradingScheme={this.props.pointsBasedGradingScheme}
+                      pendingGradeInfo={this.props.pendingGradeInfo}
+                      onSubmissionUpdate={this.props.onGradeSubmission}
+                      scalingFactor={this.props.scalingFactor}
+                      submission={this.props.submission}
+                      submissionUpdating={this.props.submissionUpdating}
+                      header={hasCheckpoints ? I18n.t('Current Total') : undefined}
+                    />
+                  </Flex.Item>
+
+                  {showSticker && (
+                    <Flex.Item flex="1" margin="xx-small none none none">
+                      <SubmissionSticker
+                        confetti={false}
+                        size="small"
+                        submission={{...this.props.submission, courseId: this.props.courseId}}
+                        onStickerChange={sticker =>
+                          this.props.onStickerChange(this.props.submission, sticker)
+                        }
+                        editable={true}
+                      />
+                    </Flex.Item>
+                  )}
+                </Flex>
                 {!!this.props.submission.pointsDeducted && (
                   <View as="div" margin="small 0 0 0">
                     <LatePolicyGrade

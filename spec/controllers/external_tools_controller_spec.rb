@@ -232,6 +232,34 @@ describe ExternalToolsController do
               subject
               expect(cached_launch["post_payload"]["https://www.instructure.com/lti_student_id"]).to eq(student.global_id.to_s)
             end
+
+            it "includes student context in launch" do
+              subject
+              expect(cached_launch["post_payload"]["https://www.instructure.com/student_context"]).to eq({ "id" => student.lti_id.to_s })
+            end
+          end
+        end
+
+        context "logging" do
+          before do
+            allow(Lti::LogService).to receive(:new) do
+              double("Lti::LogService").tap { |s| allow(s).to receive(:call) }
+            end
+            user_session(@teacher)
+          end
+
+          it "logs launch with placement and indirect_link launch_type" do
+            expect(Lti::LogService).to receive(:new).with(
+              tool:,
+              context: @course,
+              user: @teacher,
+              session_id: nil,
+              placement: "course_navigation",
+              launch_type: :direct_link,
+              launch_url: "http://www.example.com/basic_lti"
+            )
+
+            subject
           end
         end
       end
@@ -1251,7 +1279,8 @@ describe ExternalToolsController do
             user: @teacher,
             session_id: nil,
             placement:,
-            launch_type: :indirect_link
+            launch_type: :indirect_link,
+            launch_url: "http://www.example.com/basic_lti?first=john&last=smith"
           )
 
           get "retrieve", params: { course_id: @course.id, url: tool.url, placement: }
@@ -1266,7 +1295,8 @@ describe ExternalToolsController do
             user: @teacher,
             session_id: nil,
             placement: nil,
-            launch_type: :content_item
+            launch_type: :content_item,
+            launch_url: "http://www.example.com/basic_lti?first=john&last=smith"
           )
 
           get "retrieve", params: { course_id: @course.id, url: tool.url }
@@ -2004,7 +2034,7 @@ describe ExternalToolsController do
         </cartridge_basiclti_link>
       XML
     end
-    let(:xml_response) { OpenStruct.new({ body: xml }) }
+    let(:xml_response) { instance_double("Net::HTTPResponse", body: xml) }
 
     context "with client id" do
       subject do
@@ -2015,8 +2045,7 @@ describe ExternalToolsController do
       include_context "lti_1_3_spec_helper"
 
       let(:tool_id) { (response.status == 200) ? response.parsed_body["id"] : -1 }
-      let(:tool_configuration) { Lti::ToolConfiguration.create! settings:, developer_key: }
-      let(:developer_key) { DeveloperKey.create!(account:) }
+      let(:developer_key) { dev_key_model_1_3(account:, settings:) }
       let_once(:user) { account_admin_user(account:) }
       let_once(:account) { account_model }
       let(:params) do
@@ -2028,7 +2057,6 @@ describe ExternalToolsController do
 
       before do
         user_session(user)
-        tool_configuration
         enable_developer_key_account_binding!(developer_key)
       end
 
@@ -2058,7 +2086,8 @@ describe ExternalToolsController do
 
       context "with no account binding" do
         before do
-          developer_key.developer_key_account_bindings.destroy_all
+          developer_key.lti_registration.lti_registration_account_bindings.each(&:destroy!)
+          developer_key.developer_key_account_bindings.each(&:destroy!)
         end
 
         it "return 422" do
@@ -2152,11 +2181,10 @@ describe ExternalToolsController do
 
       context "create via client id" do
         include_context "lti_1_3_spec_helper"
-        let(:tool_configuration) { Lti::ToolConfiguration.create! settings:, developer_key: }
-        let(:developer_key) { DeveloperKey.create!(account: @course.account) }
+        let(:developer_key) { dev_key_model_1_3(account: @course.account, settings:) }
 
         before do
-          tool = tool_configuration.new_external_tool(@course)
+          tool = developer_key.lti_registration.new_external_tool(@course)
           tool.save!
           enable_developer_key_account_binding!(developer_key)
         end
@@ -2379,7 +2407,7 @@ describe ExternalToolsController do
             <cartridge_icon identifierref="BLTI001_Icon"/>
         </cartridge_basiclti_link>
       XML
-      obj = OpenStruct.new({ body: xml })
+      obj = instance_double("Net::HTTPResponse", body: xml)
       allow(CanvasHttp).to receive(:get).and_return(obj)
       post "create", params: { course_id: @course.id, external_tool: { name: "tool name", url: "http://example.com", consumer_key: "key", shared_secret: "secret", config_type: "by_url", config_url: "http://config.example.com" } }, format: "json"
 
@@ -2939,7 +2967,7 @@ describe ExternalToolsController do
       include_context "lti_1_3_spec_helper"
 
       let(:tool) do
-        t = tool_configuration.new_external_tool(@course)
+        t = developer_key.lti_registration.new_external_tool(@course)
         t.save!
         t
       end
@@ -2967,7 +2995,7 @@ describe ExternalToolsController do
       end
 
       it "returns the lti 1.3 launch url with a session token when given a url and tool id" do
-        get :generate_sessionless_launch, params: params.merge(url: "http://lti13testtool.docker/deep_link")
+        get :generate_sessionless_launch, params: params.merge(url: "https://www.lti13testtool.docker/deep_link")
         expect(response).to be_successful
 
         expect(url.path).to eq("#{course_external_tools_path(@course)}/#{tool.id}")
@@ -2978,9 +3006,9 @@ describe ExternalToolsController do
       end
 
       it "returns the specified launch url for a deep link" do
-        get :generate_sessionless_launch, params: params.merge(id: tool.id, url: "http://lti13testtool.docker/deep_link")
+        get :generate_sessionless_launch, params: params.merge(id: tool.id, url: "https://www.lti13testtool.docker/deep_link")
         expect(response).to be_successful
-        expect(query_params["launch_url"]).to eq ["http://lti13testtool.docker/deep_link"]
+        expect(query_params["launch_url"]).to eq ["https://www.lti13testtool.docker/deep_link"]
       end
 
       context "when not passing tool_id" do
@@ -3034,7 +3062,7 @@ describe ExternalToolsController do
         specs_require_sharding
 
         let!(:tool) do
-          t = tool_configuration.new_external_tool(course)
+          t = developer_key.lti_registration.new_external_tool(course)
           t.save!
           t
         end
@@ -3047,7 +3075,7 @@ describe ExternalToolsController do
         end
 
         let(:user) { @shard2.activate { user_model(name: "cross-shard user") } }
-        let(:developer_key) { DeveloperKey.create!(account:) }
+        let(:developer_key) { dev_key_model_1_3(account:) }
         let(:account) { Account.default }
         let(:tool_root_account) { account_model }
         let(:access_token) { pseudonym(user).user.access_tokens.create(purpose: "test") }
@@ -3083,7 +3111,7 @@ describe ExternalToolsController do
 
         context "when the context is not a course" do
           let!(:tool) do
-            t = tool_configuration.new_external_tool(course.account)
+            t = developer_key.lti_registration.new_external_tool(course.account)
             t.save!
             t
           end
@@ -3239,7 +3267,8 @@ describe ExternalToolsController do
         user: @user,
         session_id: nil,
         placement: "course_navigation",
-        launch_type: :direct_link
+        launch_type: :direct_link,
+        launch_url: "http://www.example.com/basic_lti"
       )
     end
   end

@@ -329,7 +329,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Icona di modifica" },
   "edit_link_7f53bebb": { "message": "Modifica collegamento" },
-  "editor_statusbar_26ac81fc": { "message": "Barra di stato dell’editor" },
+  "editor_status_bar_653f44ee": { "message": "Editor barra di stato" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Elemento che inizia con { start }"
   },
@@ -633,6 +633,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Collega a un sito esterno."
   },
+  "lists_cd1336fc": { "message": "Elenchi" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Gli elenchi devono essere formattati come elenchi."
   },
@@ -1070,6 +1071,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Stili" },
   "submit_a3cc6859": { "message": "Invia" },
+  "submitting_b90fac62": { "message": "Invio in corso..." },
   "subscript_59744f96": { "message": "Pedice" },
   "subset_19c1a92f": { "message": "Sottoinsieme" },
   "subset_strict_8d8948d6": { "message": "Sottoinsieme (rigido)" },

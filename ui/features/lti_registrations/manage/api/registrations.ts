@@ -17,13 +17,23 @@
  */
 
 import {ZLtiRegistration, type LtiRegistration} from '../model/LtiRegistration'
-import {success, type ApiResult, parseFetchResult} from '../../common/lib/apiResult/ApiResult'
+import {
+  type ApiResult,
+  parseFetchResult,
+  success,
+  apiError,
+  mapApiResult,
+} from '../../common/lib/apiResult/ApiResult'
 import {ZPaginatedList, type PaginatedList} from './PaginatedList'
 import {type LtiRegistrationId} from '../model/LtiRegistrationId'
-import {mockFetchSampleLtiRegistrations, mockDeleteRegistration} from './sampleLtiRegistrations'
 import type {AccountId} from '../model/AccountId'
 import {defaultFetchOptions} from '@canvas/util/xhr'
 import * as z from 'zod'
+import {
+  ZInternalLtiConfiguration,
+  type InternalLtiConfiguration,
+} from '../model/internal_lti_configuration/InternalLtiConfiguration'
+import type {LtiConfigurationOverlay} from '../model/internal_lti_configuration/LtiConfigurationOverlay'
 
 export type AppsSortProperty =
   | 'name'
@@ -31,6 +41,7 @@ export type AppsSortProperty =
   | 'lti_version'
   | 'installed'
   | 'installed_by'
+  | 'updated_by'
   | 'on'
 
 export type AppsSortDirection = 'asc' | 'desc'
@@ -59,6 +70,42 @@ export const fetchRegistrations: FetchRegistrations = options =>
     )
   )
 
+export type FetchThirdPartyToolConfiguration = (
+  config:
+    | {
+        url: string
+      }
+    | {
+        lti_configuration: unknown
+      },
+  accountId: AccountId
+) => Promise<ApiResult<InternalLtiConfiguration>>
+
+// POST
+// validate: ({url: string} | {lti_configuration: LtiConfiguration}) ->
+//   200 { configuration: InternalLtiConfiguration }
+//   422 { errors: string[] }
+
+export const fetchThirdPartyToolConfiguration: FetchThirdPartyToolConfiguration = (
+  config,
+  accountId
+) =>
+  parseFetchResult(
+    z.object({
+      configuration: ZInternalLtiConfiguration,
+    })
+  )(
+    fetch(`/api/v1/accounts/${accountId}/lti_registrations/configuration/validate`, {
+      method: 'POST',
+      ...defaultFetchOptions({
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }),
+      body: JSON.stringify(config),
+    })
+  ).then(result => mapApiResult(result, r => r.configuration))
+
 export type DeleteRegistration = (
   accountId: AccountId,
   id: LtiRegistrationId
@@ -75,5 +122,67 @@ export const deleteRegistration: DeleteRegistration = (accountId, registrationId
     fetch(`/api/v1/accounts/${accountId}/lti_registrations/${registrationId}`, {
       ...defaultFetchOptions(),
       method: 'DELETE',
+    })
+  )
+
+export type CreateRegistration = (
+  accountId: AccountId,
+  internalConfig: InternalLtiConfiguration,
+  overlay: LtiConfigurationOverlay,
+  unifiedToolId?: string
+) => Promise<ApiResult<unknown>>
+
+/**
+ * Creates an LTI registration
+ * @param accountId The account id to create the registration in
+ * @param internalConfig The internal configuration to use
+ * @param overlay An overlay to apply to the internal configuration
+ * @param unifiedToolId The unified tool id for the registration
+ * @returns An ApiResult with an unknown value. The value should be ignored.
+ */
+export const createRegistration: CreateRegistration = (
+  accountId,
+  internalConfig,
+  overlay,
+  unifiedToolId
+) =>
+  /* TODO: Implement this once INTEROP-8767 is done */ parseFetchResult(z.unknown())(
+    new Promise(resolve => {
+      setTimeout(() => {
+        resolve(new Response('{}', {status: 200}))
+      }, Math.random() * 2000)
+    })
+  )
+
+export type UpdateRegistration = (
+  accountId: AccountId,
+  registrationId: LtiRegistrationId,
+  internalConfig: InternalLtiConfiguration,
+  overlay: LtiConfigurationOverlay,
+  unifiedToolId?: string
+) => Promise<ApiResult<unknown>>
+
+/**
+ * Updates an LTI registration
+ * @param accountId The account id to update the registration in
+ * @param registrationId The id of the registration to update
+ * @param internalConfig The internal configuration to use
+ * @param overlay An overlay to apply to the internal configuration
+ * @param unifiedToolId The unified tool id for the registration
+ * @returns An ApiResult with an unknown value. The value should be ignored.
+ */
+export const updateRegistration: UpdateRegistration = (
+  accountId,
+  registrationId,
+  internalConfig,
+  overlay,
+  unifiedToolId
+) =>
+  /* TODO: Implement this once INTEROP-8768 is done */
+  parseFetchResult(z.unknown())(
+    new Promise(resolve => {
+      setTimeout(() => {
+        resolve(new Response('{}', {status: 200}))
+      }, Math.random() * 2000)
     })
   )

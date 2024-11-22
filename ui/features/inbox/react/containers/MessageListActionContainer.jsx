@@ -24,7 +24,7 @@ import {useScope as useI18nScope} from '@canvas/i18n'
 import {MailboxSelectionDropdown} from '../components/MailboxSelectionDropdown/MailboxSelectionDropdown'
 import {MessageActionButtons} from '../components/MessageActionButtons/MessageActionButtons'
 import PropTypes from 'prop-types'
-import {useQuery} from 'react-apollo'
+import {useQuery} from '@apollo/react-hooks'
 import React, {useContext, useEffect} from 'react'
 import {reduceDuplicateCourses} from '../../util/courses_helper'
 import {View} from '@instructure/ui-view'
@@ -211,6 +211,7 @@ const MessageListActionContainer = props => {
                 width={responsiveProps.addressBookContainer.width}
                 limitTagCount={LIMIT_TAG_COUNT}
                 addressBookLabel="Search"
+                renderingContext="message-list-actions"
               />
             </Flex.Item>
             <Flex.Item padding={responsiveProps.messageActionButtons.padding}>

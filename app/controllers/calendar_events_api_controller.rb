@@ -335,7 +335,7 @@ class CalendarEventsApiController < ApplicationController
   #
   # Retrieve the paginated list of calendar events or assignments for the current user
   #
-  # @argument type [String, "event"|"assignment"] Defaults to "event"
+  # @argument type [String, "event"|"assignment"|"sub_assignment"] Defaults to "event"
   # @argument start_date [Date]
   #   Only return events since the start_date (inclusive).
   #   Defaults to today. The value should be formatted as: yyyy-mm-dd or ISO 8601 YYYY-MM-DDTHH:MM:SSZ.
@@ -422,41 +422,59 @@ class CalendarEventsApiController < ApplicationController
   end
 
   def render_events_for_user(user, route_url)
+    assignment = @type == :assignment
+    sub_assignment = @type == :sub_assignment
+
+    if sub_assignment && !discussion_checkpoints_enabled?
+      render json: []
+      return
+    end
+
     GuardRail.activate(:secondary) do
-      scope = if @type == :assignment
-                assignment_scope(
-                  user,
-                  submission_types: params.fetch(:submission_types, []),
-                  exclude_submission_types: params.fetch(:exclude_submission_types, [])
-                )
-              else
-                calendar_event_scope(user)
-              end
-
-      events = Api.paginate(scope, self, route_url)
-      ActiveRecord::Associations.preload(events, :child_events) if @type == :event
-      if @type == :assignment
-        events = apply_assignment_overrides(events, user)
-        mark_submitted_assignments(user, events)
-        if includes.include?("submission")
-          submissions = Submission.active.where(assignment_id: events, user_id: user)
-                                  .group_by(&:assignment_id)
+      if @domain_root_account.feature_enabled?(:calendar_events_api_pagination_enhancements)
+        submissions = nil
+        if assignment || sub_assignment
+          events, submissions = assignment_or_subassignment_events_and_submissions_for_user(user, route_url, sub_assignment:)
+        elsif @type == :event
+          events = calendar_events_for_user(user, route_url)
         end
-        # preload data used by assignment_json
-        ActiveRecord::Associations.preload(events, :discussion_topic)
-        Shard.partition_by_shard(events) do |shard_events|
-          having_submission = Assignment.assignment_ids_with_submissions(shard_events.map(&:id))
-          shard_events.each do |event|
-            event.has_submitted_submissions = having_submission.include?(event.id)
-          end
+      else
+        scope = if assignment || sub_assignment
+                  assignment_scope(
+                    user,
+                    submission_types: params.fetch(:submission_types, []),
+                    exclude_submission_types: params.fetch(:exclude_submission_types, []),
+                    sub_assignment:
+                  )
+                else
+                  calendar_event_scope(user)
+                end
 
-          having_student_submission = Submission.active.having_submission
-                                                .where(assignment_id: shard_events)
-                                                .where.not(user_id: nil)
-                                                .distinct
-                                                .pluck(:assignment_id).to_set
-          shard_events.each do |event|
-            event.has_student_submissions = having_student_submission.include?(event.id)
+        events = Api.paginate(scope, self, route_url)
+        ActiveRecord::Associations.preload(events, :child_events) if @type == :event
+        if assignment || sub_assignment
+          events = apply_assignment_overrides(events, user, sub_assignment:)
+          mark_submitted_assignments(user, events)
+          if includes.include?("submission")
+            submissions = Submission.active.where(assignment_id: events, user_id: user)
+                                    .group_by(&:assignment_id)
+          end
+          # preload data used by assignment_json
+          ActiveRecord::Associations.preload(events, :discussion_topic)
+          Shard.partition_by_shard(events) do |shard_events|
+            having_submission = assignment_or_sub_assignment(sub_assignment:).assignment_ids_with_submissions(shard_events.map(&:id))
+            shard_events.each do |event|
+              event.has_submitted_submissions = having_submission.include?(event.id)
+            end
+
+            having_student_submission = Submission.active.having_submission
+                                                  .where(assignment_id: shard_events)
+                                                  .where.not(user_id: nil)
+                                                  .distinct
+                                                  .pluck(:assignment_id).to_set
+            shard_events.each do |event|
+              event.has_student_submissions = having_student_submission.include?(event.id)
+            end
           end
         end
       end
@@ -570,7 +588,7 @@ class CalendarEventsApiController < ApplicationController
         rr = validate_and_parse_rrule(
           rrule,
           dtstart: start_at,
-          tzid: @current_user.time_zone&.tzinfo&.name || "UTC"
+          tzid: params_for_create[:time_zone_edited] || @current_user.time_zone&.tzinfo&.name || "UTC"
         )
         return false if rr.nil?
 
@@ -1576,7 +1594,13 @@ class CalendarEventsApiController < ApplicationController
       @end_date = @start_date.end_of_day if @end_date < @start_date
     end
 
-    @type ||= (params[:type] == "assignment") ? :assignment : :event
+    @type ||= if params[:type] == "assignment"
+                :assignment
+              elsif params[:type] == "sub_assignment"
+                :sub_assignment
+              else
+                :event
+              end
 
     @context ||= user
 
@@ -1637,7 +1661,19 @@ class CalendarEventsApiController < ApplicationController
     end
   end
 
-  def assignment_scope(user, submission_types: [], exclude_submission_types: [])
+  def discussion_checkpoints_enabled?
+    @domain_root_account.feature_enabled?(:discussion_checkpoints)
+  end
+
+  def assignment_or_sub_assignment(sub_assignment: false)
+    if sub_assignment
+      SubAssignment
+    else
+      Assignment
+    end
+  end
+
+  def assignment_scope(user, submission_types: [], exclude_submission_types: [], sub_assignment: false)
     collections = []
     bookmarker = BookmarkedCollection::SimpleBookmarker.new(Assignment, :due_at, :id)
     last_scope = nil
@@ -1645,8 +1681,13 @@ class CalendarEventsApiController < ApplicationController
       # Fully ordering by due_at requires examining all the overrides linked and as it applies to
       # specific people, sections, etc. This applies the base assignment due_at for ordering
       # as a more sane default then natural DB order. No, it isn't perfect but much better.
-      scope = assignment_context_scope(user)
+      scope = assignment_context_scope(user, sub_assignment:)
+
       next unless scope
+
+      # exclude parent assignment when the discussion checkpoints FF is enabled
+      # because due dates and other relevant info is stored in the sub_assignments/checkpoints
+      scope = scope.where(has_sub_assignments: false) if discussion_checkpoints_enabled?
 
       scope = scope.order(:due_at, :id)
       scope = scope.active
@@ -1662,25 +1703,26 @@ class CalendarEventsApiController < ApplicationController
       collections << [Shard.current.id, BookmarkedCollection.wrap(bookmarker, scope)]
     end
 
+    return SubAssignment.none if sub_assignment && discussion_checkpoints_enabled? && collections.empty?
     return Assignment.none if collections.empty?
     return last_scope if collections.length == 1
 
     BookmarkedCollection.merge(*collections)
   end
 
-  def assignment_context_scope(user)
+  def assignment_context_scope(user, sub_assignment: false)
+    return nil if sub_assignment && !discussion_checkpoints_enabled?
+
     contexts = @selected_contexts.select { |c| c.is_a?(Course) && c.shard == Shard.current }
     return nil if contexts.empty?
 
     # contexts have to be partitioned into two groups so they can be queried effectively
     view_unpublished, other = contexts.partition { |c| c.grants_right?(user, session, :view_unpublished_items) }
 
-    unless view_unpublished.empty?
-      scope = Assignment.for_course(view_unpublished)
-    end
+    scope = assignment_or_sub_assignment(sub_assignment:).for_course(view_unpublished) unless view_unpublished.empty?
 
     unless other.empty?
-      scope2 = Assignment.published.for_course(other)
+      scope2 = assignment_or_sub_assignment(sub_assignment:).for_course(other)
       scope = scope ? scope.or(scope2) : scope2
     end
 
@@ -1745,7 +1787,7 @@ class CalendarEventsApiController < ApplicationController
     params.slice(:start_at, :end_at, :undated, :context_codes, :type)
   end
 
-  def apply_assignment_overrides(events, user)
+  def apply_assignment_overrides(events, user, sub_assignment: false)
     ActiveRecord::Associations.preload(events, [:context, :assignment_overrides])
     events.each { |e| e.has_no_overrides = true if e.assignment_overrides.empty? }
 
@@ -1758,7 +1800,7 @@ class CalendarEventsApiController < ApplicationController
       # improves locked_json performance
 
       student_events = events.reject { |e| e.context.grants_right?(user, session, :read_as_admin) }
-      Assignment.preload_context_module_tags(student_events) if student_events.any?
+      assignment_or_sub_assignment(sub_assignment:).preload_context_module_tags(student_events) if student_events.any?
     end
 
     courses_user_has_been_enrolled_in = DatesOverridable.precache_enrollments_for_multiple_assignments(events, user)
@@ -2076,5 +2118,51 @@ class CalendarEventsApiController < ApplicationController
       # one's date as the UNTIL, but this is simpler and I like simple
       old_rrule.gsub(/UNTIL=[^;]+/, "COUNT=#{new_count}")
     end
+  end
+
+  def assignment_or_subassignment_events_and_submissions_for_user(user, route_url, sub_assignment: nil)
+    # Same max limit as public feed
+    scope = assignment_scope(
+      user,
+      submission_types: params.fetch(:submission_types, []),
+      exclude_submission_types: params.fetch(:exclude_submission_types, []),
+      sub_assignment:
+    ).paginate(per_page: 1000, max: 1000)
+
+    # Create dummy events for all assignment overrides
+    events = apply_assignment_overrides(scope, user, sub_assignment:)
+
+    # Pagination is applied to the dummy events collection
+    events, _meta = Api.jsonapi_paginate(events, self, route_url)
+    mark_submitted_assignments(user, events)
+    if includes.include?("submission")
+      submissions = Submission.active.where(assignment_id: events, user_id: user)
+                              .group_by(&:assignment_id)
+    end
+    # preload data used by assignment_json
+    ActiveRecord::Associations.preload(events, :discussion_topic)
+    Shard.partition_by_shard(events) do |shard_events|
+      having_submission = assignment_or_sub_assignment(sub_assignment:).assignment_ids_with_submissions(shard_events.map(&:id))
+      shard_events.each do |event|
+        event.has_submitted_submissions = having_submission.include?(event.id)
+      end
+
+      having_student_submission = Submission.active.having_submission
+                                            .where(assignment_id: shard_events)
+                                            .where.not(user_id: nil)
+                                            .distinct
+                                            .pluck(:assignment_id).to_set
+      shard_events.each do |event|
+        event.has_student_submissions = having_student_submission.include?(event.id)
+      end
+    end
+    [events, submissions]
+  end
+
+  def calendar_events_for_user(user, route_url)
+    scope = calendar_event_scope(user)
+    events = Api.paginate(scope, self, route_url)
+    ActiveRecord::Associations.preload(events, :child_events)
+    events
   end
 end

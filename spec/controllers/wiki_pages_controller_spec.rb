@@ -38,6 +38,13 @@ describe WikiPagesController do
       expect(response).to be_successful
       expect(assigns[:js_env][:DISPLAY_SHOW_ALL_LINK]).to be(true)
     end
+
+    it "sets up js_env for the block editor" do
+      @course.account.enable_feature!(:block_editor)
+      get "index", params: { course_id: @course.id }
+      expect(response).to be_successful
+      expect(assigns[:js_env][:FEATURES][:BLOCK_EDITOR]).to be(true)
+    end
   end
 
   context "with page" do
@@ -227,6 +234,15 @@ describe WikiPagesController do
         end
 
         it_behaves_like "pages enforcing differentiation"
+      end
+    end
+
+    describe "PUT 'create_block_editor'" do
+      it "calls the block editor creator with the proper blank page body" do
+        allow(BlockEditor).to receive(:create!).and_call_original
+        page = @course.wiki_pages.create! title: "A Page", root_account_id: @course.root_account_id
+        expect(BlockEditor).to receive(:create!).with(root_account_id: @course.root_account_id, context: page, editor_version: BlockEditor::LATEST_VERSION, blocks: BlockEditor.blank_page)
+        put :create_block_editor, params: { course_id: @course.id, wiki_page_id: page.url }
       end
     end
 

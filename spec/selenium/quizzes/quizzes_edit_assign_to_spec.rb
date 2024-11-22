@@ -35,7 +35,7 @@ describe "quiz edit page assign to" do
   include SelectiveReleaseCommon
 
   before :once do
-    differentiated_modules_on
+    Account.site_admin.disable_feature!(:selective_release_edit_page)
 
     course_with_teacher(active_all: true)
     @quiz_assignment = @course.assignments.create
@@ -87,7 +87,7 @@ describe "quiz edit page assign to" do
 
     expect(@classic_quiz.assignment_overrides.last.assignment_override_students.count).to eq(1)
 
-    due_at_row = retrieve_quiz_due_date_table_row("1 student")
+    due_at_row = retrieve_quiz_due_date_table_row("1 Student")
     expect(due_at_row).not_to be_nil
     expect(due_at_row.text.split("\n").first).to include("Dec 31, 2022")
     expect(due_at_row.text.split("\n").third).to include("Dec 27, 2022")

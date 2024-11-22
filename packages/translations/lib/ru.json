@@ -647,7 +647,7 @@
     "edit_link_7f53bebb": {
         "message": "Редактировать ссылку"
     },
-    "editor_statusbar_26ac81fc": {
+    "editor_status_bar_653f44ee": {
         "message": "Панель состояния редактора"
     },
     "element_starting_with_start_91bf4c3b": {
@@ -1294,6 +1294,9 @@
     },
     "links_to_an_external_site_de74145d": {
         "message": "Ссылки на внешний сайт."
+    },
+    "lists_cd1336fc": {
+        "message": "Списки"
     },
     "lists_should_be_formatted_as_lists_f862de8d": {
         "message": "Списки должны быть отформатированы в виде списков."
@@ -2176,6 +2179,9 @@
     },
     "submit_a3cc6859": {
         "message": "Отправить"
+    },
+    "submitting_b90fac62": {
+        "message": "Выполняется отправка..."
     },
     "subscript_59744f96": {
         "message": "Надпись снизу"

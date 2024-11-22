@@ -308,7 +308,7 @@
   },
   "edit_icon_2c6b0e91": { "message": "Modifier l’icône" },
   "edit_link_7f53bebb": { "message": "Modifier le lien" },
-  "editor_statusbar_26ac81fc": { "message": "Barre d''état de l''éditeur" },
+  "editor_status_bar_653f44ee": { "message": "Barre d’état de l’éditeur" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Élément commençant par { start }"
   },
@@ -616,6 +616,7 @@
   "links_to_an_external_site_de74145d": {
     "message": "Liens vers un site externe."
   },
+  "lists_cd1336fc": { "message": "Listes" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Les listes doivent être formatées comme une liste."
   },
@@ -1063,6 +1064,7 @@
   },
   "styles_2aa721ef": { "message": "Styles" },
   "submit_a3cc6859": { "message": "Envoyer" },
+  "submitting_b90fac62": { "message": "Envoi en cours..." },
   "subscript_59744f96": { "message": "Description" },
   "subset_19c1a92f": { "message": "Sous-ensemble" },
   "subset_strict_8d8948d6": { "message": "Sous-ensemble (Strict)" },
@@ -1088,7 +1090,7 @@
   "switch_to_the_rich_text_editor_63c1ecf6": {
     "message": "Basculez vers l’éditeur de texte enrichi"
   },
-  "syllabus_f191f65b": { "message": "Programme" },
+  "syllabus_f191f65b": { "message": "Plan de cours" },
   "system_audio_allowed_b2508f8c": { "message": "Système audio autorisé" },
   "system_audio_disabled_c177bd13": { "message": "Système audio désactivé" },
   "tab_arrows_4cf5abfc": { "message": "TABULATION/flèches" },

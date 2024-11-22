@@ -315,7 +315,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Redigeringsikon" },
   "edit_link_7f53bebb": { "message": "Rediger link" },
-  "editor_statusbar_26ac81fc": { "message": "Editor-statusbar" },
+  "editor_status_bar_653f44ee": { "message": "Redaktørstatuslinje" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Element begynder med { start }"
   },
@@ -611,6 +611,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Links til en ekstern webside."
   },
+  "lists_cd1336fc": { "message": "Lister" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Lister skal have listeformat."
   },
@@ -1028,6 +1029,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Stile" },
   "submit_a3cc6859": { "message": "Aflever" },
+  "submitting_b90fac62": { "message": "Afleverer ..." },
   "subscript_59744f96": { "message": "Sænket skrift" },
   "subset_19c1a92f": { "message": "Delmængde" },
   "subset_strict_8d8948d6": { "message": "Delmængde (streng)" },

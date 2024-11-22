@@ -41,14 +41,14 @@ module Lti
                   :variable_whitelist,
                   :variable_blacklist
 
-    def self.register_expansion(name, permission_groups, expansion_proc, *guards, **kwargs)
+    def self.register_expansion(name, permission_groups, expansion_proc, *guards, **)
       @expansions ||= {}
       @expansions[:"$#{name}"] = VariableExpansion.new(
         name,
         permission_groups,
         expansion_proc,
         *([-> { Lti::AppUtil.allowed?(name, @variable_whitelist, @variable_blacklist) }] + guards),
-        **kwargs
+        **
       )
     end
 
@@ -1088,8 +1088,7 @@ module Lti
 
     # Returns a comma-separated list of permissions granted to the user in the current context,
     # given a comma-separated set to check using the format
-    # $Canvas.membership.permissions<example_permission,example_permission2,..>
-    # @internal
+    # `$Canvas.membership.permissions<example_permission,example_permission2,..>`
     # @example
     #   ```
     #   "example_permission_1,example_permission_2"
@@ -1700,6 +1699,28 @@ module Lti
                        -> { TextHelper.round_if_whole(@assignment.points_possible) },
                        ASSIGNMENT_GUARD
 
+    # Returns true if the assignment is hidden in the gradebook.
+    #
+    # @example
+    #   ```
+    #   true
+    #   ```
+    register_expansion "Canvas.assignment.hideInGradebook",
+                       [],
+                       -> { @assignment.hide_in_gradebook },
+                       ASSIGNMENT_GUARD
+
+    # Returns true if the assignment is omitted from students' final grade.
+    #
+    # @example
+    #   ```
+    #   true
+    #   ```
+    register_expansion "Canvas.assignment.omitFromFinalGrade",
+                       [],
+                       -> { @assignment.omit_from_final_grade },
+                       ASSIGNMENT_GUARD
+
     # @deprecated in favor of ISO8601
     register_expansion "Canvas.assignment.unlockAt",
                        [],
@@ -1741,15 +1762,14 @@ module Lti
                        -> { @assignment.lock_at.utc.iso8601 },
                        -> { @assignment && @assignment.lock_at.present? }
 
-    # Returns the `due_at` date of the assignment that was launched. Only
-    # available when launched as an assignment with a `due_at` set. If the tool
-    # is launched as a student, this will be the date that assignment is due
-    # for that student (or unexpanded -- "$Canvas.assignment.dueAt.iso8601" --
-    # if there is no due date for the student). If the tool is launched as an
-    # instructor and there are multiple possible due dates (i.e., there are
-    # multiple sections and at least one has a due date override), this will be
-    # the LATEST effective due date of any section or student (or unexpanded if
-    # there is at least one section or student with no effective due date).
+    # Returns the `due_at` date of the assignment that was launched.
+    # If the tool is launched as a student, this will be the date that assignment
+    # is due for that student (or unexpanded -- "$Canvas.assignment.dueAt.iso8601" --
+    # if there is no due date for the student).
+    # If the tool is launched as an instructor and there are multiple
+    # possible due dates (i.e., there are multiple sections and at
+    # least one has a due date override), this will be the LATEST effective
+    # due date of any section or student.
     #
     # @example
     #   ```
@@ -1757,8 +1777,8 @@ module Lti
     #   ```
     register_expansion "Canvas.assignment.dueAt.iso8601",
                        [],
-                       -> { @assignment.due_at.utc.iso8601 },
-                       -> { @assignment && @assignment.due_at.present? }
+                       -> { latest_due_at&.utc&.iso8601 },
+                       ASSIGNMENT_GUARD
 
     # Returns the `due_at` date of the assignment that was launched.
     # If the tool is launched as a student, this will be the date that
@@ -2081,15 +2101,29 @@ module Lti
 
     def earliest_due_at
       context = @assignment.context
-      # Mirrors logic in AssignmentOverrideApplicator to determine if user is a student or teacher.
       # If a user is a student, we return their due date. Otherwise, in our case here, we return
       # the earliest of all due dates for the assignment.
-      if context.user_has_been_admin?(current_user) || (context.user_has_no_enrollments?(current_user) &&
-                                               context.grants_any_right?(current_user, *RoleOverride::GRANULAR_MANAGE_ASSIGNMENT_PERMISSIONS))
+      if course_admin?(context)
         @assignment.submissions.minimum(:cached_due_date)
       else
         @assignment.due_at
       end
+    end
+
+    def latest_due_at
+      context = @assignment.context
+      # We return the latest of all due dates for the assignment if the user is a course admin.
+      if course_admin?(context)
+        @assignment.submissions.maximum(:cached_due_date)
+      else
+        @assignment.due_at
+      end
+    end
+
+    def course_admin?(context)
+      # Mirrors logic in AssignmentOverrideApplicator to determine if user is a student or teacher.
+      context.user_has_been_admin?(current_user) ||
+        (context.user_has_no_enrollments?(current_user) && context.grants_any_right?(current_user, *RoleOverride::GRANULAR_MANAGE_ASSIGNMENT_PERMISSIONS))
     end
 
     def sis_pseudonym

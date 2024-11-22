@@ -18,7 +18,7 @@
 
 import {useScope as useI18nScope} from '@canvas/i18n'
 import {IconAttachMediaLine} from '@instructure/ui-icons'
-import {Mutation} from 'react-apollo'
+import {Mutation} from '@apollo/react-components'
 import React, {Component} from 'react'
 import {bool} from 'prop-types'
 import {ScreenReaderContent} from '@instructure/ui-a11y-content'
@@ -77,6 +77,7 @@ export default class CommentTextArea extends Component {
           _id: 'pending',
           attachments: [],
           comment: this.state.commentText,
+          htmlComment: this.state.commentText,
           read: true,
           updatedAt: new Date().toISOString(),
           author: {

@@ -87,14 +87,24 @@ const enrollmentsByCourse = [
   },
 ]
 
+const additionalRecipient = {
+  email: 'ross@email.com',
+  id: '6',
+  login_id: 'mel123',
+  name: 'Melvin',
+  sis_user_id: '11',
+}
+
 const props: Props = {
-  enrollment: {
-    email: 'mel@email.com',
-    id: '2',
-    login_id: 'mel123',
-    name: 'Melvin',
-    sis_user_id: '5',
-  } as User,
+  enrollments: [
+    {
+      email: 'mel@email.com',
+      id: '2',
+      login_id: 'mel123',
+      name: 'Melvin',
+      sis_user_id: '5',
+    },
+  ] as User[],
   user: {
     id: '1',
     name: 'John Smith',
@@ -131,7 +141,7 @@ function formatDateToLocalString(utcDateStr: string) {
 }
 
 describe('TempEnrollAssign', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     // @ts-expect-error
     window.ENV = {
       ACCOUNT_ID: '1',
@@ -165,6 +175,20 @@ describe('TempEnrollAssign', () => {
       )
 
       expect(defaultMessage).toBeInTheDocument()
+    })
+
+    it('changes text when multiple recipients are being assigned', async () => {
+      const modifiedProps = {
+        ...props,
+        enrollments: [...props.enrollments, additionalRecipient],
+      }
+      const {findByText} = render(<TempEnrollAssign {...modifiedProps} />)
+
+      const summaryMsg = await findByText(/Canvas will enroll 2 users/)
+      const readyMsg = await findByText(/2 users will receive/)
+
+      expect(summaryMsg).toBeInTheDocument()
+      expect(readyMsg).toBeInTheDocument()
     })
 
     it('triggers goBack when back is clicked', async () => {
@@ -224,8 +248,11 @@ describe('TempEnrollAssign', () => {
       window.ENV = {...window.ENV, TIMEZONE: 'America/Denver'}
 
       const {findAllByLabelText, findAllByText} = render(<TempEnrollAssign {...props} />)
-      const startTime = (await findAllByLabelText('Time'))[0]
+      const startDate = (await findAllByLabelText('Begins On'))[0]
+      fireEvent.input(startDate, {target: {value: 'Oct 31 2024'}})
+      fireEvent.blur(startDate)
 
+      const startTime = (await findAllByLabelText('Time'))[0]
       fireEvent.input(startTime, {target: {value: '9:00 AM'}})
       fireEvent.blur(startTime)
 
@@ -234,13 +261,6 @@ describe('TempEnrollAssign', () => {
 
       expect(localTime.textContent).toContain('9:00 AM')
       expect(accTime.textContent).toContain('11:00 PM')
-
-      // @ts-expect-error
-      window.ENV = {
-        ACCOUNT_ID: '1',
-        CONTEXT_TIMEZONE: 'Asia/Brunei',
-        context_asset_string: 'account_1',
-      }
     })
 
     it('show error when date field is blank', async () => {
@@ -419,23 +439,22 @@ describe('TempEnrollAssign', () => {
     it('should return enrollmentProps and userProps correctly when enrollmentType is RECIPIENT', () => {
       const {enrollmentProps, userProps} = getEnrollmentAndUserProps({
         enrollmentType: RECIPIENT,
-        enrollment: props.enrollment,
+        enrollments: props.enrollments,
         user: props.user,
       })
 
-      // Assert
-      expect(enrollmentProps).toEqual(props.user)
-      expect(userProps).toEqual(props.enrollment)
+      expect(enrollmentProps).toEqual([props.user])
+      expect(userProps).toEqual(props.enrollments[0])
     })
 
     it('should return enrollmentProps and userProps correctly when enrollmentType is PROVIDER', () => {
       const {enrollmentProps, userProps} = getEnrollmentAndUserProps({
         enrollmentType: PROVIDER,
-        enrollment: props.enrollment,
+        enrollments: props.enrollments,
         user: props.user,
       })
 
-      expect(enrollmentProps).toEqual(props.enrollment)
+      expect(enrollmentProps).toEqual(props.enrollments)
       expect(userProps).toEqual(props.user)
     })
   })
@@ -669,12 +688,12 @@ describe('TempEnrollAssign', () => {
 
     it('should call deleteEnrollment for matching criteria', async () => {
       const sectionIds = ['55', '220', '19']
-      const userId = '1'
+      const enrollmentUsers: User[] = [{id: '1', name: 'user1'}]
       const roleId = '20'
       const promises = deleteMultipleEnrollmentsByNoMatch(
         mockTempEnrollments,
         sectionIds,
-        userId,
+        enrollmentUsers,
         roleId
       )
       expect(promises).toHaveLength(1)
@@ -684,12 +703,12 @@ describe('TempEnrollAssign', () => {
 
     it('should not call deleteEnrollment for non-matching criteria', async () => {
       const sectionIds = ['7', '55', '220', '19']
-      const userId = '1'
+      const enrollmentUsers: User[] = [{id: '1', name: 'user1'}]
       const roleId = '20'
       const promises = deleteMultipleEnrollmentsByNoMatch(
         mockTempEnrollments,
         sectionIds,
-        userId,
+        enrollmentUsers,
         roleId
       )
       expect(promises).toHaveLength(0)

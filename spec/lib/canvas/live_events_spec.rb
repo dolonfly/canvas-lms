@@ -68,7 +68,6 @@ describe Canvas::LiveEvents do
         @data["body"]
       end
     end.new
-    allow(LiveEvents).to receive(:get_context).and_return({ compact_live_events: true })
   end
 
   let(:course_context) do
@@ -103,7 +102,6 @@ describe Canvas::LiveEvents do
           root_account_id:,
           root_account_uuid: root_account_uuid.to_s,
           root_account_lti_guid: root_account_lti_guid.to_s,
-          compact_live_events: true
         }
       )
     end
@@ -116,7 +114,6 @@ describe Canvas::LiveEvents do
                                       context_account_id: nil,
                                       context_id: user.global_id,
                                       context_type: "User",
-                                      compact_live_events: true
                                     })
     end
   end
@@ -301,7 +298,7 @@ describe Canvas::LiveEvents do
                    hash_including(
                      conversation_id: @convo.id.to_s
                    ),
-                   { compact_live_events: true }).once
+                   {}).once
       Canvas::LiveEvents.conversation_forwarded(@convo)
     end
   end
@@ -838,7 +835,7 @@ describe Canvas::LiveEvents do
                      role: "role",
                      level: "participation"
                    }.compact!,
-                   { compact_live_events: true }).once
+                   {}).once
 
       Canvas::LiveEvents.asset_access(@course, "category", "role", "participation")
     end
@@ -856,7 +853,7 @@ describe Canvas::LiveEvents do
                      role: "role",
                      level: "participation"
                    },
-                   { compact_live_events: true }).once
+                   {}).once
 
       Canvas::LiveEvents.asset_access(["assignments", @course], "category", "role", "participation")
     end
@@ -874,7 +871,7 @@ describe Canvas::LiveEvents do
                      role: "role",
                      level: "participation"
                    },
-                   { compact_live_events: true }).once
+                   {}).once
 
       Canvas::LiveEvents.asset_access(@page, "category", "role", "participation")
     end
@@ -894,14 +891,14 @@ describe Canvas::LiveEvents do
                      filename: @attachment.filename,
                      display_name: @attachment.display_name
                    }.compact!,
-                   { compact_live_events: true }).once
+                   {}).once
 
       Canvas::LiveEvents.asset_access(@attachment, "files", "role", "participation")
     end
 
     it "provides a different context if a different context is provided" do
       attachment_model
-      context = OpenStruct.new(global_id: "1")
+      context = instance_double("Course", global_id: "1", account: nil)
 
       expect_event("asset_accessed",
                    {
@@ -916,7 +913,6 @@ describe Canvas::LiveEvents do
                      display_name: @attachment.display_name
                    }.compact!,
                    {
-                     compact_live_events: true,
                      context_account_id: context.account&.global_id&.to_s,
                      context_type: context.class.to_s,
                      context_id: "1"
@@ -940,7 +936,7 @@ describe Canvas::LiveEvents do
                      enrollment_id: @enrollment.id.to_s,
                      section_id: @enrollment.course_section_id.to_s
                    },
-                   { compact_live_events: true }).once
+                   {}).once
 
       Canvas::LiveEvents.asset_access(["assignments", @course],
                                       "category",
@@ -1500,7 +1496,23 @@ describe Canvas::LiveEvents do
           migration.migration_settings[:import_quizzes_next] = true
         end
 
-        it "does not send the resource map" do
+        it "sends the resource map" do
+          expect_event(
+            "content_migration_completed",
+            hash_including(resource_map_url: "http://example.com/resource_map.json"),
+            hash_including(context_id: course.global_id.to_s)
+          ).once
+
+          Canvas::LiveEvents.content_migration_completed(migration)
+        end
+      end
+
+      describe "importing new quizzes from new quiz QTI" do
+        before do
+          migration.migration_settings[:quiz_next_imported] = true
+        end
+
+        it "sends the resource map" do
           expect_event(
             "content_migration_completed",
             hash_including(resource_map_url: "http://example.com/resource_map.json"),
@@ -3181,6 +3193,24 @@ describe Canvas::LiveEvents do
         expect_event("rubric_assessed", assessment_data)
         Canvas::LiveEvents.rubric_assessed(@rubric_assessment)
       end
+    end
+  end
+
+  describe ".outcomes_retry_outcome_alignment_clone" do
+    it "triggers an outcome alignment clone retry live event" do
+      event_payload = {
+        original_course_uuid: "eXA43Cb5A8biA87cEPjcpByVwsaff4ULmEsRwM5s",
+        new_course_uuid: "8H3aGjEatiLI42zzV0ly8t5UGQAxYfvrI3MDlrCx",
+        domain: "canvas.instructure.com",
+        new_course_resource_link_id: "c9d7d100bb177c0e54f578e7ac538cd9f7a3e4ad",
+        original_assignment_resource_link_id: "bf950e2284bd720a28e407fe326dce68",
+        new_assignment_resource_link_id: "2ae6e5cac3081b0cc8515ad79ff114e3406169ef",
+        status: "outcome_alignment_cloning"
+      }
+
+      expect_event("outcomes.retry_outcome_alignment_clone", event_payload).once
+
+      Canvas::LiveEvents.outcomes_retry_outcome_alignment_clone(event_payload)
     end
   end
 

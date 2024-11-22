@@ -647,8 +647,8 @@
     "edit_link_7f53bebb": {
         "message": "Edita l''enllaç"
     },
-    "editor_statusbar_26ac81fc": {
-        "message": "Editor de la barra d''estat"
+    "editor_status_bar_653f44ee": {
+        "message": "Barra d''estat de l’editor"
     },
     "element_starting_with_start_91bf4c3b": {
         "message": "L’element comença per { start }"
@@ -819,7 +819,7 @@
         "message": "Cerca"
     },
     "find_and_replace_6e345933": {
-        "message": "Cerca i substitueix"
+        "message": "Cerca i substituir"
     },
     "finish_bc343002": {
         "message": "Finalitza"
@@ -1294,6 +1294,9 @@
     },
     "links_to_an_external_site_de74145d": {
         "message": "Enllaça a un lloc extern."
+    },
+    "lists_cd1336fc": {
+        "message": "Llistes"
     },
     "lists_should_be_formatted_as_lists_f862de8d": {
         "message": "Les llistes han de tenir el format de llista."
@@ -2176,6 +2179,9 @@
     },
     "submit_a3cc6859": {
         "message": "Entrega"
+    },
+    "submitting_b90fac62": {
+        "message": "S’està entregant…"
     },
     "subscript_59744f96": {
         "message": "Subíndex"

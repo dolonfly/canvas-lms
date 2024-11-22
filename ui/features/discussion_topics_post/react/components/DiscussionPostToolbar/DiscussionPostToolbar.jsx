@@ -29,7 +29,11 @@ import {
   IconPermissionsLine,
 } from '@instructure/ui-icons'
 import PropTypes from 'prop-types'
-import {CURRENT_USER, DiscussionManagerUtilityContext} from '../../utils/constants'
+import {
+  CURRENT_USER,
+  DiscussionManagerUtilityContext,
+  isSpeedGraderInTopUrl,
+} from '../../utils/constants'
 import React, {useContext, useState} from 'react'
 import {Responsive} from '@instructure/ui-responsive'
 import {hideStudentNames, responsiveQuerySizes} from '../../utils'
@@ -41,7 +45,7 @@ import {Tooltip} from '@instructure/ui-tooltip'
 import {View} from '@instructure/ui-view'
 import {AnonymousAvatar} from '@canvas/discussions/react/components/AnonymousAvatar/AnonymousAvatar'
 import {ExpandCollapseThreadsButton} from './ExpandCollapseThreadsButton'
-import ItemAssignToTray from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToTray'
+import ItemAssignToManager from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToManager'
 import {MoreMenuButton} from './MoreMenuButton'
 import {SummarizeButton} from './SummarizeButton'
 
@@ -265,23 +269,27 @@ export const DiscussionPostToolbar = props => {
                     </span>
                   </Tooltip>
                 </Flex.Item>
-
-                <Flex.Item
-                  margin={responsiveProps?.viewSplitScreen?.margin}
-                  padding={responsiveProps.padding}
-                  shouldGrow={responsiveProps?.viewSplitScreen?.shouldGrow}
-                >
-                  <SplitScreenButton
-                    setUserSplitScreenPreference={props.setUserSplitScreenPreference}
-                    userSplitScreenPreference={props.userSplitScreenPreference}
-                    closeView={props.closeView}
-                    display={matches.includes('mobile') ? 'block' : 'inline-block'}
-                  />
-                </Flex.Item>
-
-                {!props.userSplitScreenPreference && (
+                {!isSpeedGraderInTopUrl && (
+                  <Flex.Item
+                    margin={responsiveProps?.viewSplitScreen?.margin}
+                    padding={responsiveProps.padding}
+                    shouldGrow={responsiveProps?.viewSplitScreen?.shouldGrow}
+                  >
+                    <SplitScreenButton
+                      setUserSplitScreenPreference={props.setUserSplitScreenPreference}
+                      userSplitScreenPreference={props.userSplitScreenPreference}
+                      closeView={props.closeView}
+                      display={matches.includes('mobile') ? 'block' : 'inline-block'}
+                    />
+                  </Flex.Item>
+                )}
+                {(!props.userSplitScreenPreference || isSpeedGraderInTopUrl) && (
                   <Flex.Item margin="0 small 0 0" padding={responsiveProps.padding}>
-                    <ExpandCollapseThreadsButton showText={!matches.includes('mobile')} />
+                    <ExpandCollapseThreadsButton
+                      showText={!matches.includes('mobile')}
+                      isExpanded={props.isExpanded}
+                      onCollapseRepliesToggle={props.onCollapseRepliesToggle}
+                    />
                   </Flex.Item>
                 )}
                 {ENV.user_can_summarize && !props.isSummaryEnabled && (
@@ -325,7 +333,7 @@ export const DiscussionPostToolbar = props => {
             </Flex.Item>
           </Flex>
           {showAssignToTray && (
-            <ItemAssignToTray
+            <ItemAssignToManager
               open={showAssignToTray}
               onClose={handleClose}
               onDismiss={handleClose}
@@ -338,6 +346,7 @@ export const DiscussionPostToolbar = props => {
               locale={ENV.LOCALE || 'en'}
               timezone={ENV.TIMEZONE || 'UTC'}
               removeDueDateInput={!props.isGraded}
+              isCheckpointed={props.isCheckpointed}
             />
           )}
         </View>
@@ -359,6 +368,7 @@ DiscussionPostToolbar.propTypes = {
   onSearchChange: PropTypes.func,
   onViewFilter: PropTypes.func,
   onSortClick: PropTypes.func,
+  onCollapseRepliesToggle: PropTypes.func,
   searchTerm: PropTypes.string,
   discussionTitle: PropTypes.string,
   discussionId: PropTypes.string,
@@ -373,8 +383,6 @@ DiscussionPostToolbar.propTypes = {
   contextType: PropTypes.oneOf(['Course', 'Group']),
   manageAssignTo: PropTypes.bool,
   isGroupDiscussion: PropTypes.bool,
-}
-
-DiscussionPostToolbar.defaultProps = {
-  sortDirection: 'desc',
+  isCheckpointed: PropTypes.bool,
+  isExpanded: PropTypes.bool,
 }

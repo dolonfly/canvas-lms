@@ -38,7 +38,7 @@ import {
   UPDATE_SPLIT_SCREEN_VIEW_DEEPLY_NESTED_ALERT,
   UPDATE_DISCUSSION_ENTRY_PARTICIPANT,
 } from '../../../graphql/Mutations'
-import {useMutation} from 'react-apollo'
+import {useMutation} from '@apollo/react-hooks'
 import {View} from '@instructure/ui-view'
 import {ReportReply} from '../../components/ReportReply/ReportReply'
 import {AlertManagerContext} from '@canvas/alerts/react/AlertManager'
@@ -116,16 +116,18 @@ export const SplitScreenParent = ({isEditing, setIsEditing, ...props}) => {
     )
   }
 
-  threadActions.push(
-    <ThreadingToolbar.MarkAsRead
-      key={`mark-as-read-${props.discussionEntry.id}`}
-      delimiterKey={`mark-as-read-delimiter-${props.discussionEntry.id}`}
-      isRead={props.discussionEntry.entryParticipant?.read}
-      authorName={getDisplayName(props.discussionEntry)}
-      onClick={toggleUnread}
-      isSplitScreenView={true}
-    />
-  )
+  if (!props.discussionEntry.deleted) {
+    threadActions.push(
+      <ThreadingToolbar.MarkAsRead
+        key={`mark-as-read-${props.discussionEntry.id}`}
+        delimiterKey={`mark-as-read-delimiter-${props.discussionEntry.id}`}
+        isRead={props.discussionEntry.entryParticipant?.read}
+        authorName={getDisplayName(props.discussionEntry)}
+        onClick={toggleUnread}
+        isSplitScreenView={true}
+      />
+    )
+  }
 
   if (props.discussionEntry.lastReply) {
     threadActions.push(
@@ -277,12 +279,12 @@ export const SplitScreenParent = ({isEditing, setIsEditing, ...props}) => {
                     isUnread={!props.discussionEntry.entryParticipant?.read}
                     isForcedRead={props.discussionEntry.entryParticipant?.forcedReadState}
                     createdAt={props.discussionEntry.createdAt}
-                    updatedAt={props.discussionEntry.updatedAt}
+                    editedAt={props.discussionEntry.editedAt}
                     timingDisplay={DateHelper.formatDatetimeForDiscussions(
                       props.discussionEntry.createdAt
                     )}
                     editedTimingDisplay={DateHelper.formatDatetimeForDiscussions(
-                      props.discussionEntry.updatedAt
+                      props.discussionEntry.editedAt
                     )}
                     lastReplyAtDisplay={DateHelper.formatDatetimeForDiscussions(
                       props.discussionEntry.lastReply?.createdAt

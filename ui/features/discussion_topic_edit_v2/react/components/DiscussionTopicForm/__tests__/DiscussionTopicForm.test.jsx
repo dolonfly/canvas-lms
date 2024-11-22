@@ -78,6 +78,7 @@ describe('DiscussionTopicForm', () => {
       DISCUSSION_CHECKPOINTS_ENABLED: true,
       ASSIGNMENT_EDIT_PLACEMENT_NOT_ON_ANNOUNCEMENTS: false,
       context_is_not_group: true,
+      RESTRICT_QUANTITATIVE_DATA: false,
     }
   })
 
@@ -137,7 +138,6 @@ describe('DiscussionTopicForm', () => {
     expect(document.queryByTestId('section-select')).toBeTruthy()
     expect(document.queryByLabelText('Allow Participants to Comment')).toBeInTheDocument()
     expect(document.queryByLabelText('Disallow threaded replies')).toBeInTheDocument()
-    expect(document.queryByTestId('require-initial-post-checkbox')).toBeTruthy()
     expect(document.queryByLabelText('Enable podcast feed')).toBeInTheDocument()
     expect(document.queryByLabelText('Allow liking')).toBeInTheDocument()
     expect(document.queryByTestId('non-graded-date-options')).toBeTruthy()
@@ -145,6 +145,7 @@ describe('DiscussionTopicForm', () => {
     expect(document.queryAllByText('Until')).toBeTruthy()
 
     // Hides discussion only options
+    expect(document.queryByTestId('require-initial-post-checkbox')).not.toBeInTheDocument()
     expect(document.queryByLabelText('Add to student to-do')).not.toBeInTheDocument()
     expect(document.queryByText('Anonymous Discussion')).not.toBeTruthy()
     expect(document.queryByTestId('graded-checkbox')).not.toBeTruthy()
@@ -251,7 +252,7 @@ describe('DiscussionTopicForm', () => {
       const document = setup()
       expect(
         document.getByText(
-          'Notifications will not be sent retroactively for announcements created before publishing your course or before the course start date. You may consider using the Delay Posting option and set to publish on a future date.'
+          'Notifications will not be sent retroactively for announcements created before publishing your course or before the course start date. You may consider using the Available from option and set to publish on a future date.'
         )
       ).toBeInTheDocument()
     })
@@ -266,7 +267,7 @@ describe('DiscussionTopicForm', () => {
       const document = setup()
       expect(
         document.getByText(
-          'Notifications will not be sent retroactively for announcements created before publishing your course or before the course start date. You may consider using the Delay Posting option and set to publish on a future date.'
+          'Notifications will not be sent retroactively for announcements created before publishing your course or before the course start date. You may consider using the Available from option and set to publish on a future date.'
         )
       ).toBeInTheDocument()
     })
@@ -392,7 +393,6 @@ describe('DiscussionTopicForm', () => {
 
     it('does not show usageRights when not enabled', () => {
       window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_ATTACH = true
-      window.ENV.FEATURES.usage_rights_discussion_topics = true
       window.ENV.USAGE_RIGHTS_REQUIRED = false
       window.ENV.PERMISSIONS.manage_files = true
 
@@ -402,7 +402,6 @@ describe('DiscussionTopicForm', () => {
 
     it('shows usageRights when enabled', () => {
       window.ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_ATTACH = true
-      window.ENV.FEATURES.usage_rights_discussion_topics = true
       window.ENV.USAGE_RIGHTS_REQUIRED = true
       window.ENV.PERMISSIONS.manage_files = true
 
@@ -478,6 +477,24 @@ describe('DiscussionTopicForm', () => {
 
     it('does not display the checkpoints checkbox when the discussion checkpoints flag is off', () => {
       window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = false
+
+      const {queryByTestId, getByLabelText} = setup()
+
+      getByLabelText('Graded').click()
+
+      expect(queryByTestId('checkpoints-checkbox')).not.toBeInTheDocument()
+    })
+
+    it('displays the checkpoints checkbox when RESTRICT_QUANTITATIVE_DATA is false', () => {
+      const {queryByTestId, getByLabelText} = setup()
+
+      getByLabelText('Graded').click()
+
+      expect(queryByTestId('checkpoints-checkbox')).toBeInTheDocument()
+    })
+
+    it('does not display the checkpoints checkbox when RESTRICT_QUANTITATIVE_DATA is true', () => {
+      window.ENV.RESTRICT_QUANTITATIVE_DATA = true
 
       const {queryByTestId, getByLabelText} = setup()
 

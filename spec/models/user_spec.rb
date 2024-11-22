@@ -52,6 +52,7 @@ describe User do
 
     it { is_expected.to have_many(:created_lti_registrations).class_name("Lti::Registration").with_foreign_key("created_by_id") }
     it { is_expected.to have_many(:updated_lti_registrations).class_name("Lti::Registration").with_foreign_key("updated_by_id") }
+    it { is_expected.to have_many(:block_editor_templates).class_name("BlockEditorTemplate").inverse_of(:context) }
   end
 
   describe "notifications" do
@@ -72,6 +73,15 @@ describe User do
           end
         end
       end
+    end
+  end
+
+  describe "#speed_grader_settings" do
+    it "stores the user's speed grader settings" do
+      user = user_model
+      expect { user.preferences[:enable_speedgrader_grade_by_question] = true }.to change {
+        user.speed_grader_settings
+      }.from({ grade_by_question: false }).to({ grade_by_question: true })
     end
   end
 
@@ -247,7 +257,7 @@ describe User do
     course_with_student(active_all: true)
     google_docs_collaboration_model(user_id: @user.id)
     expect(@user.recent_stream_items.size).to eq 1
-    @enrollment.end_at = @enrollment.start_at = Time.now - 1.day
+    @enrollment.end_at = @enrollment.start_at = 1.day.ago
     @enrollment.save!
     @user = User.find(@user.id)
     expect(@user.recent_stream_items.size).to eq 0
@@ -514,6 +524,23 @@ describe User do
             user.update_root_account_ids
           end.to change {
             user.communication_channels.first.root_account_ids
+          }.from([]).to([root_account.id])
+        end
+      end
+
+      context "and feature flags for the user exist" do
+        let(:feature_flag) do
+          user.enable_feature!(:high_contrast)
+          user.feature_flags.first
+        end
+
+        before { feature_flag.update(root_account_ids: []) }
+
+        it "updates root_account_ids on associated feature flags" do
+          expect do
+            user.update_root_account_ids
+          end.to change {
+            user.feature_flags.first.root_account_ids
           }.from([]).to([root_account.id])
         end
       end
@@ -809,6 +836,58 @@ describe User do
       submission = auto_posted_assignment.submissions.find_by!(user: student)
       submission.update!(last_comment_at: 1.day.ago, posted_at: nil)
       expect(student.recent_feedback(contexts: [post_policies_course])).not_to be_empty
+    end
+
+    context "discussion checkpoints" do
+      before do
+        course_with_student(active_all: true)
+        course_with_teacher(course: @course, active_all: true)
+        @course.root_account.enable_feature!(:discussion_checkpoints)
+        @reply_to_topic, @reply_to_entry = graded_discussion_topic_with_checkpoints(context: @course)
+      end
+
+      it "does not include checkpoint submissions without recent feedback" do
+        expect(@student.recent_feedback(exclude_parent_assignment_submissions: true)).to be_empty
+      end
+
+      it "includes checkpoint submissions with recent feedback" do
+        @reply_to_topic.grade_student(@student, grade: 5, grader: @teacher)
+        @reply_to_entry.grade_student(@student, grade: 8, grader: @teacher)
+
+        expect(@student.recent_feedback(exclude_parent_assignment_submissions: true)).to contain_exactly(
+          @reply_to_topic.submission_for_student(@student),
+          @reply_to_entry.submission_for_student(@student)
+        )
+      end
+
+      it "does not include parent assignment submission with recent feedback" do
+        parent_assignment_submission = @topic.assignment.grade_student(@student, grade: 10, sub_assignment_tag: "reply_to_topic", grader: @teacher)
+
+        expect(@student.recent_feedback(exclude_parent_assignment_submissions: true)).not_to include(
+          parent_assignment_submission
+        )
+      end
+
+      it "does include assignment submissions with recent feedback" do
+        assignment = @course.assignments.create!(points_possible: 10)
+        assignment_submission = assignment.submissions.find_by!(user: @student)
+        assignment_submission.update!(last_comment_at: 1.day.ago, posted_at: nil)
+        expect(@student.recent_feedback(exclude_parent_assignment_submissions: true)).to contain_exactly(assignment_submission)
+      end
+
+      it "includes both assignment submissions and discussion checkpoint submissions with recent feedback" do
+        assignment = @course.assignments.create!(points_possible: 10)
+        assignment_submission = assignment.submissions.find_by!(user: @student)
+        assignment_submission.update!(last_comment_at: 1.day.ago, posted_at: nil)
+
+        @reply_to_topic.grade_student(@student, grade: 5, grader: @teacher)
+        @reply_to_entry.grade_student(@student, grade: 8, grader: @teacher)
+        expect(@student.recent_feedback(exclude_parent_assignment_submissions: true)).to contain_exactly(
+          assignment_submission,
+          @reply_to_topic.submission_for_student(@student),
+          @reply_to_entry.submission_for_student(@student)
+        )
+      end
     end
   end
 
@@ -1633,12 +1712,16 @@ describe User do
         @course.enroll_user(@student, "StudentEnrollment", enrollment_state: "active")
         @course.complete!
 
-        expect(search_messageable_users(@this_section_user, context: "course_#{@course.id}").map(&:id)).not_to include @this_section_user.id
+        student_results = search_messageable_users(@this_section_user, context: "course_#{@course.id}", include_concluded: true).map(&:id)
+
+        expect(student_results).not_to include @this_section_user.id
         # if the course was a concluded, a student should be able to browse it and message an admin (if if the admin's enrollment concluded too)
-        expect(search_messageable_users(@this_section_user, context: "course_#{@course.id}").map(&:id)).to include @this_section_teacher.id
+        expect(student_results).to include @this_section_teacher.id
         expect(@this_section_user.count_messageable_users_in_course(@course)).to be 2 # just the admins
-        expect(search_messageable_users(@student, context: "course_#{@course.id}").map(&:id)).not_to include @this_section_user.id
-        expect(search_messageable_users(@student, context: "course_#{@course.id}").map(&:id)).to include @this_section_teacher.id
+
+        student2_results = search_messageable_users(@student, context: "course_#{@course.id}", include_concluded: true).map(&:id)
+        expect(student2_results).not_to include @this_section_user.id
+        expect(student2_results).to include @this_section_teacher.id
         expect(@student.count_messageable_users_in_course(@course)).to be 2
       end
 
@@ -1767,6 +1850,14 @@ describe User do
       @user.avatar_image = { "type" => "external", "url" => "http://3510111291#secure.gravatar.com/@google.com" }
       @user.save!
       expect(@user.reload.avatar_image_url).to be_nil
+    end
+
+    it "does not remove avatar when updating only the state" do
+      @user_w_avatar = User.create! avatar_image_url: "test_url"
+
+      @user_w_avatar.avatar_image = { "state" => "reported" }
+      @user_w_avatar.save!
+      expect(@user_w_avatar.reload.avatar_image_url).to eq "test_url"
     end
 
     it "returns a useful avatar_fallback_url" do
@@ -2428,6 +2519,14 @@ describe User do
         expect(events.first).to eq assignment2
       end
 
+      it "includes sub assignments when include_sub_assignments is true" do
+        @course.root_account.enable_feature!(:discussion_checkpoints)
+        reply_to_topic, reply_to_entry = graded_discussion_topic_with_checkpoints(context: @course)
+        context_codes = [@user.asset_string] + @user.cached_context_codes
+        events = @user.upcoming_events(context_codes:, include_sub_assignments: true)
+        expect(events).to match_array([reply_to_topic, reply_to_entry])
+      end
+
       it "doesn't include events for enrollments that are inactive due to date" do
         @enrollment.start_at = 1.day.ago
         @enrollment.end_at = 2.days.from_now
@@ -2502,7 +2601,7 @@ describe User do
 
   describe "select_upcoming_assignments" do
     it "filters based on assignment date for asignments the user cannot delete" do
-      time = Time.now + 1.day
+      time = 1.day.from_now
       context = double
       assignments = [double, double, double]
       user = User.new
@@ -2520,8 +2619,8 @@ describe User do
       Timecop.freeze(Time.utc(2013, 3, 13, 0, 0)) do
         user = User.new
         allow(context).to receive(:grants_any_right?).with(user, *RoleOverride::GRANULAR_MANAGE_ASSIGNMENT_PERMISSIONS).and_return true
-        due_date1 = { due_at: Time.now + 1.day }
-        due_date2 = { due_at: Time.now + 1.week }
+        due_date1 = { due_at: 1.day.from_now }
+        due_date2 = { due_at: 1.week.from_now }
         due_date3 = { due_at: 2.weeks.from_now }
         due_date4 = { due_at: nil }
         assignments.each do |assignment|
@@ -2912,6 +3011,21 @@ describe User do
     end
   end
 
+  describe "grade_by_question_in_speedgrader?" do
+    let(:user) { user_factory(active_all: true) }
+
+    it "returns the saved preference" do
+      user.preferences[:enable_speedgrader_grade_by_question] = true
+      expect { user.preferences[:enable_speedgrader_grade_by_question] = false }.to change {
+        user.grade_by_question_in_speedgrader?
+      }.from(true).to(false)
+    end
+
+    it "defaults to false" do
+      expect(user.grade_by_question_in_speedgrader?).to be false
+    end
+  end
+
   describe "send_scores_in_emails" do
     before :once do
       course_with_student(active_all: true)
@@ -3004,6 +3118,17 @@ describe User do
   end
 
   describe "permissions" do
+    it "allows a user to update their own speed grader settings" do
+      user = user_model
+      expect(user.grants_right?(user, :update_speed_grader_settings)).to be true
+    end
+
+    it "does not allow a user to update someone else's speed grader settings" do
+      user1 = user_model
+      user2 = user_model
+      expect(user1.grants_right?(user2, :update_speed_grader_settings)).to be false
+    end
+
     it "does not allow account admin to modify admin privileges of other account admins" do
       expect(RoleOverride.readonly_for(Account.default, :manage_role_overrides, admin_role)).to be_truthy
       expect(RoleOverride.readonly_for(Account.default, :manage_account_memberships, admin_role)).to be_truthy
@@ -3713,15 +3838,6 @@ describe User do
       au.destroy
       expect(@user.root_admin_for?(@account)).to be false
     end
-  end
-
-  it "does not grant user_notes rights to restricted users" do
-    course_with_ta(active_all: true)
-    student_in_course(course: @course, active_all: true)
-    @course.account.role_overrides.create!(role: ta_role, enabled: false, permission: :manage_user_notes)
-
-    expect(@student.grants_right?(@ta, :create_user_notes)).to be_falsey
-    expect(@student.grants_right?(@ta, :read_user_notes)).to be_falsey
   end
 
   it "changes avatar state on reporting" do

@@ -55,6 +55,7 @@ module Lti
     PLACEMENTS_BY_MESSAGE_TYPE = {
       LtiAdvantage::Messages::ResourceLinkRequest::MESSAGE_TYPE => %i[
         account_navigation
+        analytics_hub
         assignment_edit
         assignment_group_menu
         assignment_index_menu
@@ -110,6 +111,7 @@ module Lti
     }.freeze
 
     PLACEMENTS = PLACEMENTS_BY_MESSAGE_TYPE.values.flatten.uniq.freeze
+    LTI_ADVANTAGE_MESSAGE_TYPES = PLACEMENTS_BY_MESSAGE_TYPE.keys.freeze
 
     PLACEMENT_LOOKUP = {
       "Canvas.placements.accountNavigation" => ACCOUNT_NAVIGATION,

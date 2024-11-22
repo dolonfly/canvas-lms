@@ -70,7 +70,10 @@ export const Component = () => {
               <TabbedView accountId={accountId} />
             </>
           ) : (
-            <ViewRubrics canManageRubrics={ENV.PERMISSIONS?.manage_rubrics} />
+            <ViewRubrics
+              canManageRubrics={ENV.PERMISSIONS?.manage_rubrics}
+              canImportExportRubrics={ENV.rubric_imports_exports}
+            />
           )}
         </ApolloProvider>
       </Portal>
@@ -101,7 +104,11 @@ const TabbedView = ({accountId}: TabbedViewProps) => {
         isSelected={tab === 'tab-panel-rubrics'}
       >
         <View as="div" margin="small 0 0 0">
-          <ViewRubrics canManageRubrics={ENV.PERMISSIONS?.manage_rubrics} showHeader={false} />
+          <ViewRubrics
+            canManageRubrics={ENV.PERMISSIONS?.manage_rubrics}
+            canImportExportRubrics={ENV.rubric_imports_exports}
+            showHeader={false}
+          />
         </View>
       </Tabs.Panel>
       <Tabs.Panel

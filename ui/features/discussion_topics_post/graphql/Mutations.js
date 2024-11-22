@@ -261,3 +261,32 @@ export const UPDATE_USER_DISCUSSION_SPLITSCREEN_PREFERENCE = gql`
     }
   }
 `
+
+export const UPDATE_DISCUSSION_SORT_ORDER = gql`
+  mutation UpdateDiscussionSortOrder(
+    $discussionTopicId: ID!
+    $sortOrder: DiscussionSortOrderType!
+  ) {
+    updateDiscussionSortOrder(
+      input: {discussionTopicId: $discussionTopicId, sortOrder: $sortOrder}
+    ) {
+      discussionTopic {
+        _id
+        id
+        sortOrder
+      }
+    }
+  }
+`
+
+export const UPDATE_DISCUSSION_EXPANDED = gql`
+  mutation UpdateDiscussionExpanded($discussionTopicId: ID!, $expanded: Boolean!) {
+    updateDiscussionExpanded(input: {discussionTopicId: $discussionTopicId, expanded: $expanded}) {
+      discussionTopic {
+        _id
+        id
+        expanded
+      }
+    }
+  }
+`

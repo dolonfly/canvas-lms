@@ -63,9 +63,9 @@ describe Api::V1::Course do
     let(:teacher_enrollment) { @course1.teacher_enrollments.first }
 
     it "supports optionally providing the url" do
-      expect(@test_api.course_json(@course1, @me, {}, ["html_url"], [])).to encompass({
-                                                                                        "html_url" => "course_url(Course.find(#{@course1.id}), :host => #{HostUrl.context_host(@course1)})"
-                                                                                      })
+      expect(@test_api.course_json(@course1, @me, {}, ["html_url"], [])).to include({
+                                                                                      "html_url" => "course_url(Course.find(#{@course1.id}), :host => #{HostUrl.context_host(@course1)})"
+                                                                                    })
       expect(@test_api.course_json(@course1, @me, {}, [], [])).to_not include "html_url"
     end
 
@@ -3163,7 +3163,7 @@ describe CoursesController, type: :request do
                         { state: ["available"] })
         expect(json.collect { |c| c["id"].to_i }.sort).to eq [@course1.id, @course2.id].sort
         json.pluck("workflow_state").each do |s|
-          expect(%w[available]).to include(s)
+          expect(s).to eql "available"
         end
       end
 
@@ -3174,7 +3174,7 @@ describe CoursesController, type: :request do
                         { state: ["unpublished"] })
         expect(json.collect { |c| c["id"].to_i }.sort).to eq [@course3.id, @course4.id].sort
         json.pluck("workflow_state").each do |s|
-          expect(%w[unpublished]).to include(s)
+          expect(s).to eql "unpublished"
         end
       end
 
@@ -3185,7 +3185,7 @@ describe CoursesController, type: :request do
                         { state: ["unpublished", "available"] })
         expect(json.collect { |c| c["id"].to_i }.sort).to eq [@course1.id, @course2.id, @course3.id, @course4.id].sort
         json.pluck("workflow_state").each do |s|
-          expect(%w[available unpublished]).to include(s)
+          expect(s).to be_in %w[available unpublished]
         end
       end
 
@@ -3202,7 +3202,7 @@ describe CoursesController, type: :request do
                                                 "enrollment_state" => "invited",
                                                 "limit_privileges_to_course_section" => false }]
         json.pluck("workflow_state").each do |s|
-          expect(%w[unpublished]).to include(s)
+          expect(s).to eql "unpublished"
         end
       end
 
@@ -4242,6 +4242,17 @@ describe CoursesController, type: :request do
         json = api_call(:get,
                         "/api/v1/courses.json?enrollment_type=teacher&include[]=syllabus_body",
                         { controller: "courses", action: "index", format: "json", enrollment_type: "teacher", include: ["syllabus_body"] })
+        json[0]["syllabus_body"]
+      end
+    end
+
+    it "returns the course syllabus without verifiers" do
+      should_translate_user_content(@course1, false) do |content|
+        @course1.syllabus_body = content
+        @course1.save!
+        json = api_call(:get,
+                        "/api/v1/courses.json?enrollment_type=teacher&include[]=syllabus_body",
+                        { controller: "courses", action: "index", format: "json", enrollment_type: "teacher", include: ["syllabus_body"], no_verifiers: true })
         json[0]["syllabus_body"]
       end
     end

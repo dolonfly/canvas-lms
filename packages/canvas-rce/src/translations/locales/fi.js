@@ -329,7 +329,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Muokkaa kuvaketta" },
   "edit_link_7f53bebb": { "message": "Muokkaa linkkiä" },
-  "editor_statusbar_26ac81fc": { "message": "Editorin tilapalkki" },
+  "editor_status_bar_653f44ee": { "message": "Editorin tilapalkki" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Elementti, joka alkaa { start }"
   },
@@ -627,6 +627,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Linkittyy ulkoiselle sivustolle."
   },
+  "lists_cd1336fc": { "message": "Listat" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Luettelot pitäisi muotoilla luetteloina."
   },
@@ -1038,6 +1039,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Tyylit" },
   "submit_a3cc6859": { "message": "Lähetä" },
+  "submitting_b90fac62": { "message": "Lähetetään..." },
   "subscript_59744f96": { "message": "Alaindeksi" },
   "subset_19c1a92f": { "message": "Osajoukko" },
   "subset_strict_8d8948d6": { "message": "Osajoukko (tiukka)" },

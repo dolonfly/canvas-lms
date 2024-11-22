@@ -43,7 +43,7 @@ import SubmissionTypeButton from './SubmissionTypeButton'
 import {Submission} from '@canvas/assignments/graphql/student/Submission'
 import {Text} from '@instructure/ui-text'
 import {uploadFile} from '@canvas/upload-file'
-import {useQuery} from 'react-apollo'
+import {useQuery} from '@apollo/react-hooks'
 import {View} from '@instructure/ui-view'
 import theme from '@instructure/canvas-theme'
 import {isOriginalityReportVisible} from '@canvas/grading/originalityReportHelper'
@@ -515,8 +515,8 @@ export default class AttemptTab extends Component {
             {selectedType != null && (
               <div
                 style={{
-                  backgroundColor: theme.variables.colors.backgroundLight,
-                  borderTop: `2px solid ${theme.variables.colors.borderMedium}`,
+                  backgroundColor: theme.colors.backgroundLight,
+                  borderTop: `2px solid ${theme.colors.borderMedium}`,
                 }}
               >
                 {this.renderByType(selectedType, context, this.props.selectedExternalTool)}

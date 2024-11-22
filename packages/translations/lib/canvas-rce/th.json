@@ -284,7 +284,7 @@
   },
   "edit_icon_2c6b0e91": { "message": "ไอคอนแก้ไข" },
   "edit_link_7f53bebb": { "message": "แก้ไขลิงค์" },
-  "editor_statusbar_26ac81fc": { "message": "แถบสถานะโปรแกรมแก้ไข" },
+  "editor_status_bar_653f44ee": { "message": "แถบสถานะโปรแกรมแก้ไข" },
   "element_starting_with_start_91bf4c3b": {
     "message": "องค์ประกอบเริ่มต้นด้วย { start }"
   },
@@ -564,6 +564,7 @@
   },
   "links_14b70841": { "message": "ลิงค์" },
   "links_to_an_external_site_de74145d": { "message": "ลิงค์ไปยังไซต์ภายนอก" },
+  "lists_cd1336fc": { "message": "รายการ" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "รายการควรกำหนดรูปแบบเป็นแสดงรายการ"
   },
@@ -969,6 +970,7 @@
   },
   "styles_2aa721ef": { "message": "รูปแบบ" },
   "submit_a3cc6859": { "message": "ส่ง" },
+  "submitting_b90fac62": { "message": "กำลังจัดส่ง..." },
   "subscript_59744f96": { "message": "ตัวห้อย" },
   "subset_19c1a92f": { "message": "ซับเซ็ต" },
   "subset_strict_8d8948d6": { "message": "ซับเซ็ต (เข้มงวด)" },

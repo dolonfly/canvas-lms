@@ -314,7 +314,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "आइकन संपादित करें" },
   "edit_link_7f53bebb": { "message": "लिंक संपादित करें" },
-  "editor_statusbar_26ac81fc": { "message": "संपादक स्टेटसबार " },
+  "editor_status_bar_653f44ee": { "message": "संपादक स्थिति पट्टी" },
   "element_starting_with_start_91bf4c3b": {
     "message": "{ start } से शुरू होता तत्व"
   },
@@ -604,6 +604,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "बाहरी साइट के लिए लिंक।"
   },
+  "lists_cd1336fc": { "message": "सूचियां" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "सूचियों को सूचियों के रूप में स्वरूपित किया जाना चाहिए।"
   },
@@ -1013,6 +1014,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "स्टाइल" },
   "submit_a3cc6859": { "message": "सबमिट करें" },
+  "submitting_b90fac62": { "message": "सबमिट किया जा रहा है..." },
   "subscript_59744f96": { "message": "सबस्क्रिप्ट" },
   "subset_19c1a92f": { "message": "उपसमुच्चय" },
   "subset_strict_8d8948d6": { "message": "उपसमुच्चय (विशुद्ध)" },

@@ -378,6 +378,37 @@ describe AccountsController do
       expect(@account.settings[:sis_assignment_name_length_input][:value]).to eq "255"
     end
 
+    it "updates 'show_sections_in_course_tray'" do
+      account_with_admin_logged_in
+      post(
+        :update,
+        params: {
+          id: @account.id,
+          account: {
+            settings: {
+              show_sections_in_course_tray: false
+            }
+          }
+        }
+      )
+      @account.reload
+      expect(@account.settings[:show_sections_in_course_tray]).to be false
+
+      post(
+        :update,
+        params: {
+          id: @account.id,
+          account: {
+            settings: {
+              show_sections_in_course_tray: true
+            }
+          }
+        }
+      )
+      @account.reload
+      expect(@account.settings[:show_sections_in_course_tray]).to be true
+    end
+
     it "allows admins to set the sis_source_id on sub accounts" do
       account_with_admin_logged_in
       @account = @account.sub_accounts.create!
@@ -1003,6 +1034,25 @@ describe AccountsController do
     end
   end
 
+  describe "#acceptable_use_policy" do
+    before do
+      @account = Account.create!
+      @controller.instance_variable_set(:@domain_root_account, @account)
+    end
+
+    it "returns a successful HTML response" do
+      get "acceptable_use_policy", format: :html
+      expect(response).to be_successful
+      expect(response.content_type).to eq "text/html; charset=utf-8"
+    end
+
+    it "returns a successful JSON response" do
+      get "acceptable_use_policy", format: :json
+      expect(response).to be_successful
+      expect(response.content_type).to eq "application/json; charset=utf-8"
+    end
+  end
+
   describe "#settings" do
     describe "js_env" do
       let(:account) do
@@ -1263,16 +1313,6 @@ describe AccountsController do
       expect(response.body).to match(/"id":"instructor_question"/)
       expect(response.body).to match(/"id":"search_the_canvas_guides"/)
       expect(response.body).to match(/"type":"default"/)
-      expect(response.body).to_not match(/"id":"covid"/)
-    end
-
-    context "with featured_help_links enabled" do
-      it "returns the covid help link as a default" do
-        Account.site_admin.enable_feature!(:featured_help_links)
-        get "help_links", params: { account_id: @account.id }
-        expect(response).to be_successful
-        expect(response.body).to match(/"id":"covid"/)
-      end
     end
 
     it "returns custom help links" do
@@ -1476,6 +1516,11 @@ describe AccountsController do
 
         expect(response).to be_successful
         expect(response.body).to match(/"name":"apple".+"name":"bar".+"name":"foo"/)
+      end
+
+      it "works in conjunction with the blueprint option" do
+        get "courses_api", params: { account_id: @account.id, sort: "course_status", order: "desc", blueprint: false }
+        expect(response).to be_successful
       end
     end
 

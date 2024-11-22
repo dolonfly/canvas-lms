@@ -19,9 +19,8 @@
 import React, {useState, useRef, useEffect, useMemo, useCallback} from 'react'
 import {Checkbox} from '@instructure/ui-checkbox'
 import {useScope as useI18nScope} from '@canvas/i18n'
-import ItemAssignToTray, {
-  getEveryoneOption,
-} from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToTray'
+import ItemAssignToManager from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToManager'
+import {getEveryoneOption} from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToTray'
 import _ from 'underscore'
 import {forEach, map} from 'lodash'
 import CardActions from '../util/differentiatedModulesCardActions'
@@ -40,6 +39,7 @@ import {
 import {uid} from '@instructure/uid'
 import DateValidator from '@canvas/grading/DateValidator'
 import GradingPeriodsAPI from '@canvas/grading/jquery/gradingPeriodsApi'
+import {View} from '@instructure/ui-view'
 
 const I18n = useI18nScope('DueDateOverrideView')
 
@@ -54,6 +54,7 @@ const AssignToContent = ({
   supportDueDates = true,
   isCheckpointed,
   postToSIS = false,
+  defaultGroupCategoryId = null,
 }) => {
   // stagedCards are the itemAssignToCards that will be saved when the assignment is saved
   const [stagedCards, setStagedCardsInner] = useState([])
@@ -66,6 +67,7 @@ const AssignToContent = ({
   const [hasModuleOverrides, setHasModuleOverrides] = useState(false)
   const [moduleAssignees, setModuleAssignees] = useState([])
   const [initialModuleOverrides, setInitialModuleOverrides] = useState([])
+  const [groupCategoryId, setGroupCategoryId] = useState(getGroupCategoryId?.())
   const dateValidator = useMemo(
     () =>
       new DateValidator({
@@ -80,16 +82,16 @@ const AssignToContent = ({
 
   const stagedCardsRef = useRef(stagedCards)
 
-  const setStagedCards = (cards) => {
+  const setStagedCards = cards => {
     stagedCardsRef.current = cards
     setStagedCardsInner(cards)
   }
 
   const stagedOverridesRef = useRef(stagedOverrides)
 
-  const setStagedOverrides = (overrides) => {
-    stagedOverridesRef.current = overrides
-    setStagedOverridesInner(overrides)
+  const setStagedOverrides = newOverrides => {
+    stagedOverridesRef.current = newOverrides
+    setStagedOverridesInner(newOverrides)
   }
 
   const shouldRenderImportantDates = useMemo(
@@ -97,14 +99,21 @@ const AssignToContent = ({
     [type]
   )
 
-  // TODO: ensure group category id is passed in correctly when it's changed
-  const formData = useMemo(
-    () => ({
-      groupCategoryId: getGroupCategoryId?.(),
-    }),
+  useEffect(() => {
+    if (getGroupCategoryId === undefined) return
+    const handleGroupChange = () => setGroupCategoryId(getGroupCategoryId?.())
+    document.addEventListener('group_category_changed', handleGroupChange)
+    return () => {
+      document.removeEventListener('group_category_changed', handleGroupChange)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [open]
-  )
+  }, [])
+
+  useEffect(() => {
+    if (getGroupCategoryId !== undefined) return
+    setGroupCategoryId(defaultGroupCategoryId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultGroupCategoryId])
 
   useEffect(() => {
     const updatedOverrides = overrides.map(override => {
@@ -120,11 +129,12 @@ const AssignToContent = ({
   }, [overrides])
 
   useEffect(() => {
-    if (stagedOverrides === null) return
+    if (stagedOverridesRef.current === null) return
     const parsedOverrides = getParsedOverrides(
-      stagedOverrides,
+      stagedOverridesRef.current,
       stagedCards,
-      formData.groupCategoryId
+      groupCategoryId,
+      defaultSectionId
     )
     const uniqueOverrides = removeOverriddenAssignees(overrides, parsedOverrides)
     setStagedCards(uniqueOverrides)
@@ -134,8 +144,10 @@ const AssignToContent = ({
       setInitialState(state)
       // hasModuleOverrides and module assignees are only set once since they don't change
       let moduleOverrides = []
-      for (const card in state){
-        moduleOverrides = moduleOverrides.concat(state[card].overrides.filter(o => o.context_module_id))
+      for (const card in state) {
+        moduleOverrides = moduleOverrides.concat(
+          state[card].overrides.filter(o => o.context_module_id)
+        )
       }
       setInitialModuleOverrides(moduleOverrides)
 
@@ -149,12 +161,13 @@ const AssignToContent = ({
           if (moduleOverride.student_ids) {
             return moduleOverride.student_ids.map(id => `student-${id}`)
           }
+          return []
         })
         .flat()
       setModuleAssignees(allModuleAssignees)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stagedOverrides, formData.groupCategoryId])
+  }, [stagedOverrides, groupCategoryId])
 
   useEffect(() => {
     const newOverrides = getAllOverridesFromCards(stagedCardsRef.current).filter(
@@ -195,10 +208,11 @@ const AssignToContent = ({
 
     const withoutModuleOverrides = processModuleOverridesV2(newOverrides, initialModuleOverrides)
     resetOverrides(newOverrides, withoutModuleOverrides)
-    stagedOverridesRef.current = newOverrides
 
-    onSync(newOverrides, stagedImportantDates)
-  }, [stagedOverrides])
+    const noModuleOverrides = newOverrides.filter(o => !o.context_module_id)
+    onSync(noModuleOverrides, stagedImportantDates)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stagedCards, stagedOverrides])
 
   const cards = useMemo(() => {
     const selectedOptionIds = []
@@ -213,7 +227,6 @@ const AssignToContent = ({
           defaultOptions.push('mastery_paths')
           selectedOptionIds.push(...defaultOptions)
         } else if (override?.course_section_id === defaultSectionId) {
-          card.index = 0
           defaultOptions.push(everyoneOptionKey)
           selectedOptionIds.push(...defaultOptions)
         } else if (override?.course_id) {
@@ -272,7 +285,7 @@ const AssignToContent = ({
     const newCard = CardActions.handleAssigneeAdd({}, [], cardId, {})[0]
     delete newCard.student_ids
     newCard.draft = true
-    newCard.index = cards[cards.length -1].index + 1
+    newCard.index = cardId
     const oldOverrides = getAllOverridesFromCards(stagedCardsRef.current).filter(
       card =>
         card.course_section_id ||
@@ -290,7 +303,9 @@ const AssignToContent = ({
     delete newStagedCards[cardId]
     setStagedCards(newStagedCards)
 
-    const newStagedOverrides = stagedOverridesRef.current.filter(override => override.rowKey.toString() !== cardId)
+    const newStagedOverrides = stagedOverridesRef.current.filter(
+      override => override.rowKey.toString() !== cardId
+    )
     setStagedOverrides(newStagedOverrides)
   }
 
@@ -305,13 +320,13 @@ const AssignToContent = ({
   }
 
   const addOverride = () => {
-    const cardsCount = cards[cards.length -1].index + 1
-    generateCard(cardsCount)
+    const lastCard = cards.at(-1)
+    generateCard(lastCard ? lastCard.index + 1 : 1)
   }
 
   const handleChange = (cardId, newAssignee, deletedAssignees) => {
-    // Cards without assignees are emty objects
-    // ui/shared/context-modules/differentiated-modules/react/Item/ItemAssignToTray.tsx
+    // Cards without assignees are empty objects
+    // ui/shared/context-modules/differentiated-modules/react/Item/ItemAssignToManager.tsx
     if (Object.keys(newAssignee).length > 0) {
       handleAssigneeAddition(cardId, newAssignee)
     }
@@ -328,27 +343,26 @@ const AssignToContent = ({
     const oldDates = card.dates
     const date = newDate === '' ? null : newDate
 
+    const initialModuleOverrideState = initialModuleOverrides.find(obj => obj.rowKey === cardId)
+
+    const tmp = {}
+    tmp[dateType] = date
+    const newDates = _.extend(oldDates, tmp)
+    const hasDates = !Object.values(newDates).every(
+      value => value === null || value === undefined || value === ''
+    )
+
     const newOverrides = oldOverrides.map(override => {
       return {
         ...override,
         [dateType]: date,
         [`${dateType}_overridden`]: !!date,
+        context_module_id: hasDates ? null : initialModuleOverrideState?.context_module_id,
+        context_module_name: hasDates ? null : initialModuleOverrideState?.context_module_name,
       }
     })
-
-    const tmp = {}
-    tmp[dateType] = date
-    const newDates = _.extend(oldDates, tmp)
 
     updateCard(cardId, newOverrides, newDates)
-
-    const updatedOverrides = [...stagedOverridesRef.current]
-    updatedOverrides.forEach(override => {
-      if (String(override.rowKey) === String(cardId)) {
-        override[dateType] = newDate
-      }
-    })
-    setStagedOverrides(updatedOverrides)
   }
 
   const handleAssigneeAddition = (cardId, newAssignee) => {
@@ -412,6 +426,8 @@ const AssignToContent = ({
       delete existingOverrideData.group_id
       delete existingOverrideData.noop_id
       delete existingOverrideData.course_id
+      delete existingOverrideData.context_module_id
+      delete existingOverrideData.context_module_name
       remainingCardOverrides = [existingOverrideData]
     }
 
@@ -437,7 +453,9 @@ const AssignToContent = ({
 
   const importantDatesCheckbox = useCallback(() => {
     if (supportDueDates && (ENV.K5_SUBJECT_COURSE || ENV.K5_HOMEROOM_COURSE)) {
-      const disabled = !stagedOverridesRef.current?.some(override => override.due_at)
+      const disabled = !Object.values(stagedCardsRef?.current)?.some(
+        override => override?.dates?.due_at
+      )
       const checked = !disabled && stagedImportantDates
       return (
         <div id="important-dates">
@@ -446,8 +464,8 @@ const AssignToContent = ({
             name="important_dates"
             data-testid="important_dates"
             size="small"
-            value={checked ? 1 : 0}
-            checked={checked}
+            value={checked && !disabled ? 1 : 0}
+            checked={checked && !disabled}
             onChange={handleImportantDatesChange}
             disabled={disabled}
             inline={true}
@@ -455,48 +473,52 @@ const AssignToContent = ({
         </div>
       )
     }
-  }, [handleImportantDatesChange, supportDueDates, stagedImportantDates])
+    return null
+  }, [
+    handleImportantDatesChange,
+    supportDueDates,
+    stagedImportantDates,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    stagedCardsRef?.current,
+  ])
 
   return (
-    <>
-    {shouldRenderImportantDates && importantDatesCheckbox()}
-        <ItemAssignToTray
-          courseId={ENV.COURSE_ID}
-          itemType={type}
-          itemContentId={assignmentId}
-          initHasModuleOverrides={hasModuleOverrides}
-          defaultGroupCategoryId={formData.groupCategoryId}
-          useApplyButton={true}
-          locale={ENV.LOCALE || 'en'}
-          timezone={ENV.TIMEZONE || 'UTC'}
-          defaultCards={cards}
-          defaultSectionId={defaultSectionId}
-          defaultDisabledOptionIds={disabledOptionIds}
-          onAddCard={addOverride}
-          onAssigneesChange={handleChange}
-          onDatesChange={handleDatesUpdate}
-          onCardRemove={handleCardRemove}
-          removeDueDateInput={!supportDueDates}
-          isCheckpointed={isCheckpointed}
-          postToSIS={postToSIS}
-          isTray={false}
-        />
-    </>
-)
+    <View as="div" padding="x-small 0 0 0">
+      {shouldRenderImportantDates && importantDatesCheckbox()}
+      <ItemAssignToManager
+        courseId={ENV.COURSE_ID}
+        itemType={type}
+        itemContentId={assignmentId}
+        initHasModuleOverrides={hasModuleOverrides}
+        defaultGroupCategoryId={groupCategoryId}
+        useApplyButton={true}
+        locale={ENV.LOCALE || 'en'}
+        timezone={ENV.TIMEZONE || 'UTC'}
+        defaultCards={cards}
+        defaultSectionId={defaultSectionId}
+        defaultDisabledOptionIds={disabledOptionIds}
+        onAddCard={addOverride}
+        onAssigneesChange={handleChange}
+        onDatesChange={handleDatesUpdate}
+        onCardRemove={handleCardRemove}
+        removeDueDateInput={!supportDueDates}
+        isCheckpointed={isCheckpointed}
+        postToSIS={postToSIS}
+        isTray={false}
+      />
+    </View>
+  )
 }
 
 AssignToContent.propTypes = {
   onSync: func.isRequired,
-  getAssignmentName: func.isRequired,
   assignmentId: string,
   type: string.isRequired,
-  getPointsPossible: func.isRequired,
   overrides: array.isRequired,
   defaultSectionId: oneOfType([number, string]),
   importantDates: bool,
   getGroupCategoryId: func,
-  onTrayOpen: func,
-  onTrayClose: func,
+  defaultGroupCategoryId: string,
   supportDueDates: bool,
   isCheckpointed: bool,
   postToSIS: bool,

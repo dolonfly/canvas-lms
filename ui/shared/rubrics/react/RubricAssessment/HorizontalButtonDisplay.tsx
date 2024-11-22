@@ -26,25 +26,26 @@ import {View} from '@instructure/ui-view'
 import {escapeNewLineText, rangingFrom} from './utils/rubricUtils'
 import {possibleString, possibleStringRange} from '../Points'
 
-const {licorice} = colors
+const {shamrock} = colors
 
 type HorizontalButtonDisplayProps = {
   isPreviewMode: boolean
   ratings: RubricRating[]
   ratingOrder: string
-  selectedRatingIndex?: number
-  onSelectRating: (index: number) => void
+  selectedRatingId?: string
+  onSelectRating: (rating: RubricRating) => void
   criterionUseRange: boolean
 }
 export const HorizontalButtonDisplay = ({
   isPreviewMode,
   ratings,
   ratingOrder,
-  selectedRatingIndex = -1,
+  selectedRatingId,
   onSelectRating,
   criterionUseRange,
 }: HorizontalButtonDisplayProps) => {
-  const selectedRating = ratings[selectedRatingIndex]
+  const selectedRating = ratings.find(rating => rating.id && rating.id === selectedRatingId)
+  const selectedRatingIndex = selectedRating ? ratings.indexOf(selectedRating) : -1
   const min = criterionUseRange ? rangingFrom(ratings, selectedRatingIndex) : undefined
 
   const getPossibleText = (points?: number) => {
@@ -62,7 +63,7 @@ export const HorizontalButtonDisplay = ({
           padding="xx-small"
           margin="0 xx-small small xx-small"
           data-testid={`rating-details-${selectedRating?.id}`}
-          themeOverride={{borderColorBrand: licorice, borderWidthMedium: '0.188rem'}}
+          themeOverride={{borderColorBrand: shamrock, borderWidthMedium: '0.188rem'}}
         >
           <View as="div">
             <Text size="x-small" weight="bold">
@@ -101,7 +102,7 @@ export const HorizontalButtonDisplay = ({
                 isSelected={selectedRatingIndex === index}
                 isPreviewMode={isPreviewMode}
                 selectedArrowDirection="up"
-                onClick={() => onSelectRating(index)}
+                onClick={() => onSelectRating(rating)}
               />
             </Flex.Item>
           )

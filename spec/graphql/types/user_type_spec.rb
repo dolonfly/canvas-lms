@@ -19,8 +19,11 @@
 #
 
 require_relative "../graphql_spec_helper"
+require "helpers/k5_common"
 
 describe Types::UserType do
+  include K5Common
+
   before(:once) do
     student = student_in_course(active_all: true).user
     course = @course
@@ -942,6 +945,64 @@ describe Types::UserType do
         result = type.resolve("favoriteCoursesConnection { nodes { dashboardCard { assetString } } }")
         expect(result).to match_array([@course1.asset_string])
       end
+
+      it "caches dashboard card counts" do
+        @cur_teacher = course_with_teacher(active_all: true).user
+        @published_course = @course
+        @unpublished_course = course_factory(active_course: false)
+        @unpublished_course.enroll_teacher(@cur_teacher).accept!
+
+        teacher_type = GraphQLTypeTester.new(
+          @cur_teacher,
+          current_user: @cur_teacher,
+          domain_root_account: @course.account.root_account,
+          request: ActionDispatch::TestRequest.create
+        )
+
+        enable_cache do
+          teacher_type.resolve("favoriteCoursesConnection { nodes { dashboardCard { assetString } } }")
+          published_count = Rails.cache.read(["last_known_dashboard_cards_published_count", @cur_teacher.global_id].cache_key)
+          unpublished_count = Rails.cache.read(["last_known_dashboard_cards_unpublished_count", @cur_teacher.global_id].cache_key)
+          expect(published_count).to eq 1
+          expect(unpublished_count).to eq 1
+
+          # Publish the unpublished course
+          @unpublished_course.offer!
+          teacher_type.resolve("favoriteCoursesConnection { nodes { dashboardCard { assetString } } }")
+          published_count = Rails.cache.read(["last_known_dashboard_cards_published_count", @cur_teacher.global_id].cache_key)
+          unpublished_count = Rails.cache.read(["last_known_dashboard_cards_unpublished_count", @cur_teacher.global_id].cache_key)
+          expect(published_count).to eq 2
+          expect(unpublished_count).to eq 0
+        end
+      end
+
+      it "caches dashboard card counts for k5" do
+        k5_account = Account.create!(name: "K5 Elementary")
+        toggle_k5_setting(k5_account)
+        @cur_teacher = user_factory(active_all: true)
+        @k5_course1 = course_factory(course_name: "K5 Course 1", active_all: true, account: k5_account)
+        @k5_course1.enroll_teacher(@cur_teacher, enrollment_state: "active")
+
+        teacher_type = GraphQLTypeTester.new(
+          @cur_teacher,
+          current_user: @cur_teacher,
+          domain_root_account: k5_account.root_account,
+          request: ActionDispatch::TestRequest.create
+        )
+
+        enable_cache do
+          teacher_type.resolve("favoriteCoursesConnection { nodes { dashboardCard { assetString } } }")
+          k5_count = Rails.cache.read(["last_known_k5_cards_count", @cur_teacher.global_id].cache_key)
+          expect(k5_count).to eq 1
+
+          # Create and add a new K5 course
+          @k5_course2 = course_factory(course_name: "K5 Course 2", active_all: true, account: k5_account)
+          @k5_course2.enroll_teacher(@cur_teacher, enrollment_state: "active")
+          teacher_type.resolve("favoriteCoursesConnection { nodes { dashboardCard { assetString } } }")
+          k5_count = Rails.cache.read(["last_known_k5_cards_count", @cur_teacher.global_id].cache_key)
+          expect(k5_count).to eq 2
+        end
+      end
     end
   end
 
@@ -1141,6 +1202,53 @@ describe Types::UserType do
       expect(
         custom_teacher_type.resolve(%|courseRoles(courseId: "#{@course.id}", roleTypes: ["TeacherEnrollment"], builtInOnly: false)|)
       ).to eq ["TeacherEnrollment"]
+    end
+  end
+
+  describe "course_progression" do
+    let(:progress_helper) do
+      progress_helper = double(CourseProgress.name)
+      allow(progress_helper).to receive_messages(can_evaluate_progression?: true, normalized_requirement_count: 1)
+      progress_helper
+    end
+
+    before do
+      allow(CourseProgress).to receive(:new).and_return(progress_helper)
+    end
+
+    it "returns nil in a non-course context" do
+      type = GraphQLTypeTester.new(@student, current_user: @student)
+
+      expect(type.resolve("courseProgression { requirements { total } }")).to be_nil
+    end
+
+    it "returns nil when progress cannot be evaluated" do
+      type = GraphQLTypeTester.new(@student, current_user: @teacher, course: @course)
+
+      expect(progress_helper).to receive(:can_evaluate_progression?).and_return(false)
+      expect(type.resolve("courseProgression { requirements { total } }")).to be_nil
+    end
+
+    context "for a user with view_all_grades permission in the course" do
+      it "returns progression for another user" do
+        type = GraphQLTypeTester.new(@student, current_user: @teacher, course: @course)
+
+        expect(type.resolve("courseProgression { requirements { total } }")).to be_truthy
+      end
+    end
+
+    context "for a user without view_all_grades permission in the course" do
+      it "does not return progression for another user" do
+        type = GraphQLTypeTester.new(@student, current_user: @other_student, course: @course)
+
+        expect(type.resolve("courseProgression { requirements { total } }")).to be_nil
+      end
+
+      it "returns progression for self" do
+        type = GraphQLTypeTester.new(@student, current_user: @student, course: @course)
+
+        expect(type.resolve("courseProgression { requirements { total } }")).to be_truthy
+      end
     end
   end
 

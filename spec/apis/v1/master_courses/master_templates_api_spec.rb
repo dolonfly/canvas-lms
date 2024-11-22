@@ -244,6 +244,30 @@ describe MasterCourses::MasterTemplatesController, type: :request do
       expect(migration).to be_queued
       expect(migration.send_notification).to be true
     end
+
+    describe "send_item_notifications option" do
+      context "with feature on" do
+        before :once do
+          Account.default.enable_feature!(:blueprint_item_notifications)
+        end
+
+        it "accepts the send_item_notifications option" do
+          json = api_call(:post, @url, @params.merge(send_item_notifications: true))
+          migration = @template.master_migrations.find(json["id"])
+          expect(migration).to be_queued
+          expect(migration.migration_settings[:send_item_notifications]).to be true
+        end
+      end
+
+      context "with feature off" do
+        it "ignores the send_item_notifications option" do
+          json = api_call(:post, @url, @params.merge(send_item_notifications: true))
+          migration = @template.master_migrations.find(json["id"])
+          expect(migration).to be_queued
+          expect(migration.migration_settings).not_to have_key(:send_item_notifications)
+        end
+      end
+    end
   end
 
   describe "migrations show/index" do
@@ -715,6 +739,8 @@ describe MasterCourses::MasterTemplatesController, type: :request do
         @file = attachment_model(context: @master, display_name: "Some File")
         @folder = @master.folders.create!(name: "Blargh")
         @template.content_tag_for(@file).update_attribute(:restrictions, { content: true })
+        @assignment = @master.assignments.create(title: "some assignment", points_possible: "5")
+        @sub_assignment = @assignment.sub_assignments.create!(title: "sub assignment", context: @assignment.context, sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC)
       end
     end
 
@@ -742,6 +768,7 @@ describe MasterCourses::MasterTemplatesController, type: :request do
         @file.update_attribute(:display_name, "Renamed")
         @folder.update_attribute(:name, "Blergh")
         @new_page = @master.wiki_pages.create! title: "New News"
+        @sub_assignment.update_attribute(:points_possible, "7.3")
         @master.syllabus_body = "srslywat"
         @master.save!
 
@@ -783,6 +810,18 @@ describe MasterCourses::MasterTemplatesController, type: :request do
                                         "asset_name" => "Syllabus",
                                         "change_type" => "updated",
                                         "html_url" => "http://www.example.com/courses/#{@master.id}/assignments/syllabus",
+                                        "locked" => false },
+                                      { "asset_id" => @sub_assignment.id,
+                                        "asset_type" => "sub_assignment",
+                                        "asset_name" => "sub assignment",
+                                        "change_type" => "updated",
+                                        "html_url" => "http://www.example.com/courses/#{@master.id}/assignments/#{@assignment.id}",
+                                        "locked" => false },
+                                      { "asset_id" => @assignment.assignment_group_id,
+                                        "asset_type" => "assignment_group",
+                                        "asset_name" => "Assignments",
+                                        "change_type" => "updated",
+                                        "html_url" => "http://www.example.com/courses/#{@master.id}/assignment_groups/#{@assignment.assignment_group_id}",
                                         "locked" => false }
                                     ])
       end

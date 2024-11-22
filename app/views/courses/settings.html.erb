@@ -62,6 +62,10 @@
       <% if can_do(@context, @current_user, :read_as_admin) %>
         <li id="external_tools_tab"><a href="#tab-tools" id="tab-tools-link"><%= t('tabs.tools', %{Apps}) %></a></li>
       <% end %>
+      <% if can_do(@context, @current_user, :read_as_admin) && @context.root_account.feature_enabled?(:lti_apps_page_instructors) %>
+        <%# TODO: change name and deal with old apps? %>
+        <li id="apps_tab"><a href="#tab-apps" id="tab-apps-link">Apps (Discover)</a></li>
+      <% end %>
       <% if @publishing_enabled %>
         <li id="grade_publishing_tab"><a href="#tab-grade-publishing" id="tab-grade-publishing-link"><%= t('Grade Syncing') %></a></li>
       <% end %>
@@ -688,8 +692,10 @@
               <% end %>
               <% unless @context.elementary_subject_course? %>
                 <div class="checkbox-flex-container">
-                <%= f.check_box :lock_all_announcements, :disabled => !can_manage || @context.account.lock_all_announcements[:locked] %>
-                <%= f.label :lock_all_announcements, :en => 'Disable comments on announcements' %><br />
+                  <span <%= 'data-tooltip' if @context.account.lock_all_announcements[:locked] %> title="<%= t("This setting is locked on the account level")%>">
+                    <%= f.check_box :lock_all_announcements, :disabled => !can_manage || @context.account.lock_all_announcements[:locked] %>
+                    <%= f.label :lock_all_announcements, :en => 'Disable comments on announcements' %><br />
+                  </span>
                 </div>
               <% end %>
               <%= f.select :default_wiki_editing_roles, [
@@ -715,7 +721,7 @@
         <footer class="sticky-footer">
           <div>
             <% if Setting.get('cross_root_account_course_moves', 'false') == 'true' &&
-              Account.site_admin.grants_any_right?(@current_user, :manage_courses, :manage_courses_admin) && Account.root_accounts.length > 1 %>
+              Account.site_admin.grants_any_right?(@current_user, :manage_courses, :manage_courses_admin) && Account.root_accounts.count > 1 %>
                 <a href="#" class="move_course_link btn"><i class="icon-arrow-right"></i> <%= t('links.move_course', %{Move To Another Account}) %></a>
             <% end %>
               <span class="course_form">
@@ -877,7 +883,17 @@
           <li aria-label="<%= tab[:label] %>" class="navitem <%= 'enabled' if @context.tab_enabled?(tab) %>"
               id="nav_edit_tab_id_<%= tab[:id] %>"
           >
-            <%= tab[:label] %>
+            <div class="draggable_handle">
+              <% if @context.tab_enabled?(tab) %>
+                  <i class="icon-drag-handle"></i>
+              <% else %>
+                &nbsp;
+              <% end %>
+            </div>
+            <div class="navitem_content">
+              <%= tab[:label] %>
+              <span class="disabled_message"><%= tab[:disabled_message] %></span>
+            </div>
             <% if @context.tab_enabled?(tab) %>
               <div class="admin-links">
                 <a class="al-trigger al-trigger-gray" role="button" href="#">
@@ -895,7 +911,6 @@
                   </li>
                 </ul>
               </div>
-              <span class="disabled_message"><%= tab[:disabled_message] %></span>
             <% end %>
           </li>
         <% end %>
@@ -916,7 +931,13 @@
               class="navitem enabled"
               id="nav_edit_tab_id_<%= tab[:id] %>"
           >
-            <%= tab[:label] %>
+            <div class="draggable_handle">
+              <i class="icon-drag-handle"></i>
+            </div>
+            <div class="navitem_content">
+              <%= tab[:label] %>
+              <span class="disabled_message"><%= tab[:disabled_message] %></span>
+            </div>
             <div class="admin-links">
                 <a class="al-trigger al-trigger-gray" role="button" href="#">
                   <i class="icon-more" aria-hidden="true"></i>
@@ -933,8 +954,6 @@
                   </li>
                 </ul>
               </div>
-              <span class="disabled_message"><%= tab[:disabled_message] %></span>
-
           </li>
         <% end %>
       </ul>
@@ -951,6 +970,10 @@
     <div id="tab-tools">
       <%= render :partial => 'external_tools/external_tools', :object => @context.context_external_tools.active %>
     </div>
+  <% end %>
+
+  <% if @context.root_account.feature_enabled?(:lti_apps_page_instructors) && can_do(@context, @current_user, :read_as_admin) && !@context.elementary_homeroom_course? %>
+    <div id="tab-apps"></div>
   <% end %>
 
   <% if @publishing_enabled && !@context.elementary_homeroom_course? %>

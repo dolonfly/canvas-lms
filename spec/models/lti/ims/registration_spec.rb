@@ -38,7 +38,7 @@ module Lti::IMS
     let(:scopes) { [] }
 
     let(:registration) do
-      r = Registration.new({
+      Registration.new({
         redirect_uris:,
         initiate_login_uri:,
         client_name:,
@@ -48,12 +48,12 @@ module Lti::IMS
         tos_uri:,
         policy_uri:,
         lti_tool_configuration:,
-        scopes:
+        scopes:,
+        developer_key:,
+        lti_registration: developer_key.lti_registration
       }.compact)
-      r.developer_key = developer_key
-      r
     end
-    let(:developer_key) { DeveloperKey.create }
+    let(:developer_key) { dev_key_model_1_3 }
 
     it "is soft_deleted when destroy is called" do
       registration.destroy
@@ -453,6 +453,49 @@ module Lti::IMS
         end
       end
 
+      describe "placement_disabled?" do
+        let(:lti_tool_configuration) do
+          {
+            domain: "example.com",
+            claims: [],
+            messages: [{
+              type: "LtiResourceLinkRequest",
+              target_link_uri: "http://example.com/launch",
+              placements: ["global_navigation", "https://canvas.instructure.com/lti/course_navigation"],
+              "https://canvas.instructure.com/lti/visibility": "admins",
+            }],
+          }
+        end
+
+        let(:global_nav_placement) { registration.placements.find { |p| p[:placement] == "global_navigation" } }
+        let(:course_nav_placement) { registration.placements.find { |p| p[:placement] == "course_navigation" } }
+
+        it "says the placement is disabled when tool config is using the non-prefixed placement name" do
+          registration.registration_overlay["disabledPlacements"] = ["global_navigation"]
+          expect(registration.placement_disabled?("course_navigation")).to be false
+          expect(registration.placement_disabled?("global_navigation")).to be true
+
+          expect(course_nav_placement[:enabled]).to be true
+          expect(global_nav_placement[:enabled]).to be false
+        end
+
+        it "says the placement is disabled when tool config is using the prefixed placement name" do
+          registration.registration_overlay["disabledPlacements"] = ["course_navigation"]
+          expect(registration.placement_disabled?("course_navigation")).to be true
+          expect(registration.placement_disabled?("global_navigation")).to be false
+
+          expect(course_nav_placement[:enabled]).to be false
+          expect(global_nav_placement[:enabled]).to be true
+        end
+
+        it "rejects invalid placement names in the disabledPlacements array" do
+          expect(registration.valid?).to be true # ensure that we aren't invalid for other reasons
+          # disabledPlacements array should have non-prefixed placement names
+          registration.registration_overlay["disabledPlacements"] = ["https://canvas.instructure.com/lti/course_navigation"]
+          expect(registration.valid?).to be false
+        end
+      end
+
       describe "when extension visibility is supplied" do
         let(:lti_tool_configuration) do
           {
@@ -641,7 +684,7 @@ module Lti::IMS
     end
 
     describe "#new_external_tool" do
-      subject { registration.new_external_tool(context) }
+      subject { registration.developer_key.lti_registration.new_external_tool(context) }
 
       let(:lti_tool_configuration) do
         {
@@ -694,9 +737,14 @@ module Lti::IMS
       end
 
       context "when existing_tool is provided" do
-        subject { registration.new_external_tool(context, existing_tool:) }
+        subject { lti_registration.new_external_tool(context, existing_tool:) }
 
-        let(:existing_tool) { registration.new_external_tool(context) }
+        let(:lti_registration) { registration.developer_key.lti_registration }
+        let(:existing_tool) { lti_registration.new_external_tool(context) }
+
+        before do
+          lti_registration.ims_registration = registration
+        end
 
         context "and existing tool is disabled" do
           let(:state) { "disabled" }
@@ -785,7 +833,7 @@ module Lti::IMS
       end
 
       context "placements" do
-        subject { registration.new_external_tool(context).settings["course_navigation"] }
+        subject { registration.developer_key.lti_registration.new_external_tool(context).settings["course_navigation"] }
 
         it "uses the correct icon url" do
           expect(subject["icon_url"]).to eq icon_uri
@@ -813,27 +861,25 @@ module Lti::IMS
       end
     end
 
-    describe "registration_configuration" do
-      subject { registration.registration_configuration }
+    describe "internal_lti_configuration" do
+      subject { registration.internal_lti_configuration }
 
       context "when no explicit tool_id is set" do
         it "formats the configuration correctly with tool_id being nil" do
           config = registration.lti_tool_configuration.with_indifferent_access
           expect(subject).to eq(
             {
-              name: registration.client_name,
-              description: config[:description],
+              title: registration.client_name,
               domain: config[:domain],
-              custom_fields: config[:custom_parameters],
-              target_link_uri: config[:target_link_uri],
               privacy_level: registration.privacy_level,
-              icon_url: registration.logo_uri,
               oidc_initiation_url: registration.initiate_login_uri,
               redirect_uris: registration.redirect_uris,
               public_jwk_url: registration.jwks_uri,
               scopes: registration.overlaid_scopes,
               placements: registration.placements,
-              tool_id: nil
+              launch_settings: {
+                icon_url: "http://example.com/logo.png"
+              }
             }.with_indifferent_access
           )
         end
@@ -853,18 +899,17 @@ module Lti::IMS
           config = registration.lti_tool_configuration.with_indifferent_access
           expect(subject).to eq(
             {
-              name: registration.client_name,
-              description: config[:description],
+              title: registration.client_name,
               domain: config[:domain],
-              custom_fields: config[:custom_parameters],
-              target_link_uri: config[:target_link_uri],
               privacy_level: registration.privacy_level,
-              icon_url: registration.logo_uri,
               oidc_initiation_url: registration.initiate_login_uri,
               redirect_uris: registration.redirect_uris,
               public_jwk_url: registration.jwks_uri,
               scopes: registration.overlaid_scopes,
               placements: registration.placements,
+              launch_settings: {
+                icon_url: "http://example.com/logo.png"
+              },
               tool_id: "ToolV2"
             }.with_indifferent_access
           )

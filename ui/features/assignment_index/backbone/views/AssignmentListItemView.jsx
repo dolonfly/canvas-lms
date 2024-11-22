@@ -44,7 +44,7 @@ import template from '../../jst/AssignmentListItem.handlebars'
 import scoreTemplate from '../../jst/_assignmentListItemScore.handlebars'
 import AssignmentKeyBindingsMixin from '../mixins/AssignmentKeyBindingsMixin'
 import CreateAssignmentView from './CreateAssignmentView'
-import ItemAssignToTray from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToTray'
+import ItemAssignToManager from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToManager'
 import {captureException} from '@sentry/browser'
 
 const I18n = useI18nScope('AssignmentListItemView')
@@ -480,6 +480,7 @@ export default AssignmentListItemView = (function () {
             tool.base_url +
             `&discussion_topics[]=${__guard__(this.model.get('discussion_topic'), x => x.id)}`)
         })
+        data.item_assignment_type = "discussion_topic"
       } else {
         const isNewQuizzes = this.model.isQuizLTIAssignment()
         const isShareToCommons = (tool) => tool.canvas_icon_class === 'icon-commons'
@@ -601,11 +602,16 @@ export default AssignmentListItemView = (function () {
     }
 
     renderItemAssignToTray(open, returnFocusTo, itemProps) {
+      const mountPoint = document.getElementById('assign-to-mount-point')
+      if (mountPoint.hasChildNodes()) {
+        ReactDOM.unmountComponentAtNode(mountPoint)
+        mountPoint.innerHTML = ''
+      }
       ReactDOM.render(
-        <ItemAssignToTray
+        <ItemAssignToManager
           open={open}
           onClose={() => {
-            ReactDOM.unmountComponentAtNode(document.getElementById('assign-to-mount-point'))
+            ReactDOM.unmountComponentAtNode(mountPoint)
           }}
           onDismiss={() => {
             this.renderItemAssignToTray(false, returnFocusTo, itemProps)
@@ -614,9 +620,10 @@ export default AssignmentListItemView = (function () {
           itemType="assignment"
           locale={ENV.LOCALE || 'en'}
           timezone={ENV.TIMEZONE || 'UTC'}
+          isCheckpointed={itemProps.isCheckpoint}
           {...itemProps}
         />,
-        document.getElementById('assign-to-mount-point')
+        mountPoint
       )
     }
 
@@ -629,12 +636,14 @@ export default AssignmentListItemView = (function () {
       const itemContentId = e.target.getAttribute('data-assignment-id')
       const pointsPossible = this.model.get('points_possible')
       const iconType = e.target.getAttribute('data-assignment-type')
+      const isCheckpoint = e.target.getAttribute('data-assignment-has-checkpoint')
       this.renderItemAssignToTray(true, returnFocusTo, {
         courseId,
         itemName,
         itemContentId,
         pointsPossible,
         iconType,
+        isCheckpoint,
       })
     }
 

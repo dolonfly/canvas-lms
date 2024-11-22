@@ -48,7 +48,7 @@ class StreamItem < ActiveRecord::Base
   end
 
   def get_notification_category
-    read_attribute(:data)["notification_category"] || data.notification_category
+    self["data"]["notification_category"] || data.notification_category
   end
 
   def self.reconstitute_ar_object(type, data)
@@ -93,7 +93,7 @@ class StreamItem < ActiveRecord::Base
     res.instance_variable_set(:@new_record, false) if data["id"]
 
     # the after_find from NotificationPreloader won't get triggered
-    if res.respond_to?(:preload_notification) && res.read_attribute(:notification_id)
+    if res.respond_to?(:preload_notification) && res["notification_id"]
       res.preload_notification
     end
 
@@ -103,7 +103,7 @@ class StreamItem < ActiveRecord::Base
   def data(viewing_user_id = nil)
     # reconstitute AR objects
     @ar_data ||= shard.activate do
-      self.class.reconstitute_ar_object(asset_type, read_attribute(:data))
+      self.class.reconstitute_ar_object(asset_type, super())
     end
     res = @ar_data
 
@@ -296,10 +296,8 @@ class StreamItem < ActiveRecord::Base
           owner_insert[:hidden] = true
         end
 
-        StreamItemInstance.unique_constraint_retry do
-          StreamItemInstance.where(stream_item_id:, user_id: sliced_user_ids).delete_all
-          StreamItemInstance.bulk_insert(inserts)
-        end
+        StreamItemInstance.where(stream_item_id:, user_id: sliced_user_ids).delete_all
+        StreamItemInstance.insert_all(inserts)
 
         # reset caches manually because the observer wont trigger off of the above mass inserts
         sliced_user_ids.each do |user_id|

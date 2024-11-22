@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-properties */
 /*
  * Copyright (C) 2011 - present Instructure, Inc.
  *
@@ -43,11 +44,13 @@ import type {
 import type {SubmissionOriginalityData} from '@canvas/grading/grading.d'
 import React from 'react'
 import ReactDOM from 'react-dom'
+import {Alert} from '@instructure/ui-alerts'
 import {IconButton} from '@instructure/ui-buttons'
 import iframeAllowances from '@canvas/external-apps/iframeAllowances'
 import OutlierScoreHelper from '@canvas/grading/OutlierScoreHelper'
 import QuizzesNextSpeedGrading from '../QuizzesNextSpeedGrading'
 import StatusPill from '@canvas/grading-status-pill'
+import SubmissionSticker from '@canvas/submission-sticker'
 import JQuerySelectorCache from '../JQuerySelectorCache'
 import numberHelper from '@canvas/i18n/numberHelper'
 import GradeFormatHelper from '@canvas/grading/GradeFormatHelper'
@@ -55,7 +58,7 @@ import AssessmentAuditButton from '../react/AssessmentAuditTray/components/Asses
 import AssessmentAuditTray from '../react/AssessmentAuditTray/index'
 import CommentArea from '../react/CommentArea'
 import GradeLoadingSpinner from '../react/GradeLoadingSpinner'
-import RubricAssessmentTrayWrapper from '../react/RubricAssessmentTrayWrapper'
+import RubricAssessmentContainerWrapper from '../react/RubricAssessmentContainerWrapper'
 import ScreenCaptureIcon from '../react/ScreenCaptureIcon'
 import {originalityReportSubmissionKey} from '@canvas/grading/originalityReportHelper'
 import PostPolicies from '../react/PostPolicies/index'
@@ -159,7 +162,11 @@ import type {
   RubricAssessmentUnderscore,
   RubricOutcomeUnderscore,
   RubricUnderscoreType,
-} from '../react/RubricAssessmentTrayWrapper/utils'
+} from '@canvas/rubrics/react/utils'
+import {SpeedGraderCheckpointsWrapper} from '../react/SpeedGraderCheckpoints/SpeedGraderCheckpointsWrapper'
+import {SpeedGraderDiscussionsNavigation} from '../react/SpeedGraderDiscussionsNavigation'
+import sanitizeHtml from 'sanitize-html-with-tinymce'
+import {containsHtmlTags, formatMessage} from '@canvas/util/TextHelper'
 
 declare global {
   interface Window {
@@ -181,9 +188,12 @@ const SPEED_GRADER_SUBMISSION_COMMENTS_DOWNLOAD_MOUNT_POINT =
   'speed_grader_submission_comments_download_mount_point'
 const SPEED_GRADER_HIDDEN_SUBMISSION_PILL_MOUNT_POINT =
   'speed_grader_hidden_submission_pill_mount_point'
+const SPEED_GRADER_CHECKPOINTS_MOUNT_POINT = 'speed_grader_checkpoints_mount_point'
 const SPEED_GRADER_EDIT_STATUS_MENU_MOUNT_POINT = 'speed_grader_edit_status_mount_point'
 const SPEED_GRADER_EDIT_STATUS_MENU_SECONDARY_MOUNT_POINT =
   'speed_grader_edit_status_secondary_mount_point'
+const SPEED_GRADER_DISCUSSIONS_NAVIGATION_MOUNT_POINT =
+  'speed_grader_discussions_navigation_mount_point'
 const ASSESSMENT_AUDIT_BUTTON_MOUNT_POINT = 'speed_grader_assessment_audit_button_mount_point'
 const ASSESSMENT_AUDIT_TRAY_MOUNT_POINT = 'speed_grader_assessment_audit_tray_mount_point'
 const SCREEN_CAPTURE_ICON_MOUNT_POINT = 'screen-capture-icon-mount-point'
@@ -195,6 +205,7 @@ let anonymizableUserId: 'anonymous_id' | 'user_id'
 let anonymizableStudentId: 'anonymous_id' | 'student_id'
 let anonymizableAuthorId: 'anonymous_id' | 'author_id'
 let isModerated: boolean
+let isMostRecentAttempt: boolean
 
 let commentSubmissionInProgress: boolean
 let reassignAssignmentInProgress: boolean
@@ -291,6 +302,8 @@ const HISTORY_REPLACE = 'replace'
 
 const {enhanced_rubrics_enabled} = ENV ?? {}
 type RubricSavedComments = {summary_data?: {saved_comments: Record<string, string[]>}}
+
+const isRceLiteEnabled = () => ENV.FEATURES?.rce_lite_enabled_speedgrader_comments
 
 function setGradeLoading(studentId: string, loading: boolean) {
   useStore.setState(state => {
@@ -840,7 +853,60 @@ function renderHiddenSubmissionPill(submission: Submission) {
   }
 }
 
-function renderCommentTextArea() {
+function renderCheckpoints(submission: Submission) {
+  const mountPoint = document.getElementById(SPEED_GRADER_CHECKPOINTS_MOUNT_POINT)
+
+  if (mountPoint) {
+    ReactDOM.render(
+      <SpeedGraderCheckpointsWrapper
+        courseId={ENV.course_id}
+        assignmentId={submission.assignment_id}
+        studentId={submission.user_id}
+      />,
+      mountPoint
+    )
+  }
+}
+
+function renderRubricsCheckpointsInfo() {
+  const mountPoint = document.getElementById('rubrics_checkpoints_info')
+
+  if (mountPoint) {
+    ReactDOM.render(
+      <Alert variant="info" margin="medium none">
+        {I18n.t('Rubrics do not auto-populate grades for checkpoints.')}
+      </Alert>,
+      mountPoint
+    )
+  }
+}
+
+function renderDiscussionsNavigation() {
+  const mountPoint = document.getElementById(SPEED_GRADER_DISCUSSIONS_NAVIGATION_MOUNT_POINT)
+
+  if (mountPoint) {
+    ReactDOM.render(<SpeedGraderDiscussionsNavigation />, mountPoint)
+  }
+}
+
+function clearDiscussionsNavigation() {
+  const mountPoint = document.getElementById(SPEED_GRADER_DISCUSSIONS_NAVIGATION_MOUNT_POINT)
+
+  if (mountPoint) {
+    ReactDOM.unmountComponentAtNode(mountPoint)
+  }
+}
+
+const setCommentText = (comment: string, shouldRerender: boolean) => {
+  if ($add_a_comment_textarea) {
+    $add_a_comment_textarea.data('textarea', comment)
+  }
+  if (shouldRerender) {
+    renderCommentTextArea()
+  }
+}
+
+function renderCommentTextArea(readOnly = false) {
   // unmounting is a temporary workaround for INSTUI-870 to allow
   // for textarea minheight to be reset
   unmountCommentTextArea()
@@ -848,11 +914,17 @@ function renderCommentTextArea() {
     $add_a_comment_textarea = $(textarea)
   }
 
+  const currentText = $add_a_comment_textarea.data('textarea')
+
   ReactDOM.render(
     <CommentArea
       getTextAreaRef={getTextAreaRef}
       courseId={ENV.course_id}
       userId={ENV.current_user_id!}
+      useRCELite={isRceLiteEnabled()}
+      handleCommentChange={setCommentText}
+      currentText={currentText}
+      readOnly={readOnly}
     />,
     document.getElementById(SPEED_GRADER_COMMENT_TEXTAREA_MOUNT_POINT)
   )
@@ -866,6 +938,8 @@ function initCommentBox() {
     if ($('.media_comment_link').hasClass('ui-state-disabled')) {
       return
     }
+    const studentIdAtTimeOfClick = EG.currentStudent[anonymizableId]
+
     $('#media_media_recording')
       .show()
       .find('.media_recording')
@@ -873,8 +947,12 @@ function initCommentBox() {
         'create',
         'any',
         (id: string, type: string) => {
-          $('#media_media_recording').data('comment_id', id).data('comment_type', type)
-          EG.addSubmissionComment()
+          const studentIdAtCreateComplete = EG.currentStudent[anonymizableId]
+          if (studentIdAtTimeOfClick === studentIdAtCreateComplete) {
+            $('#media_media_recording').data('comment_id', id).data('comment_type', type)
+          }
+
+          EG.addSubmissionComment(undefined, studentIdAtTimeOfClick)
         },
         () => {
           EG.revertFromFormSubmit()
@@ -917,7 +995,12 @@ function initCommentBox() {
       if ($('#record_button').attr('recording') === 'true') {
         recognition.stop()
         const current_comment = $('#final_results').html() + $('#interim_results').html()
-        $add_a_comment_textarea.val(formatComment(current_comment))
+        if (isRceLiteEnabled()) {
+          $add_a_comment_textarea.data('textarea', formatComment(current_comment))
+          renderCommentTextArea()
+        } else {
+          $add_a_comment_textarea.val(formatComment(current_comment))
+        }
         $this.dialog('close').remove()
       } else {
         recognition.start()
@@ -1189,7 +1272,9 @@ function updateSubmissionAndPageEffects(data?: {
         if (availableMountPointForStatusMenu()) {
           const mountPoint = availableMountPointForStatusMenu()
           if (!mountPoint) throw new Error('SpeedGrader: mount point for status menu not found')
-          renderStatusMenu(statusMenuComponent(submission), mountPoint)
+          if (!window.jsonData.has_sub_assignments) {
+            renderStatusMenu(statusMenuComponent(submission), mountPoint)
+          }
         }
       })
     })
@@ -1304,6 +1389,7 @@ EG = {
   jsonReady() {
     isAnonymous = setupIsAnonymous(window.jsonData)
     isModerated = setupIsModerated(window.jsonData)
+    isMostRecentAttempt = true
     anonymousGraders = setupAnonymousGraders(window.jsonData)
     anonymizableId = setupAnonymizableId(isAnonymous)
     anonymizableUserId = setupAnonymizableUserId(isAnonymous)
@@ -1411,8 +1497,11 @@ EG = {
   },
 
   anyUnpostedComment() {
+    const comment = isRceLiteEnabled()
+      ? $add_a_comment_textarea.data('textarea')
+      : $add_a_comment_textarea.val()
     return !!(
-      $.trim($add_a_comment_textarea.val() as string).length ||
+      $.trim(comment as string).length ||
       $('#media_media_recording').data('comment_id') ||
       $add_a_comment.find("input[type='file']:visible").length
     )
@@ -1420,6 +1509,8 @@ EG = {
 
   skipRelativeToCurrentIndex(offset) {
     const nextStudent = (offset_: number) => {
+      // if we switch student, we don't have the data for the correct entry. so for now we empty it.
+      ENV.ENTRY_ID = ''
       const {length: students} = window.jsonData.studentsWithSubmissions
       const newIndex = (this.currentIndex() + offset_ + students) % students
       this.goToStudent(
@@ -1528,19 +1619,27 @@ EG = {
     if (enhanced_rubrics_enabled) {
       const isOpen = isClosed ? false : !useStore.getState().rubricAssessmentTrayOpen
       useStore.setState({rubricAssessmentTrayOpen: isOpen})
+      toggleGradeVisibility(!isOpen)
       this.refreshFullRubric()
+
+      if (!isOpen) {
+        $('.toggle_full_rubric').focus()
+      }
+
       return
     }
 
     const rubricFull = selectors.get('#rubric_full')
 
     if (rubricFull.filter(':visible').length || isClosed) {
+      $('#submission_sticker_mount_point').show()
       toggleGradeVisibility(true)
       rubricFull.fadeOut()
       $('.toggle_full_rubric').focus()
     } else {
       rubricFull.fadeIn()
       toggleGradeVisibility(false)
+      $('#submission_sticker_mount_point').hide()
       this.refreshFullRubric()
       originalRubric = EG.getOriginalRubricInfo()
       rubricFull.find('.rubric_title .title').focus()
@@ -1577,12 +1676,12 @@ EG = {
     return null
   },
 
-  hasUnsubmittedRubric(originalRubric_) {
+  hasUnsubmittedRubric(rubric) {
     const $rubricFull = $('#rubric_full')
     if ($rubricFull.filter(':visible').length) {
       const $unSavedRubric = $('.save_rubric_button').parents('#rubric_holder').find('.rubric')
       const unSavedData = rubricAssessment.assessmentData($unSavedRubric)
-      return !isEqual(unSavedData, originalRubric_)
+      return !isEqual(unSavedData, rubric)
     }
     return false
   },
@@ -1665,9 +1764,15 @@ EG = {
   },
 
   handleStudentChanged(historyBehavior = null) {
+    clearDiscussionsNavigation()
+
     // Save any draft comments before loading the new student
     if ($add_a_comment_textarea.hasClass('ui-state-disabled')) {
-      $add_a_comment_textarea.val('')
+      if (isRceLiteEnabled()) {
+        $add_a_comment_textarea.data('textarea', '')
+      } else {
+        $add_a_comment_textarea.val('')
+      }
     } else {
       EG.addSubmissionComment(true)
     }
@@ -1839,6 +1944,8 @@ EG = {
       $not_gradeable_message.hide()
       $rightside_inner.show()
     }
+
+    this.renderSticker()
     if (ENV.grading_role === 'moderator') {
       this.renderProvisionalGradeSelector({showingNewStudent: true})
       this.setCurrentStudentRubricAssessments()
@@ -1919,21 +2026,18 @@ EG = {
     ReactDOM.render(button, document.getElementById(ASSESSMENT_AUDIT_BUTTON_MOUNT_POINT))
   },
 
-  setUpRubricAssessmentTrayWrapper() {
+  setUpRubricAssessmentContainerWrapper() {
     ReactDOM.render(
-      <RubricAssessmentTrayWrapper
+      <RubricAssessmentContainerWrapper
         rubric={ENV.rubric as RubricUnderscoreType}
         rubricOutcomeData={ENV.rubric_outcome_data as RubricOutcomeUnderscore[]}
-        onAccessorChange={accessorId => {
-          $('#rubric_assessments_select').val(accessorId)
-          handleSelectedRubricAssessmentChanged()
-        }}
+        onDismiss={() => EG.toggleFullRubric('close')}
         onSave={data => {
           useStore.setState({rubricAssessmentTrayOpen: false})
           this.saveRubricAssessment(data)
         }}
       />,
-      document.getElementById('speed_grader_rubric_assessment_tray_wrapper')
+      document.getElementById('enhanced-rubric-assessment-container')
     )
   },
 
@@ -2531,10 +2635,9 @@ EG = {
     renderSubmissionCommentsDownloadLink(submission)
     EG.updateWordCount(preview_attachment ? preview_attachment.word_count : submission.word_count)
 
+    isMostRecentAttempt = !$submission_to_view.filter(':visible').find(':selected').nextAll().length
     // if there is any submissions after this one, show a notice that they are not looking at the newest
-    $submission_not_newest_notice.showIf(
-      $submission_to_view.filter(':visible').find(':selected').nextAll().length
-    )
+    $submission_not_newest_notice.showIf(!isMostRecentAttempt)
 
     $submission_late_notice.showIf(submission.late)
     $full_width_container.removeClass('with_enrollment_notice')
@@ -2584,8 +2687,11 @@ EG = {
       const isInModeration = isModerated && !window.jsonData.grades_published_at
       const shouldRender = isMostRecent && !isClosedForSubmission && !isConcluded && !isInModeration
       const component = shouldRender ? statusMenuComponent(this.currentStudent.submission) : null
-      renderStatusMenu(component, mountPoint)
+      if (!window.jsonData.has_sub_assignments) {
+        renderStatusMenu(component, mountPoint)
+      }
     }
+    this.renderSticker()
 
     EG.showDiscussion()
   },
@@ -2798,6 +2904,12 @@ EG = {
     clearInterval(sessionTimer)
     $submissions_container.children().hide()
     $('.speedgrader_alert').hide()
+
+    if (this.currentStudent.submission && this.currentStudent.submission['partially_submitted?']) {
+      this.renderSubmissionPreview()
+      return
+    }
+
     if (
       !this.currentStudent.submission ||
       !this.currentStudent.submission.submission_type ||
@@ -2854,7 +2966,8 @@ EG = {
       this.currentStudent.submission
     )
     const hideStudentNames = utils.shouldHideStudentNames() ? '&hide_student_name=1' : ''
-    const queryParams = `${iframePreviewVersion}${hideStudentNames}`
+    const entryId = ENV.ENTRY_ID ? `&entry_id=${ENV.ENTRY_ID}` : ''
+    const queryParams = `${iframePreviewVersion}${hideStudentNames}${entryId}`
     const src = `/courses/${courseId}/assignments/${assignmentId}/${resourceSegment}/${anonymizableSubmissionId}?preview=true${queryParams}`
     const iframe = SpeedgraderHelpers.buildIframe(
       htmlEscape(src),
@@ -2862,6 +2975,8 @@ EG = {
       domElement
     )
     $iframe_holder.html(iframe).show()
+
+    renderDiscussionsNavigation()
   },
 
   renderLtiLaunch($div: JQuery, urlBase: string, submission: HistoricalSubmission) {
@@ -3094,7 +3209,6 @@ EG = {
 
       const {hide_points} = (window?.jsonData?.rubric_association ?? {}) as {hide_points: boolean}
       useStore.setState({
-        rubricAssessors: showSelectMenu ? selectMenuOptions : [],
         rubricHidePoints: hide_points,
       })
       handleSelectedRubricAssessmentChanged({validateEnteredData})
@@ -3234,6 +3348,12 @@ EG = {
       .showIf(comment.publishable && !isConcluded)
   },
 
+  addCommentEditDraftHandler(commentElement, comment) {
+    commentElement.find('.edit_comment_link').click(_event => {
+      setCommentText(comment.comment, true)
+    })
+  },
+
   renderComment(commentData: SubmissionComment, incomingOpts?: CommentRenderingOptions) {
     const self = this
     let comment = commentData
@@ -3289,12 +3409,21 @@ EG = {
         commentText: spokenComment,
       })
       commentElement.find('.submit_comment_button').attr('aria-label', submitCommentButtonText)
+      if (!isRceLiteEnabled()) {
+        // With the addition of RCE Lite, we are introducing the ability to continue editing
+        // draft comments
+        commentElement.find('.edit_comment_link').remove()
+      }
     } else {
       commentElement.find('.draft-marker').remove()
       commentElement.find('.submit_comment_button').remove()
+      commentElement.find('.edit_comment_link').remove()
     }
 
-    commentElement.find('span.comment').html(htmlEscape(comment.comment).replace(/\n/g, '<br />'))
+    const formattedComment = containsHtmlTags(comment.comment)
+      ? sanitizeHtml(comment.comment)
+      : formatMessage(comment.comment)
+    commentElement.find('span.comment').html(formattedComment)
 
     deleteCommentLinkText = I18n.t('Delete comment: %{commentText}', {commentText: spokenComment})
     commentElement.find('.delete_comment_link .screenreader-only').text(deleteCommentLinkText)
@@ -3317,21 +3446,28 @@ EG = {
       }
     )
 
-    /* Submit a comment and Delete a comment listeners */
+    /* Submit a comment,  Delete a comment, and Edit a draft comment listeners */
 
     this.addCommentDeletionHandler(commentElement, comment)
     this.addCommentSubmissionHandler(commentElement, comment)
+    this.addCommentEditDraftHandler(commentElement, comment)
 
     return commentElement
   },
 
-  currentDisplayedSubmission(): HistoricalSubmission {
-    const displayedHistory =
-      typeof this.currentStudent.submission?.currentSelectedIndex === 'number'
-        ? this.currentStudent.submission?.submission_history?.[
-            this.currentStudent.submission.currentSelectedIndex
-          ]
-        : undefined
+  currentDisplayedSubmission(inferIdx = false): HistoricalSubmission {
+    const history = this.currentStudent.submission?.submission_history
+    let requestedIdx = this.currentStudent.submission?.currentSelectedIndex
+
+    if (inferIdx && requestedIdx == null && history?.length) {
+      requestedIdx = history.length - 1
+    }
+
+    if (history == null || requestedIdx == null) {
+      return this.currentStudent.submission
+    }
+
+    const displayedHistory = history[requestedIdx]
     return displayedHistory?.submission || this.currentStudent.submission
   },
 
@@ -3444,7 +3580,7 @@ EG = {
     )
   },
 
-  addSubmissionComment(draftComment) {
+  addSubmissionComment(draftComment, studentId) {
     // Avoid submitting additional comments if a request is already in progress.
     // This can happen if the user submits a comment and then switches students
     // (which attempts to save a draft comment) before the request finishes.
@@ -3459,8 +3595,12 @@ EG = {
 
     $comment_submitted.hide()
     $comment_saved.hide()
+    const comment = isRceLiteEnabled()
+      ? $add_a_comment_textarea.data('textarea')
+      : $add_a_comment_textarea.val()
+
     if (
-      !$.trim($add_a_comment_textarea.val() as string).length &&
+      !$.trim(comment as string).length &&
       !$('#media_media_recording').data('comment_id') &&
       !$add_a_comment.find("input[type='file']:visible").length
     ) {
@@ -3476,9 +3616,9 @@ EG = {
     const formData = {
       'submission[assignment_id]': window.jsonData.id,
       'submission[group_comment]': $('#submission_group_comment').prop('checked') ? '1' : '0',
-      'submission[comment]': $add_a_comment_textarea.val(),
+      'submission[comment]': comment,
       'submission[draft_comment]': draftComment,
-      [`submission[${anonymizableId}]`]: EG.currentStudent[anonymizableId],
+      [`submission[${anonymizableId}]`]: studentId || EG.currentStudent[anonymizableId],
     }
 
     if (ENV.group_comments_per_attempt) {
@@ -3505,6 +3645,11 @@ EG = {
         EG.setOrUpdateSubmission(this.submission)
       })
       EG.revertFromFormSubmit({draftComment})
+      // Clear the RCE Lite text area
+      if (isRceLiteEnabled()) {
+        $add_a_comment_textarea.data('textarea', '')
+        renderCommentTextArea()
+      }
       window.setTimeout(() => {
         $rightside_inner.scrollTo($rightside_inner[0].scrollHeight, 500)
       })
@@ -3536,7 +3681,11 @@ EG = {
     }
 
     $('#comment_attachments').empty()
-    $add_a_comment.find(':input').prop('disabled', true)
+    if (isRceLiteEnabled()) {
+      renderCommentTextArea(true)
+    } else {
+      $add_a_comment.find(':input').prop('disabled', true)
+    }
     $add_a_comment_submit_button.text(I18n.t('buttons.submitting', 'Submitting...'))
     hideMediaRecorderContainer()
   },
@@ -3782,19 +3931,31 @@ EG = {
     }
 
     $('#submit_same_score').hide()
-    if (typeof submission !== 'undefined' && submission.entered_score !== null) {
-      // @ts-expect-error
-      $score.text(I18n.n(round(submission.entered_score, round.DEFAULT)))
-      if (!submission.grade_matches_current_submission) {
-        $('#submit_same_score').show()
+    // Discussion Checkpoints uses a shared React component to display the use same score link
+    // Do not show submit_same_score is checkpoints FF is enabled and the assignment has sub_assignments
+    if (
+      !document.getElementById(SPEED_GRADER_CHECKPOINTS_MOUNT_POINT) &&
+      !window.jsonData.has_sub_assignments
+    ) {
+      if (typeof submission !== 'undefined' && submission.entered_score !== null) {
+        // @ts-expect-error
+        $score.text(I18n.n(round(submission.entered_score, round.DEFAULT)))
+        if (!submission.grade_matches_current_submission) {
+          $('#submit_same_score').show()
+        }
+      } else {
+        $score.text('')
       }
-    } else {
-      $score.text('')
     }
 
     if (ENV.MANAGE_GRADES || (window.jsonData.context.concluded && ENV.READ_AS_ADMIN)) {
       renderHiddenSubmissionPill(submission)
     }
+
+    renderCheckpoints(submission)
+
+    renderRubricsCheckpointsInfo()
+
     EG.updateStatsInHeader()
   },
 
@@ -3987,7 +4148,10 @@ EG = {
     }
 
     function hasUnsubmittedComments() {
-      return $.trim($add_a_comment_textarea.val() as string) !== ''
+      const comment = isRceLiteEnabled()
+        ? $add_a_comment_textarea.data('textarea')
+        : $add_a_comment_textarea.val()
+      return $.trim(comment as string) !== ''
     }
 
     const isNewGradeSaved = ($grade.val() || null) === EG.currentStudent.submission.grade
@@ -4176,6 +4340,51 @@ EG = {
     }
   },
 
+  renderSticker() {
+    const mountPoint = document.getElementById('submission_sticker_mount_point')
+    if (!mountPoint) {
+      return
+    }
+
+    if (ENV.grading_role === 'moderator' || ENV.grading_role === 'provisional_grader') {
+      return
+    }
+
+    const {
+      id,
+      anonymous_id: anonymousId,
+      assignment_id: assignmentId,
+      user_id: userId,
+      sticker,
+    } = EG.currentDisplayedSubmission()
+
+    const submission = {courseId: ENV.course_id, id, anonymousId, assignmentId, userId, sticker}
+    const changeSticker = newSticker => {
+      const currentSubmission = EG.currentDisplayedSubmission(true)
+      currentSubmission.sticker = newSticker
+
+      if (
+        currentSubmission !== this.currentStudent.submission &&
+        currentSubmission.attempt === this.currentStudent.submission?.attempt
+      ) {
+        this.currentStudent.submission.sticker = newSticker
+        renderHiddenSubmissionPill(this.currentStudent.submission)
+      }
+      this.renderSticker()
+    }
+
+    ReactDOM.render(
+      <SubmissionSticker
+        confetti={false}
+        editable={isMostRecentAttempt}
+        onStickerChange={changeSticker}
+        size="small"
+        submission={submission}
+      />,
+      mountPoint
+    )
+  },
+
   renderProvisionalGradeSelector({showingNewStudent = false} = {}) {
     const mountPoint = document.getElementById('grading_details_mount_point')
     if (!mountPoint) throw new Error('Could not find mount point for provisional grade selector')
@@ -4262,7 +4471,7 @@ function setupSpeedGrader(
     useStore.setState({
       rubricSavedComments: rubricAssociation.summary_data?.saved_comments,
     })
-    EG.setUpRubricAssessmentTrayWrapper()
+    EG.setUpRubricAssessmentContainerWrapper()
   }
 }
 

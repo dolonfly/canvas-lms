@@ -87,8 +87,8 @@ module Lti
     # For information on how the cached ID token is eventually retrieved
     # and sent to a tool, please refer to the inline documentation of
     # app/controllers/lti/ims/authentication_controller.rb
-    def generate_post_payload_for_assignment(*args)
-      login_request(resource_link_request.generate_post_payload_for_assignment(*args))
+    def generate_post_payload_for_assignment(*)
+      login_request(resource_link_request.generate_post_payload_for_assignment(*))
     end
 
     # Generates a login request pointing to a cached launch (ID token)
@@ -104,8 +104,8 @@ module Lti
     # For information on how the cached ID token is eventually retrieved
     # and sent to a tool, please refer to the inline documentation of
     # app/controllers/lti/ims/authentication_controller.rb
-    def generate_post_payload_for_homework_submission(*args)
-      login_request(resource_link_request.generate_post_payload_for_homework_submission(*args))
+    def generate_post_payload_for_homework_submission(*)
+      login_request(resource_link_request.generate_post_payload_for_homework_submission(*))
     end
 
     # Generates a login request pointing to a cached launch (ID token)
@@ -121,8 +121,9 @@ module Lti
     # For information on how the cached ID token is eventually retrieved
     # and sent to a tool, please refer to the inline documentation of
     # app/controllers/lti/ims/authentication_controller.rb
-    def generate_post_payload_for_student_context_card(student_id:)
-      @opts[:student_id] = student_id
+    def generate_post_payload_for_student_context_card(student:)
+      @opts[:student_id] = student.global_id
+      @opts[:student_lti_id] = student.lti_id
       login_request(resource_link_request.to_cached_hash)
     end
 
@@ -168,11 +169,6 @@ module Lti
     end
 
     def generate_lti_params
-      if resource_type&.to_sym == :course_assignments_menu &&
-         !@context.root_account.feature_enabled?(:lti_multiple_assignment_deep_linking)
-        return resource_link_request.to_cached_hash
-      end
-
       if resource_type&.to_sym == :module_index_menu_modal &&
          !@context.root_account.feature_enabled?(:lti_deep_linking_module_index_menu_modal)
         return resource_link_request.to_cached_hash

@@ -323,7 +323,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Golygu Eicon" },
   "edit_link_7f53bebb": { "message": "Golygu Dolen" },
-  "editor_statusbar_26ac81fc": { "message": "Bar Statws Golygydd" },
+  "editor_status_bar_653f44ee": { "message": "Bar Statws Golygydd" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Elfen yn dechrau gyda { start }"
   },
@@ -619,6 +619,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Dolenni at safle allanol."
   },
+  "lists_cd1336fc": { "message": "Rhestrau" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Dylai rhestrau gael eu fformatio fel rhestrau."
   },
@@ -1044,6 +1045,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Arddulliau" },
   "submit_a3cc6859": { "message": "Cyflwyno" },
+  "submitting_b90fac62": { "message": "Wrthi’n cyflwyno..." },
   "subscript_59744f96": { "message": "Isysgrif" },
   "subset_19c1a92f": { "message": "Is-set" },
   "subset_strict_8d8948d6": { "message": "Is-set (Strict)" },

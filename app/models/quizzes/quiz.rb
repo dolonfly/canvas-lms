@@ -147,7 +147,7 @@ class Quizzes::Quiz < ActiveRecord::Base
     end
     self.scoring_policy = "keep_highest" if scoring_policy.nil?
     self.ip_filter = nil if ip_filter && ip_filter.strip.empty?
-    if !available? && !survey?
+    if !available? && !survey? && !saved_by_new_quizzes_migration
       self.points_possible = current_points_possible
     end
     self.title = t("#quizzes.quiz.default_title", "Unnamed Quiz") if title.blank?
@@ -340,7 +340,7 @@ class Quizzes::Quiz < ActiveRecord::Base
 
   def assignment_id=(val)
     @assignment_id_set = true
-    write_attribute(:assignment_id, val)
+    super
   end
 
   def lock_at=(val)
@@ -624,7 +624,7 @@ class Quizzes::Quiz < ActiveRecord::Base
   # Returns the number of questions a student will see on the
   # SAVED version of the quiz
   def question_count(force_check = false)
-    return read_attribute(:question_count) if !force_check && read_attribute(:question_count)
+    return super() if !force_check && super()
 
     question_count = 0
     stored_questions.each do |q|
@@ -816,7 +816,7 @@ class Quizzes::Quiz < ActiveRecord::Base
     questions = assessment_questions.map do |assessment_question|
       question = quiz_questions.build
       question.quiz_group_id = group.id if group && group.quiz_id == id
-      question.write_attribute(:question_data, assessment_question.question_data)
+      question["question_data"] = assessment_question.question_data
       question.assessment_question = assessment_question
       question.assessment_question_version = assessment_question.version_number
       question.save
@@ -907,7 +907,7 @@ class Quizzes::Quiz < ActiveRecord::Base
     when ""
       val = nil
     end
-    write_attribute(:hide_results, val)
+    super
   end
 
   def check_if_submissions_need_review
@@ -1199,7 +1199,7 @@ class Quizzes::Quiz < ActiveRecord::Base
   # NOTE: only use for courses with differentiated assignments on
   scope :visible_to_students_in_course_with_da, lambda { |user_ids, course_ids|
     if Account.site_admin.feature_enabled?(:selective_release_backend)
-      visible_quiz_ids = QuizVisibility::QuizVisibilityService.quizzes_visible_to_students_in_courses(course_ids:, user_ids:).map(&:quiz_id)
+      visible_quiz_ids = QuizVisibility::QuizVisibilityService.quizzes_visible_to_students(course_ids:, user_ids:).map(&:quiz_id)
       if visible_quiz_ids.any?
         where(id: visible_quiz_ids)
       else
@@ -1544,7 +1544,6 @@ class Quizzes::Quiz < ActiveRecord::Base
         }
       end
     end
-
     filters
   end
 
@@ -1579,7 +1578,7 @@ class Quizzes::Quiz < ActiveRecord::Base
   def visible_students_with_da(context_students)
     if Account.site_admin.feature_enabled?(:selective_release_backend)
       user_ids = context_students.pluck(:id)
-      visible_user_ids = QuizVisibility::QuizVisibilityService.quiz_visible_to_students(quiz_id: id, user_ids:).map(&:user_id)
+      visible_user_ids = QuizVisibility::QuizVisibilityService.quizzes_visible_to_students(quiz_ids: id, user_ids:).map(&:user_id)
 
       quiz_students = if visible_user_ids.any?
                         context_students.where(id: visible_user_ids)

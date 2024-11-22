@@ -55,6 +55,8 @@ const getAriaLabel = (itemType, itemTitle) => {
       return I18n.t('Page, %{itemTitle}', {itemTitle})
     case 'Peer Review':
       return I18n.t('Peer Review, %{itemTitle}', {itemTitle})
+    case 'Discussion Checkpoint':
+      return I18n.t('Discussion Checkpoint, %{itemTitle}', {itemTitle})
     default:
       return I18n.t('To Do, %{itemTitle}', {itemTitle})
   }
@@ -68,6 +70,13 @@ const getIconComponent = itemType => {
       return <IconQuizLine label={I18n.t('Quiz')} className="ToDoSidebarItem__Icon" />
     case 'Discussion':
       return <IconDiscussionLine label={I18n.t('Discussion')} className="ToDoSidebarItem__Icon" />
+    case 'Discussion Checkpoint':
+      return (
+        <IconDiscussionLine
+          label={I18n.t('Discussion Checkpoint')}
+          className="ToDoSidebarItem__Icon"
+        />
+      )
     case 'Announcement':
       return (
         <IconAnnouncementLine label={I18n.t('Announcement')} className="ToDoSidebarItem__Icon" />
@@ -91,12 +100,19 @@ const getContextShortName = (courses, courseId) => {
 }
 
 export default class ToDoItem extends React.Component {
+  constructor(props) {
+    super(props)
+    this.dismissed = false
+  }
+
   focus() {
     const focusable = this.linkRef || this.buttonRef
     if (focusable) focusable.focus()
   }
 
   handleClick = () => {
+    if (this.dismissed) return
+    this.dismissed = true
     this.props.handleDismissClick(this.props.item)
   }
 

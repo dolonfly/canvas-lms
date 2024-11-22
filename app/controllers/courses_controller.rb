@@ -865,6 +865,11 @@ class CoursesController < ApplicationController
   # @argument course[course_format] [String]
   #   Optional. Specifies the format of the course. (Should be 'on_campus', 'online', or 'blended')
   #
+  # @argument course[post_manually] [Boolean]
+  #   Default is false.
+  #   When true, all grades in the course must be posted manually, and will not be automatically posted.
+  #   When false, all grades in the course will be automatically posted.
+  #
   # @argument enable_sis_reactivation [Boolean]
   #   When true, will first try to re-activate a deleted course with matching sis_course_id if possible.
   #
@@ -893,6 +898,12 @@ class CoursesController < ApplicationController
 
       sis_course_id = params[:course].delete(:sis_course_id)
       apply_assignment_group_weights = params[:course].delete(:apply_assignment_group_weights)
+
+      # params_for_create is used to build the course object
+      # since post_manually is not an actual attribute of the course object,
+      # we need to remove it from the params. We will use it later to
+      # apply the post policy to the course after the course is saved.
+      post_manually = params_for_create.delete(:post_manually) if params_for_create.key?(:post_manually)
 
       # accept end_at as an alias for conclude_at. continue to accept
       # conclude_at for legacy support, and return conclude_at only if
@@ -931,6 +942,7 @@ class CoursesController < ApplicationController
           @course.account = @sub_account if @sub_account
         end
       end
+
       @course ||= (@sub_account || @account).courses.build(params_for_create)
 
       if can_manage_sis
@@ -952,7 +964,7 @@ class CoursesController < ApplicationController
         if @course.save
           Auditors::Course.record_created(@course, @current_user, changes, source: (api_request? ? :api : :manual))
           @course.enroll_user(@current_user, "TeacherEnrollment", enrollment_state: "active") if params[:enroll_me].to_s == "true"
-          @course.require_assignment_group rescue nil
+          @course.require_assignment_group
           # offer updates the workflow state, saving the record without doing validation callbacks
           if api_request? && value_to_boolean(params[:offer])
             return unless verified_user_check
@@ -971,6 +983,11 @@ class CoursesController < ApplicationController
             # force the user to refresh the page after the job finishes to see the changes
             @course.sync_homeroom_participation
           end
+
+          # Cannot set the course PostPolicy until the course has saved a PostPolicy
+          # is a polymorphic association
+          @course.apply_post_policy!(post_manually: value_to_boolean(post_manually)) unless post_manually.nil?
+
           format.html { redirect_to @course }
           format.json do
             render json: course_json(
@@ -1781,7 +1798,9 @@ class CoursesController < ApplicationController
       :course_color,
       :friendly_name,
       :enable_course_paces,
-      :conditional_release
+      :conditional_release,
+      :show_student_only_module_id,
+      :show_teacher_only_module_id
     )
     changes = changed_settings(@course.changes, @course.settings, old_settings)
 
@@ -2371,7 +2390,7 @@ class CoursesController < ApplicationController
         end
 
         if @current_user && (@show_recent_feedback = @context.user_is_student?(@current_user))
-          @recent_feedback = @current_user.recent_feedback(contexts: @contexts) || []
+          @recent_feedback = @current_user.recent_feedback(contexts: @contexts, exclude_parent_assignment_submissions: @domain_root_account.feature_enabled?(:discussion_checkpoints)) || []
         end
 
         flash.now[:notice] = t("notices.updated", "Course was successfully updated.") if params[:for_reload]
@@ -2735,6 +2754,7 @@ class CoursesController < ApplicationController
     js_env(NEW_QUIZZES_MIGRATION: new_quizzes_migration_enabled?)
     js_env(NEW_QUIZZES_MIGRATION_DEFAULT: new_quizzes_migration_default)
     js_env(NEW_QUIZZES_MIGRATION_REQUIRED: new_quizzes_require_migration?)
+    js_env(NEW_QUIZZES_UNATTACHED_BANK_MIGRATIONS: new_quizzes_unattached_bank_migrations_enabled?)
   end
 
   def copy_course
@@ -2766,8 +2786,13 @@ class CoursesController < ApplicationController
       args[:account] = account
       @course = @context.account.courses.new
       @course.attributes = args
-      @course.start_at = DateTime.parse(params[:course][:start_at]).utc rescue nil
-      @course.conclude_at = DateTime.parse(params[:course][:conclude_at]).utc rescue nil
+      %i[start_at conclude_at].each do |timestamp_field|
+        if (timestamp = params.dig(:course, timestamp_field))
+          @course[timestamp_field] = DateTime.parse(timestamp).utc
+        end
+      rescue Date::Error
+        # ignore
+      end
       @course.workflow_state = "claimed"
 
       Course.suspend_callbacks(:copy_from_course_template) do
@@ -3026,6 +3051,11 @@ class CoursesController < ApplicationController
   # @argument course[conditional_release] [Boolean]
   #   Enable or disable individual learning paths for students based on assessment
   #
+  # @argument course[post_manually] [Boolean]
+  #   When true, all grades in the course will be posted manually.
+  #   When false, all grades in the course will be automatically posted.
+  #   Use with caution as this setting will override any assignment level post policy.
+  #
   # @argument override_sis_stickiness [boolean]
   #   Default is true. If false, any fields containing “sticky” changes will not be updated.
   #   See SIS CSV Format documentation for information on which fields can have SIS stickiness
@@ -3148,6 +3178,14 @@ class CoursesController < ApplicationController
         return unless authorized_action?(@course, @current_user, :manage_grades)
 
         update_grade_passback_setting(grade_passback_setting)
+      end
+
+      if params_for_update.key?(:post_manually)
+        @course.apply_post_policy!(post_manually: value_to_boolean(params_for_update[:post_manually]))
+
+        # attributes in params_for_update will be applied to the course
+        # since post_manually is not an attribute on the Course model, it needs to be removed
+        params_for_update.delete :post_manually
       end
 
       unless @course.account.grants_right? @current_user, session, :manage_storage_quotas
@@ -3287,8 +3325,8 @@ class CoursesController < ApplicationController
         end
       end
 
-      if params[:override_sis_stickiness] && !value_to_boolean(params[:override_sis_stickiness])
-        params_for_update -= [*@course.stuck_sis_fields]
+      if params.key?(:override_sis_stickiness) && !value_to_boolean(params[:override_sis_stickiness])
+        params_for_update = params_for_update.except(*@course.stuck_sis_fields)
       end
 
       @course.attributes = params_for_update
@@ -4237,7 +4275,8 @@ class CoursesController < ApplicationController
       :friendly_name,
       :enable_course_paces,
       :default_due_time,
-      :conditional_release
+      :conditional_release,
+      :post_manually
     )
   end
 

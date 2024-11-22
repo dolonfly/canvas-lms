@@ -41,10 +41,12 @@ class RubricsController < ApplicationController
     mastery_scales_js_env
     set_tutorial_js_env
 
-    is_enhanced_rubrics = Rubric.enhanced_rubrics_enabled_for_context?(@context)
-    if is_enhanced_rubrics
+    if @context.feature_enabled?(:enhanced_rubrics)
       js_env breadcrumbs: rubric_breadcrumbs
       js_env enhanced_rubrics_enabled: true
+      js_env rubric_imports_exports: Account.site_admin.feature_enabled?(:rubric_imports_exports)
+      js_env enhanced_rubrics_copy_to: Account.site_admin.feature_enabled?(:enhanced_rubrics_copy_to)
+      js_env enhanced_rubric_assignments_enabled: Rubric.enhanced_rubrics_assignments_enabled?(@context)
 
       return show_rubrics_redesign
     end
@@ -59,7 +61,7 @@ class RubricsController < ApplicationController
     permission = @context.is_a?(User) ? :manage : [:manage_rubrics, :read_rubrics]
     return unless authorized_action(@context, @current_user, permission)
 
-    is_enhanced_rubrics = Rubric.enhanced_rubrics_enabled_for_context?(@context)
+    is_enhanced_rubrics = @context.feature_enabled?(:enhanced_rubrics)
 
     if params[:id].match?(Api::ID_REGEX) || is_enhanced_rubrics
       js_env ROOT_OUTCOME_GROUP: get_root_outcome,
@@ -72,6 +74,7 @@ class RubricsController < ApplicationController
       if is_enhanced_rubrics
         js_env breadcrumbs: rubric_breadcrumbs
         js_env enhanced_rubrics_enabled: true
+        js_env enhanced_rubric_assignments_enabled: Rubric.enhanced_rubrics_assignments_enabled?(@context)
 
         return show_rubrics_redesign
       end
@@ -219,6 +222,7 @@ class RubricsController < ApplicationController
         @rubric = @association.rubric if @association
       end
       @rubric.reconcile_criteria_models(@current_user)
+      track_metrics
       json_res = {}
       json_res[:rubric] = @rubric.as_json(methods: :criteria, include_root: false, permissions: { user: @current_user, session: }) if @rubric
       json_res[:rubric_association] = @association.as_json(include_root: false, include: [:assessment_requests], permissions: { user: @current_user, session: }) if @association
@@ -276,5 +280,11 @@ class RubricsController < ApplicationController
 
   def can_manage_rubrics_context?
     @context.grants_right?(@current_user, session, :manage_rubrics)
+  end
+
+  def track_metrics
+    if @association_object.is_a?(Assignment)
+      InstStatsd::Statsd.increment("#{@context.class.to_s.downcase}.rubrics.created_from_assignment")
+    end
   end
 end

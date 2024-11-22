@@ -307,7 +307,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "تحرير الأيقونة" },
   "edit_link_7f53bebb": { "message": "تحرير الارتباط" },
-  "editor_statusbar_26ac81fc": { "message": "شريط حالة المحرر" },
+  "editor_status_bar_653f44ee": { "message": "شريط حالة المحرر" },
   "element_starting_with_start_91bf4c3b": {
     "message": "عنصر يبدأ بـ { start }"
   },
@@ -593,6 +593,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "ارتباطات إلى موقع خارجي."
   },
+  "lists_cd1336fc": { "message": "القوائم" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "يجب تنسيق القوائم في صورة قوائم."
   },
@@ -994,6 +995,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "الأنماط" },
   "submit_a3cc6859": { "message": "إرسال" },
+  "submitting_b90fac62": { "message": "جارٍ الإرسال..." },
   "subscript_59744f96": { "message": "منخفض" },
   "subset_19c1a92f": { "message": "Subset" },
   "subset_strict_8d8948d6": { "message": "Subset (Strict)" },

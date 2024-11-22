@@ -180,6 +180,12 @@ module.exports = {
         property: '__defineSetter__',
         message: 'Please use Object.defineProperty instead.',
       },
+      {
+        object: 'ReactDOM',
+        property: 'render',
+        message:
+          'React 18 deprecates ReactDOM.render, try using ReactDOM.createRoot and render instead.',
+      },
     ],
 
     'no-restricted-syntax': [
@@ -239,8 +245,12 @@ module.exports = {
     '@typescript-eslint/no-unused-vars': [
       'warn',
       {
+        args: 'all',
         argsIgnorePattern: '^_',
-
+        caughtErrors: 'all',
+        caughtErrorsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
         // allows `const {propIUse, propIDontUseButDontWantToPassOn, ...propsToPassOn} = this.props`
         ignoreRestSiblings: true,
       },

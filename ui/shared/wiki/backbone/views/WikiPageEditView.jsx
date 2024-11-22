@@ -71,6 +71,7 @@ export default class WikiPageEditView extends ValidatedFormView {
     super.initialize(...arguments)
     if (!this.WIKI_RIGHTS) this.WIKI_RIGHTS = {}
     if (!this.PAGE_RIGHTS) this.PAGE_RIGHTS = {}
+    this.queryParams = new URLSearchParams(window.location.search)
     this.enableAssignTo =
       window.ENV.FEATURES?.selective_release_ui_api &&
       ENV.COURSE_ID != null &&
@@ -96,7 +97,11 @@ export default class WikiPageEditView extends ValidatedFormView {
       this.disablingDfd.reject()
       $.flashError(I18n.t("Oops! We weren't able to save your page. Please try again"))
     }
-    $.ajaxJSON(url, 'PUT', JSON.stringify(this.overrides), redirect, errorCallBack, {
+
+    const data = this.overrides
+    data.only_visible_to_overrides = ENV.IN_PACED_COURSE ? false : this.overrides.only_visible_to_overrides
+
+    $.ajaxJSON(url, 'PUT', JSON.stringify(data), redirect, errorCallBack, {
       contentType: 'application/json',
     })
   }
@@ -142,6 +147,11 @@ export default class WikiPageEditView extends ValidatedFormView {
 
     json.content_is_locked = this.lockedItems.content
     json.show_assign_to = this.enableAssignTo
+    json.edit_with_block_editor = this.model.get('editor') === 'block_editor'
+
+    if (this.queryParams.get('editor') === 'block_editor' && this.model.get('body') == null) {
+      json.edit_with_block_editor = true
+    }
 
     return json
   }
@@ -224,13 +234,10 @@ export default class WikiPageEditView extends ValidatedFormView {
       }
       renderAssignToTray(mountElement, {pageId, onSync, pageName})
     }
-    if (window.ENV.BLOCK_EDITOR) {
+    if (this.model.get('editor') === 'block_editor' && this.model.get('block_editor_attributes')) {
       const BlockEditor = lazy(() => import('@canvas/block-editor'))
 
-      const blockEditorData = ENV.WIKI_PAGE?.block_editor_attributes || {
-        version: '1',
-        blocks: [{data: undefined}],
-      }
+      const blockEditorData = this.model.get('block_editor_attributes')
 
       const container = document.getElementById('content')
       container.style.boxSizing = 'border-box'
@@ -240,9 +247,9 @@ export default class WikiPageEditView extends ValidatedFormView {
       ReactDOM.render(
         <Suspense fallback={<div>{I18n.t('Loading...')}</div>}>
           <BlockEditor
+            course_id={ENV.COURSE_ID}
             container={container}
-            version={blockEditorData.version}
-            content={blockEditorData.blocks[0].data}
+            content={blockEditorData}
             onCancel={this.cancel.bind(this)}
           />
         </Suspense>,
@@ -299,10 +306,11 @@ export default class WikiPageEditView extends ValidatedFormView {
   destroyEditor() {
     // hack fix for LF-1134
     try {
-      if (!window.ENV.BLOCK_EDITOR) {
+      if (this.model.get('editor') !== 'block_editor') {
         RichContentEditor.destroyRCE(this.$wikiPageBody)
       }
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.warn(e)
     } finally {
       this.$el.remove()
@@ -353,6 +361,18 @@ export default class WikiPageEditView extends ValidatedFormView {
       ]
     }
 
+    if (ENV.FEATURES.selective_release_edit_page) {
+      const sectionViewRef = document.getElementById(
+        'manage-assign-to-container'
+      )?.reactComponentInstance
+      const invalidInput = sectionViewRef?.focusErrors()
+      if (invalidInput) {
+        errors.invalid_card = {$input: null, showError: this.showError}
+      } else {
+        delete errors.invalid_card
+      }
+    }
+
     return errors
   }
 
@@ -391,11 +411,7 @@ export default class WikiPageEditView extends ValidatedFormView {
       }
     }
     if (window.block_editor) {
-      this.blockEditorData = {
-        time: Date.now(),
-        version: '1',
-        blocks: [{data: window.block_editor.serialize()}],
-      }
+      this.blockEditorData = window.block_editor().getBlocks()
     }
 
     if (this.reloadView != null) {
@@ -451,7 +467,7 @@ export default class WikiPageEditView extends ValidatedFormView {
     // eslint-disable-next-line no-alert
     if (!this.hasUnsavedChanges() || window.confirm(this.unsavedWarning())) {
       this.checkUnsavedOnLeave = false
-      if (!window.ENV.BLOCK_EDITOR) {
+      if (this.model.get('editor') !== 'block_editor') {
         RichContentEditor.closeRCE(this.$wikiPageBody)
       }
       return this.trigger('cancel')

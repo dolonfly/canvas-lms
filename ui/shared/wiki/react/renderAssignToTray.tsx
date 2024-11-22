@@ -22,7 +22,7 @@ import {Pill} from '@instructure/ui-pill'
 import {View} from '@instructure/ui-view'
 import {IconEditLine} from '@instructure/ui-icons'
 import {useScope as useI18nScope} from '@canvas/i18n'
-import ItemAssignToTray from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToTray'
+import ItemAssignToManager from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToManager'
 import ReactDOM from 'react-dom'
 import {
   DateDetailsPayload,
@@ -66,6 +66,58 @@ const AssignToOption = (props: Props) => {
     }
   }, [props.pageId])
 
+  const onChange = (
+    assignToCards: ItemAssignToCardSpec[],
+    hasModuleOverrides: boolean,
+    deletedModuleAssignees: string[],
+    newDisabledOptionIds: string[],
+    moduleOverrides: ItemAssignToCardSpec[]
+  ) => {
+    if (!ENV.FEATURES?.selective_release_edit_page) return
+
+    const filteredCards = assignToCards.filter(
+      card =>
+        [null, undefined, ''].includes(card.contextModuleId) ||
+        (card.contextModuleId !== null && card.isEdited)
+    )
+    if (hasModuleOverrides) {
+      assignToCards.forEach(card => {
+        const hasUnlockOrLock = card.unlock_at != null || card.lock_at != null
+
+        if (
+          card.contextModuleId &&
+          card.isEdited &&
+          (hasUnlockOrLock || !card.hasInitialOverride)
+        ) {
+          card.contextModuleId = null
+          card.contextModuleName = null
+          return
+        } else if (hasUnlockOrLock) {
+          return
+        }
+
+        const moduleCard = moduleOverrides.find(moduleOverride => moduleOverride.key === card.key)
+        if (
+          moduleCard &&
+          !hasUnlockOrLock &&
+          (card.hasInitialOverride === undefined || card.hasInitialOverride)
+        ) {
+          card.contextModuleId = moduleCard.contextModuleId
+          card.contextModuleName = moduleCard.contextModuleName
+        }
+      })
+    }
+
+    const overrides = generateDateDetailsPayload(
+      filteredCards,
+      hasModuleOverrides,
+      deletedModuleAssignees
+    )
+    props.onSync(overrides)
+    setDisabledOptionIds(newDisabledOptionIds)
+    return assignToCards
+  }
+
   const handleSave = (
     assignToCards: ItemAssignToCardSpec[],
     hasModuleOverrides: boolean,
@@ -92,7 +144,7 @@ const AssignToOption = (props: Props) => {
     handleClose()
   }
 
-  return (
+  const trayView = (
     <>
       <View display="flex">
         <View as="div" margin="none none" width="25px">
@@ -115,7 +167,7 @@ const AssignToOption = (props: Props) => {
           </View>
         </Link>
       </View>
-      <ItemAssignToTray
+      <ItemAssignToManager
         open={open}
         onClose={handleClose}
         onDismiss={handleDismiss}
@@ -134,6 +186,34 @@ const AssignToOption = (props: Props) => {
         onInitialStateSet={setCheckPoint}
       />
     </>
+  )
+
+  const embeddedView = (
+    <>
+      <ItemAssignToManager
+        data-testid="manage-assign-to"
+        courseId={ENV.COURSE_ID}
+        itemName={itemName}
+        itemType="page"
+        iconType="page"
+        itemContentId={props.pageId}
+        useApplyButton={true}
+        locale={ENV.LOCALE || 'en'}
+        timezone={ENV.TIMEZONE || 'UTC'}
+        removeDueDateInput={true}
+        defaultCards={checkPoint}
+        defaultDisabledOptionIds={disabledOptionIds}
+        onInitialStateSet={setCheckPoint}
+        isTray={false}
+        onChange={onChange}
+      />
+    </>
+  )
+
+  return (
+    <View as="div" maxWidth="478px">
+      {ENV.FEATURES?.selective_release_edit_page ? embeddedView : trayView}
+    </View>
   )
 }
 

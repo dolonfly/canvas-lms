@@ -221,8 +221,10 @@ export interface EnvCommon {
     type?: string
     classes?: string
   }>
-  breadcrumbs: {name: string; url: string | null}[]
+  breadcrumbs?: {name: string; url: string | null}[]
   enhanced_rubrics_enabled?: boolean
+  enhanced_rubrics_copy_to?: boolean
+  rubric_imports_exports?: boolean
 
   /**
    * Used by ui/features/top_navigation_tools/react/TopNavigationTools.tsx
@@ -250,7 +252,6 @@ export type SiteAdminFeatureId =
   | 'media_links_use_attachment_id'
   | 'multiselect_gradebook_filters'
   | 'permanent_page_links'
-  | 'platform_service_speedgrader'
   | 'render_both_to_do_lists'
   | 'instui_header'
   | 'lti_registrations_discover_page'
@@ -269,28 +270,29 @@ export type RootAccountFeatureId =
   | 'instui_nav'
   | 'lti_deep_linking_module_index_menu_modal'
   | 'lti_dynamic_registration'
-  | 'lti_multiple_assignment_deep_linking'
+  | 'lti_registrations_next'
   | 'lti_overwrite_user_url_input_select_content_dialog'
   | 'mobile_offline_mode'
   | 'product_tours'
   | 'rce_transform_loaded_content'
   | 'scheduled_page_publication'
   | 'send_usage_metrics'
-  | 'usage_rights_discussion_topics'
   | 'account_level_mastery_scales'
   | 'non_scoring_rubrics'
   | 'rubric_criterion_range'
+  | 'rce_lite_enabled_speedgrader_comments'
+  | 'login_registration_ui_identity'
 
 /**
  * From ApplicationController#JS_ENV_BRAND_ACCOUNT_FEATURES
  */
-export type BrandAccountFeatureId = 'embedded_release_notes'
+export type BrandAccountFeatureId = 'embedded_release_notes' | 'consolidated_media_player'
 
 /**
  * Feature id exported in ApplicationController that aren't mentioned in
  * JS_ENV_SITE_ADMIN_FEATURES or JS_ENV_ROOT_ACCOUNT_FEATURES or JS_ENV_BRAND_ACCOUNT_FEATURES
  */
-export type OtherFeatureId = 'canvas_k6_theme' | 'new_math_equation_handling' | 'learner_passport'
+export type OtherFeatureId = 'canvas_k6_theme' | 'new_math_equation_handling'
 
 /**
  * From ApplicationHelper#set_tutorial_js_env

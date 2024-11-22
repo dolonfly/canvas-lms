@@ -333,7 +333,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Icono de editar" },
   "edit_link_7f53bebb": { "message": "Editar enlace" },
-  "editor_statusbar_26ac81fc": { "message": "Barra de estado del editor" },
+  "editor_status_bar_653f44ee": { "message": "Barra de estado del editor" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Elemento que comienza con { start }"
   },
@@ -639,6 +639,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Enlaces a un sitio externo."
   },
+  "lists_cd1336fc": { "message": "Listas" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Las listas deben tener formato de listas."
   },
@@ -1086,6 +1087,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Estilos" },
   "submit_a3cc6859": { "message": "Entregar" },
+  "submitting_b90fac62": { "message": "Entregando..." },
   "subscript_59744f96": { "message": "Subíndice" },
   "subset_19c1a92f": { "message": "Subconjunto" },
   "subset_strict_8d8948d6": { "message": "Subconjunto (Estricto)" },

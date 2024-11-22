@@ -57,6 +57,7 @@ describe('DiscussionRow', () => {
             html_url: '',
             avatar_image_url: null,
           },
+          permissions: {},
           subscribed: false,
           read_state: 'unread',
           unread_count: 0,
@@ -65,6 +66,7 @@ describe('DiscussionRow', () => {
           html_url: '',
           user_count: 10,
           last_reply_at: new Date(2018, 1, 14, 0, 0, 0, 0),
+          ungraded_discussion_overrides: [],
         },
         canPublish: false,
         canReadAsAdmin: true,
@@ -236,7 +238,7 @@ describe('DiscussionRow', () => {
   it('renders the publish ToggleIcon', () => {
     const discussion = {published: false}
     render(<DiscussionRow {...makeProps({canPublish: true, discussion})} />)
-    expect(screen.getByText('Publish Hello World')).toBeInTheDocument()
+    expect(screen.getAllByText('Publish Hello World', {exact: false}).length).toBe(2)
   })
 
   it('when feature flag is off, renders anonymous discussion lock explanation for read_as_admin', () => {
@@ -263,9 +265,47 @@ describe('DiscussionRow', () => {
   it('renders "Delayed until" date label if discussion is delayed', () => {
     const delayedDate = new Date()
     delayedDate.setYear(delayedDate.getFullYear() + 1)
-    const discussion = {delayed_post_at: delayedDate.toISOString()}
+    const discussion = {delayed_post_at: delayedDate}
     render(<DiscussionRow {...makeProps({discussion})} />)
-    expect(screen.getAllByText('Not available until', {exact: false}).length).toBe(2)
+    expect(screen.getAllByText(`Not available until ${dateFormatter(delayedDate)}`)).toBeTruthy()
+  })
+
+  it('renders "Delayed until" date label for ungraded overrides', () => {
+    const delayedDate = new Date()
+    delayedDate.setYear(delayedDate.getFullYear() + 1)
+    const discussion = {
+      ungraded_discussion_overrides: [{assignment_override: {unlock_at: delayedDate}}],
+    }
+    render(<DiscussionRow {...makeProps({discussion})} />)
+    expect(screen.getAllByText(`Not available until ${dateFormatter(delayedDate)}`)).toBeTruthy()
+  })
+
+  it('renders "Delayed until" date label for ungraded overrides even if has discussion has "everyone" dates', () => {
+    const delayedDate = new Date()
+    delayedDate.setYear(delayedDate.getFullYear() + 1)
+    const delayedDate2 = new Date()
+    delayedDate2.setYear(delayedDate.getFullYear() + 1)
+    const discussion = {
+      delayed_post_at: delayedDate,
+      ungraded_discussion_overrides: [{assignment_override: {unlock_at: delayedDate2}}],
+    }
+    render(<DiscussionRow {...makeProps({discussion})} />)
+    expect(screen.getAllByText(`Not available until ${dateFormatter(delayedDate2)}`)).toBeTruthy()
+  })
+
+  it('renders the further "Delayed until" date for ungraded overrides', () => {
+    const delayedDate = new Date()
+    delayedDate.setYear(delayedDate.getFullYear() + 1)
+    const delayedDate2 = new Date()
+    delayedDate2.setYear(delayedDate.getFullYear() + 1)
+    const discussion = {
+      ungraded_discussion_overrides: [
+        {assignment_override: {unlock_at: delayedDate}},
+        {assignment_override: {unlock_at: delayedDate2}},
+      ],
+    }
+    render(<DiscussionRow {...makeProps({discussion})} />)
+    expect(screen.getAllByText(`Not available until ${dateFormatter(delayedDate2)}`)).toBeTruthy()
   })
 
   it('renders a last reply at date', () => {
@@ -287,6 +327,44 @@ describe('DiscussionRow', () => {
     expect(screen.getAllByText('Available until', {exact: false}).length).toBe(2)
     // We need a relative date to ensure future-ness, so we can't really insist
     // on a given date element appearing this time
+  })
+
+  it('renders available until for ungraded overrides', () => {
+    const futureDate = new Date()
+    futureDate.setYear(futureDate.getFullYear() + 1)
+    const discussion = {
+      ungraded_discussion_overrides: [{assignment_override: {lock_at: futureDate}}],
+    }
+    render(<DiscussionRow {...makeProps({discussion})} />)
+    expect(screen.getAllByText(`Available until ${dateFormatter(futureDate)}`)).toBeTruthy()
+  })
+
+  it('renders available until for ungraded overrides even if has discussion has "everyone" dates', () => {
+    const futureDate = new Date()
+    futureDate.setYear(futureDate.getFullYear() + 1)
+    const futureDate2 = new Date()
+    futureDate2.setYear(futureDate2.getFullYear() + 2)
+    const discussion = {
+      lock_at: futureDate,
+      ungraded_discussion_overrides: [{assignment_override: {lock_at: futureDate2}}],
+    }
+    render(<DiscussionRow {...makeProps({discussion})} />)
+    expect(screen.getAllByText(`Available until ${dateFormatter(futureDate2)}`)).toBeTruthy()
+  })
+
+  it('renders the further available until date for ungraded overrides', () => {
+    const futureDate = new Date()
+    futureDate.setYear(futureDate.getFullYear() + 1)
+    const futureDate2 = new Date()
+    futureDate2.setYear(futureDate2.getFullYear() + 2)
+    const discussion = {
+      ungraded_discussion_overrides: [
+        {assignment_override: {lock_at: futureDate}},
+        {assignment_override: {lock_at: futureDate2}},
+      ],
+    }
+    render(<DiscussionRow {...makeProps({discussion})} />)
+    expect(screen.getAllByText(`Available until ${dateFormatter(futureDate2)}`)).toBeTruthy()
   })
 
   it('renders locked at if appropriate', () => {
@@ -317,6 +395,66 @@ describe('DiscussionRow', () => {
     render(<DiscussionRow {...props} />)
     expect(screen.getAllByText('Due ', {exact: false}).length).toBe(2)
     expect(screen.queryByText('To do', {exact: false})).not.toBeInTheDocument()
+  })
+
+  it('renders checkpoint information', () => {
+    const props = makeProps({
+      discussion: {
+        reply_to_entry_required_count: 2,
+        assignment: {
+          checkpoints: [
+            {
+              tag: 'reply_to_topic',
+              points_possible: 20,
+              due_at: '2024-09-14T05:59:00Z',
+            },
+            {
+              tag: 'reply_to_entry',
+              points_possible: 10,
+              due_at: '2024-09-21T05:59:00Z',
+            },
+          ],
+        },
+      },
+    })
+    render(<DiscussionRow {...props} />)
+    expect(screen.queryByText('Reply to topic:', {exact: false})).toBeInTheDocument()
+    expect(screen.queryByText('Required replies (2):', {exact: false})).toBeInTheDocument()
+    expect(
+      screen.queryByText(props.dateFormatter('2024-09-14T05:59:00Z'), {exact: false})
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(props.dateFormatter('2024-09-21T05:59:00Z'), {exact: false})
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No Due Date', {exact: false})).not.toBeInTheDocument()
+  })
+
+  it('renders checkpoint information without due dates', () => {
+    const props = makeProps({
+      discussion: {
+        reply_to_entry_required_count: 4,
+        assignment: {
+          checkpoints: [
+            {
+              tag: 'reply_to_topic',
+              points_possible: 10,
+              due_at: null,
+            },
+            {
+              tag: 'reply_to_entry',
+              points_possible: 20,
+              due_at: null,
+            },
+          ],
+        },
+      },
+    })
+    render(<DiscussionRow {...props} />)
+    expect(
+      screen.queryByText('Reply to topic: No Due Date Required replies (4): No Due Date', {
+        exact: false,
+      })
+    ).toBeInTheDocument()
   })
 
   it('renders to do date if ungraded with a to do date', () => {
@@ -675,6 +813,33 @@ describe('DiscussionRow', () => {
     const allKeys = list.querySelectorAll('li')
     expect(allKeys.length).toBe(1)
     expect(allKeys[0].textContent.includes('Close for comments')).toBe(true)
+  })
+
+  it('renders edit menu item if the user has update permission and discussion has html_url', async () => {
+    Object.defineProperty(window, 'location', {
+      value: {assign: jest.fn()},
+    })
+    render(
+      <DiscussionRow
+        {...makeProps({
+          displayManageMenu: true,
+          discussion: {
+            permissions: {update: true},
+            html_url: 'https://example.com',
+          },
+        })}
+      />
+    )
+
+    const list = await openManageMenu('Hello World')
+    const allKeys = list.querySelectorAll('li')
+    expect(allKeys.length).toBe(1)
+    expect(allKeys[0].textContent.includes('Edit')).toBe(true)
+
+    const edit = screen.getByText('Edit')
+    await user.click(edit)
+
+    expect(window.location.assign).toHaveBeenCalledWith('https://example.com/edit')
   })
 
   it('renders mastery paths menu item if permitted', async () => {

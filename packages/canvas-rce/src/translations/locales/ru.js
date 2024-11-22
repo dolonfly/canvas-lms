@@ -329,7 +329,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Редактировать значок" },
   "edit_link_7f53bebb": { "message": "Редактировать ссылку" },
-  "editor_statusbar_26ac81fc": { "message": "Панель состояния редактора" },
+  "editor_status_bar_653f44ee": { "message": "Панель состояния редактора" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Элемент, начинающийся с { start }"
   },
@@ -633,6 +633,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Ссылки на внешний сайт."
   },
+  "lists_cd1336fc": { "message": "Списки" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Списки должны быть отформатированы в виде списков."
   },
@@ -1068,6 +1069,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Стили" },
   "submit_a3cc6859": { "message": "Отправить" },
+  "submitting_b90fac62": { "message": "Выполняется отправка..." },
   "subscript_59744f96": { "message": "Надпись снизу" },
   "subset_19c1a92f": { "message": "Подмножество" },
   "subset_strict_8d8948d6": { "message": "Подмножество (жесткое)" },

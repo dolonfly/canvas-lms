@@ -81,7 +81,7 @@ class PageView < ActiveRecord::Base
   end
 
   def url
-    url = read_attribute(:url)
+    url = super
     url && LoggingFilter.filter_uri(url)
   end
 
@@ -113,16 +113,12 @@ class PageView < ActiveRecord::Base
     page_view_method == :db
   end
 
-  def self.cassandra?
-    page_view_method == :cassandra
-  end
-
   def self.pv4?
     page_view_method == :pv4 || Setting.get("read_from_pv4", "false") == "true"
   end
 
   def self.global_storage_namespace?
-    cassandra? || pv4?
+    pv4?
   end
 
   def self.find_all_by_id(ids)
@@ -236,7 +232,7 @@ class PageView < ActiveRecord::Base
   end
 
   def self.user_count_bucket_for_time(time)
-    utc = time.in_time_zone("UTC")
+    utc = time.utc
     # round down to the last 5 minute mark -- so 03:43:28 turns into 03:40:00
     utc = utc - ((utc.min % 5) * 60) - utc.sec
     "active_users:#{utc.as_json}"

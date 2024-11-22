@@ -632,9 +632,6 @@
     "edit_link_7f53bebb": {
         "message": "Endre lenke"
     },
-    "editor_statusbar_26ac81fc": {
-        "message": "Statusrad editor"
-    },
     "element_starting_with_start_91bf4c3b": {
         "message": "Element som startar med { start }"
     },
@@ -2101,6 +2098,9 @@
     },
     "submit_a3cc6859": {
         "message": "Send!"
+    },
+    "submitting_b90fac62": {
+        "message": "Leverer..."
     },
     "subscript_59744f96": {
         "message": "Senka skrift"

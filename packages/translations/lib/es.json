@@ -647,7 +647,7 @@
     "edit_link_7f53bebb": {
         "message": "Editar enlace"
     },
-    "editor_statusbar_26ac81fc": {
+    "editor_status_bar_653f44ee": {
         "message": "Barra de estado del editor"
     },
     "element_starting_with_start_91bf4c3b": {
@@ -1294,6 +1294,9 @@
     },
     "links_to_an_external_site_de74145d": {
         "message": "Enlaces a un sitio externo."
+    },
+    "lists_cd1336fc": {
+        "message": "Listas"
     },
     "lists_should_be_formatted_as_lists_f862de8d": {
         "message": "Las listas deben tener el formato de listas."
@@ -2176,6 +2179,9 @@
     },
     "submit_a3cc6859": {
         "message": "Entregar"
+    },
+    "submitting_b90fac62": {
+        "message": "Presentando…"
     },
     "subscript_59744f96": {
         "message": "Subíndice"

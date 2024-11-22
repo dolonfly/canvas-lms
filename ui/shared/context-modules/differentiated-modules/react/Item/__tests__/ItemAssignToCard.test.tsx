@@ -19,7 +19,11 @@
 import React from 'react'
 import {render, fireEvent, screen, waitFor} from '@testing-library/react'
 import ItemAssignToCard, {type ItemAssignToCardProps} from '../ItemAssignToCard'
+import {SECTIONS_DATA, STUDENTS_DATA} from '../../__tests__/mocks'
+import fetchMock from 'fetch-mock'
 import userEvent from '@testing-library/user-event'
+import {queryClient} from '@canvas/query'
+import {MockedQueryProvider} from '@canvas/test-utils/query'
 
 const props: ItemAssignToCardProps = {
   courseId: '1',
@@ -40,7 +44,11 @@ const props: ItemAssignToCardProps = {
 }
 
 const renderComponent = (overrides: Partial<ItemAssignToCardProps> = {}) =>
-  render(<ItemAssignToCard {...props} {...overrides} />)
+  render(
+    <MockedQueryProvider>
+      <ItemAssignToCard {...props} {...overrides} />
+    </MockedQueryProvider>
+  )
 
 const withWithGradingPeriodsMock = () => {
   window.ENV.HAS_GRADING_PERIODS = true
@@ -67,6 +75,30 @@ const withWithGradingPeriodsMock = () => {
 }
 
 describe('ItemAssignToCard', () => {
+  const ASSIGNMENT_OVERRIDES_URL = `/api/v1/courses/1/modules/2/assignment_overrides?per_page=100`
+  const COURSE_SETTINGS_URL = `/api/v1/courses/1/settings`
+  const SECTIONS_URL = /\/api\/v1\/courses\/.+\/sections\?per_page=\d+/
+
+  beforeAll(() => {
+    if (!document.getElementById('flash_screenreader_holder')) {
+      const liveRegion = document.createElement('div')
+      liveRegion.id = 'flash_screenreader_holder'
+      liveRegion.setAttribute('role', 'alert')
+      document.body.appendChild(liveRegion)
+    }
+  })
+
+  beforeEach(() => {
+    fetchMock.get(SECTIONS_URL, SECTIONS_DATA)
+    queryClient.setQueryData(['students', props.courseId, {per_page: 100}], STUDENTS_DATA)
+    fetchMock.get(ASSIGNMENT_OVERRIDES_URL, [])
+    fetchMock.get(COURSE_SETTINGS_URL, {hide_final_grades: false})
+  })
+
+  afterEach(() => {
+    fetchMock.restore()
+  })
+
   it('renders', () => {
     const {getByLabelText, getAllByLabelText, getByTestId, queryByRole} = renderComponent()
     expect(getByTestId('item-assign-to-card')).toBeInTheDocument()
@@ -78,7 +110,8 @@ describe('ItemAssignToCard', () => {
   })
 
   it('renders checkpoints fields and not Due Date', () => {
-    const {getByLabelText, getAllByLabelText, getByTestId, queryByRole} = renderComponent({
+    window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = true
+    const {getByLabelText, getAllByLabelText} = renderComponent({
       isCheckpointed: true,
     })
     expect(getByLabelText('Reply to Topic Due Date')).toBeInTheDocument()
@@ -101,6 +134,7 @@ describe('ItemAssignToCard', () => {
 
     it('renders the Reply to Topic Due Date 1st from the top', () => {
       window.ENV.DEFAULT_DUE_TIME = '08:00:00'
+      window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = true
       const {getByLabelText, getByRole, getAllByLabelText} = renderComponent({
         due_at: undefined,
         isCheckpointed: true,
@@ -113,6 +147,7 @@ describe('ItemAssignToCard', () => {
 
     it('renders the Required Replies Due Date 2nd from the top', () => {
       window.ENV.DEFAULT_DUE_TIME = '08:00:00'
+      window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = true
       const {getByLabelText, getByRole, getAllByLabelText} = renderComponent({
         due_at: undefined,
         isCheckpointed: true,
@@ -125,6 +160,7 @@ describe('ItemAssignToCard', () => {
 
     describe('isCheckpointed is true', () => {
       it('renders the Available From 3rd from the top', () => {
+        window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = true
         const {getByLabelText, getByRole, getAllByLabelText} = renderComponent({
           due_at: undefined,
           isCheckpointed: true,
@@ -136,6 +172,7 @@ describe('ItemAssignToCard', () => {
       })
 
       it('renders the Available Until 4th from the top', () => {
+        window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = true
         const {getByLabelText, getByRole, getAllByLabelText} = renderComponent({
           due_at: undefined,
           isCheckpointed: true,
@@ -339,6 +376,21 @@ describe('ItemAssignToCard', () => {
     await waitFor(async () => {
       expect(timeInput).toHaveValue('3:30 PM')
       expect(await getAllByText('Invalid date')[0]).toBeInTheDocument()
+    })
+  })
+
+  it('clears date field and time field when date field is manually cleared on blur', async () => {
+    const due_at = '2023-10-05T12:00:00Z'
+    const {getAllByLabelText, getByLabelText} = renderComponent({due_at})
+    const dateInput = getByLabelText('Due Date')
+    const timeInput = getAllByLabelText('Time')[0]
+
+    await userEvent.clear(dateInput)
+    await userEvent.tab()
+
+    await waitFor(async () => {
+      expect(dateInput).toHaveValue('')
+      expect(timeInput).toHaveValue('')
     })
   })
 
@@ -575,6 +627,14 @@ describe('ItemAssignToCard', () => {
     })
 
     describe('isCheckpointed is true', () => {
+      beforeEach(() => {
+        window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = true
+      })
+
+      afterEach(() => {
+        window.ENV.DISCUSSION_CHECKPOINTS_ENABLED = false
+      })
+
       it('labels the clear buttons on cards with no pills', () => {
         renderComponent({isCheckpointed: true})
         const labels = [

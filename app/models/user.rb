@@ -19,6 +19,8 @@
 #
 
 class User < ActiveRecord::Base
+  self.ignored_columns += ["last_user_note"]
+
   GRAVATAR_PATTERN = %r{^https?://[a-zA-Z0-9.-]+\.gravatar\.com/}
   MAX_ROOT_ACCOUNT_ID_SYNC_ATTEMPTS = 5
   MINIMAL_COLUMNS_TO_SAVE = %i[avatar_image_source
@@ -62,7 +64,7 @@ class User < ActiveRecord::Base
   before_save :infer_defaults
   before_validation :ensure_lti_id, on: :update
   after_create :set_default_feature_flags
-  after_update :clear_cached_short_name, if: ->(user) { user.saved_change_to_short_name? || (user.read_attribute(:short_name).nil? && user.saved_change_to_name?) }
+  after_update :clear_cached_short_name, if: ->(user) { user.saved_change_to_short_name? || (user["short_name"].nil? && user.saved_change_to_name?) }
   validate :preserve_lti_id, on: :update
 
   serialize :preferences
@@ -89,7 +91,7 @@ class User < ActiveRecord::Base
   has_many :not_ended_enrollments, -> { where("enrollments.workflow_state NOT IN ('rejected', 'completed', 'deleted', 'inactive')") }, class_name: "Enrollment", multishard: true
   has_many :not_removed_enrollments, -> { where.not(workflow_state: %w[rejected deleted inactive]) }, class_name: "Enrollment", multishard: true
   has_many :observer_enrollments
-  has_many :observee_enrollments, foreign_key: :associated_user_id, class_name: "ObserverEnrollment"
+  has_many :observee_enrollments, foreign_key: :associated_user_id, class_name: "ObserverEnrollment", inverse_of: :associated_user
 
   has_many :observer_pairing_codes, -> { where("workflow_state<>'deleted' AND expires_at > ?", Time.zone.now) }, dependent: :destroy, inverse_of: :user
 
@@ -148,7 +150,7 @@ class User < ActiveRecord::Base
   has_many :associated_accounts, -> { order("user_account_associations.depth") }, source: :account, through: :user_account_associations
   has_many :associated_root_accounts, -> { merge(Account.root_accounts.active) }, source: :account, through: :user_account_associations, multishard: true
   has_many :developer_keys
-  has_many :access_tokens, -> { where(workflow_state: "active") }, inverse_of: :user, multishard: true
+  has_many :access_tokens, -> { where(workflow_state: ["active", "pending"]) }, inverse_of: :user, multishard: true
   has_many :masquerade_tokens, -> { where(workflow_state: "active") }, class_name: "AccessToken", inverse_of: :real_user
   has_many :notification_endpoints, -> { merge(AccessToken.active) }, through: :access_tokens, multishard: true
   has_many :context_external_tools, -> { order(:name) }, as: :context, inverse_of: :context, dependent: :destroy
@@ -190,14 +192,13 @@ class User < ActiveRecord::Base
   has_many :learning_outcome_results
   has_many :collaborators
   has_many :collaborations, -> { preload(:user, :collaborators) }, through: :collaborators
-  has_many :assigned_submission_assessments, -> { preload(:user, submission: :assignment) }, class_name: "AssessmentRequest", foreign_key: "assessor_id"
-  has_many :assigned_assessments, class_name: "AssessmentRequest", foreign_key: "assessor_id"
+  has_many :assigned_submission_assessments, -> { preload(:user, submission: :assignment) }, class_name: "AssessmentRequest", foreign_key: "assessor_id", inverse_of: :assessor
+  has_many :assigned_assessments, class_name: "AssessmentRequest", foreign_key: "assessor_id", inverse_of: :assessor
   has_many :web_conference_participants
   has_many :web_conferences, through: :web_conference_participants
   has_many :account_users
   has_many :media_objects, as: :context, inverse_of: :context
   has_many :user_generated_media_objects, class_name: "MediaObject"
-  has_many :user_notes
   has_many :content_shares, dependent: :destroy
   has_many :received_content_shares
   has_many :sent_content_shares
@@ -217,6 +218,7 @@ class User < ActiveRecord::Base
            class_name: "UsageRights",
            dependent: :destroy
   has_many :gradebook_csvs, dependent: :destroy, class_name: "GradebookCSV"
+  has_many :block_editor_templates, class_name: "BlockEditorTemplate", as: :context, inverse_of: :context
 
   has_one :profile, class_name: "UserProfile"
 
@@ -257,6 +259,8 @@ class User < ActiveRecord::Base
            class_name: "Lti::RegistrationAccountBinding",
            foreign_key: :updated_by_id,
            inverse_of: :updated_by
+  has_many :lti_overlays, class_name: "Lti::Overlay", foreign_key: :updated_by_id, inverse_of: :updated_by
+  has_many :lti_overlay_versions, class_name: "Lti::OverlayVersion", inverse_of: :created_by, dependent: :destroy
 
   has_many :comment_bank_items, -> { where("workflow_state<>'deleted'") }
   has_many :microsoft_sync_partial_sync_changes, class_name: "MicrosoftSync::PartialSyncChange", dependent: :destroy, inverse_of: :user
@@ -343,7 +347,7 @@ class User < ActiveRecord::Base
   # NOTE: only use for courses with differentiated assignments on
   scope :able_to_see_assignment_in_course_with_da, lambda { |assignment_id, course_id|
     if Account.site_admin.feature_enabled?(:selective_release_backend)
-      visible_user_id = AssignmentVisibility::AssignmentVisibilityService.assignment_visible_in_course(assignment_id:, course_id:).map(&:user_id)
+      visible_user_id = AssignmentVisibility::AssignmentVisibilityService.assignments_visible_to_students(assignment_ids: assignment_id, course_ids: course_id).map(&:user_id)
       if visible_user_id.any?
         where(id: visible_user_id)
       else
@@ -358,7 +362,7 @@ class User < ActiveRecord::Base
   # NOTE: only use for courses with differentiated assignments on
   scope :able_to_see_quiz_in_course_with_da, lambda { |quiz_id, course_id|
     if Account.site_admin.feature_enabled?(:selective_release_backend)
-      visible_user_ids = QuizVisibility::QuizVisibilityService.quiz_visible_in_course(quiz_id:, course_id:).map(&:user_id)
+      visible_user_ids = QuizVisibility::QuizVisibilityService.quizzes_visible_to_students(quiz_ids: quiz_id, course_ids: course_id).map(&:user_id)
       where(id: visible_user_ids)
     else
       joins(:quiz_student_visibilities)
@@ -526,7 +530,6 @@ class User < ActiveRecord::Base
   end
 
   before_save :assign_uuid
-  before_save :update_avatar_image
   before_save :record_acceptance_of_terms
   after_save :update_account_associations_if_necessary
   after_save :self_enroll_if_necessary
@@ -614,8 +617,9 @@ class User < ActiveRecord::Base
     self.root_account_ids = refreshed_root_account_ids.to_a.sort
     if root_account_ids_changed?
       save!
-      # Update each communication channel associated with the user
+      # Update communication channel and feature flag records associated with the user
       communication_channels.update_all(root_account_ids:)
+      feature_flags.update_all(root_account_ids:)
     end
   end
 
@@ -854,7 +858,7 @@ class User < ActiveRecord::Base
   def assign_uuid
     # DON'T use ||=, because that will cause an immediate save to the db if it
     # doesn't already exist
-    self.uuid = CanvasSlug.generate_securish_uuid unless read_attribute(:uuid)
+    self.uuid = CanvasSlug.generate_securish_uuid unless self["uuid"]
   end
   protected :assign_uuid
 
@@ -977,7 +981,7 @@ class User < ActiveRecord::Base
                                 !sortable_name_explicitly_set &&
                                 name_changed? &&
                                 User.name_parts(sortable_name, likely_already_surname_first: true).compact.join(" ") == name_was
-    unless read_attribute(:sortable_name)
+    unless self["sortable_name"]
       self.sortable_name = User.last_name_first(self.name, sortable_name_was, likely_already_surname_first: true)
     end
     self.reminder_time_for_due_dates ||= 48.hours.to_i
@@ -1009,7 +1013,7 @@ class User < ActiveRecord::Base
   end
 
   def sortable_name
-    self.sortable_name = read_attribute(:sortable_name) ||
+    self.sortable_name = super ||
                          User.last_name_first(self.name, likely_already_surname_first: false)
   end
 
@@ -1122,7 +1126,7 @@ class User < ActiveRecord::Base
   end
 
   def short_name
-    read_attribute(:short_name) || name
+    super || name
   end
 
   workflow do
@@ -1316,18 +1320,18 @@ class User < ActiveRecord::Base
     return account.grants_right?(user, sought_right) if fake_student? # doesn't have account association
 
     # Intentionally include deleted pseudonyms when checking deleted users (important for diagnosing deleted users)
-    accounts_to_search = if associated_accounts.empty?
-                           if merged_into_user
-                             # Early return from inside if to ensure we handle chains of merges correctly
-                             return merged_into_user.check_accounts_right?(user, sought_right)
-                           elsif Account.where(id: pseudonyms.pluck(:account_id)).any?
-                             Account.where(id: pseudonyms.pluck(:account_id))
-                           else
-                             associated_accounts
-                           end
-                         else
-                           associated_accounts
-                         end
+    accounts_to_search =
+      if associated_accounts.empty?
+        if merged_into_user && active_merged_into_user
+          return active_merged_into_user.check_accounts_right?(user, sought_right)
+        elsif Account.joins(:pseudonyms).where(pseudonyms: { user_id: id }).exists?
+          Account.joins(:pseudonyms).where(pseudonyms: { user_id: id })
+        else
+          associated_accounts
+        end
+      else
+        associated_accounts
+      end
 
     common_shards = associated_shards & user.associated_shards
     search_method = lambda do |shard|
@@ -1345,6 +1349,22 @@ class User < ActiveRecord::Base
     return true if (associated_shards - common_shards).any?(&search_method)
 
     false
+  end
+
+  def active_merged_into_user
+    merged_into_users.find { |u| u.associated_accounts.present? }
+  end
+
+  def merged_into_users
+    chain = []
+    next_in_chain = merged_into_user
+
+    while next_in_chain && chain.exclude?(next_in_chain) && chain.length < 20
+      chain << next_in_chain
+      next_in_chain = next_in_chain.merged_into_user
+    end
+
+    chain
   end
 
   set_policy do
@@ -1372,6 +1392,7 @@ class User < ActiveRecord::Base
       read_email_addresses
       view_user_logins
       generate_observer_pairing_code
+      update_speed_grader_settings
     ]
 
     given { |user| user == self && user.user_can_edit_name? }
@@ -1389,9 +1410,6 @@ class User < ActiveRecord::Base
     given { |user| check_courses_right?(user, :read_reports) }
     can :read_profile and can :remove_avatar and can :read_reports
 
-    given { |user| check_courses_right?(user, :manage_user_notes) }
-    can :create_user_notes and can :read_user_notes
-
     %i[read_email_addresses read_sis manage_sis].each do |permission|
       given { |user| check_courses_right?(user, permission) }
       can permission
@@ -1399,9 +1417,6 @@ class User < ActiveRecord::Base
 
     given { |user| check_courses_right?(user, :generate_observer_pairing_code, enrollments.not_deleted) }
     can :generate_observer_pairing_code
-
-    given { |user| check_accounts_right?(user, :manage_user_notes) }
-    can :create_user_notes and can :read_user_notes and can :delete_user_notes
 
     given { |user| check_accounts_right?(user, :view_statistics) }
     can :view_statistics
@@ -1456,6 +1471,23 @@ class User < ActiveRecord::Base
 
     given { |user| check_accounts_right?(user, :moderate_user_content) }
     can :moderate_user_content
+  end
+
+  def can_change_pronunciation?(account)
+    return false unless account.root_account? && account.enable_name_pronunciation?
+
+    GuardRail.activate(:secondary) do
+      role_types = %w[TeacherEnrollment TaEnrollment DesignerEnrollment StudentEnrollment]
+      enrollment_types = enrollments.where(root_account: account, type: role_types)
+                                    .active_by_date.distinct.pluck(:type)
+
+      return true if account.allow_name_pronunciation_edit_for_students? && enrollment_types.include?("StudentEnrollment")
+
+      course_admin_roles = %w[TeacherEnrollment TaEnrollment DesignerEnrollment]
+      return true if account.allow_name_pronunciation_edit_for_teachers? && enrollment_types.intersection(course_admin_roles).present?
+
+      account.allow_name_pronunciation_edit_for_admins? && account_users.active.where(account:).exists?
+    end
   end
 
   def can_masquerade?(masquerader, account)
@@ -1542,20 +1574,6 @@ class User < ActiveRecord::Base
     contexts.uniq
   end
 
-  def update_avatar_image(force_reload = false)
-    if (!avatar_image_url || force_reload) && avatar_image_source == "twitter"
-      twitter = user_services.for_service("twitter").first rescue nil
-      if twitter
-        url = URI.parse("http://twitter.com/users/show.json?user_id=#{twitter.service_user_id}")
-        data = JSON.parse(Net::HTTP.get(url)) rescue nil
-        if data
-          self.avatar_image_url = data["profile_image_url_https"] || avatar_image_url
-          self.avatar_image_updated_at = Time.now
-        end
-      end
-    end
-  end
-
   def record_acceptance_of_terms
     accept_terms if @require_acceptance_of_terms && @terms_of_use
   end
@@ -1591,20 +1609,23 @@ class User < ActiveRecord::Base
   def avatar_image=(val)
     return if avatar_state == :locked
 
-    # Clear out the old avatar first, in case of failure to get new avatar.
-    # The order of these attributes is standard throughout the method.
-    self.avatar_image_source = "no_pic"
-    self.avatar_image_url = nil
-    self.avatar_image_updated_at = Time.zone.now
-    self.avatar_state = "approved"
+    external_avatar_url_patterns = Setting.get("avatar_external_url_patterns", "^https://[a-zA-Z0-9.-]+\\.instructure\\.com/").split(",").map { |re| Regexp.new re }
+    blank_avatar = { avatar_image_source: "no_pic", avatar_image_url: nil, avatar_state: "approved" }
 
     # Return here if we're passed a nil val or any non-hash val (both of which
     # will just nil the user's avatar).
-    return unless val.is_a?(Hash)
+    unless val.is_a?(Hash)
+      assign_attributes(blank_avatar)
+      return
+    end
 
-    external_avatar_url_patterns = Setting.get("avatar_external_url_patterns", "^https://[a-zA-Z0-9.-]+\\.instructure\\.com/").split(",").map { |re| Regexp.new re }
+    only_includes_state = val["url"].blank? && val["type"].blank? && val["state"].present?
 
-    if val["url"]&.match?(GRAVATAR_PATTERN)
+    self.avatar_image_updated_at = Time.zone.now
+
+    if only_includes_state
+      self.avatar_state = val["state"]
+    elsif val["url"]&.match?(GRAVATAR_PATTERN)
       self.avatar_image_source = "gravatar"
       self.avatar_image_url = val["url"]
       self.avatar_state = "submitted"
@@ -1616,6 +1637,8 @@ class User < ActiveRecord::Base
       self.avatar_image_source = "external"
       self.avatar_image_url = val["url"]
       self.avatar_state = "submitted"
+    else
+      assign_attributes(blank_avatar)
     end
   end
 
@@ -1629,8 +1652,8 @@ class User < ActiveRecord::Base
   end
 
   def avatar_state
-    if %w[none submitted approved locked reported re_reported].include?(read_attribute(:avatar_state))
-      read_attribute(:avatar_state).to_sym
+    if %w[none submitted approved locked reported re_reported].include?(super)
+      super.to_sym
     else
       :none
     end
@@ -1643,7 +1666,7 @@ class User < ActiveRecord::Base
         self.avatar_image_source = "no_pic"
         self.avatar_image_updated_at = Time.now
       end
-      write_attribute(:avatar_state, val.to_s)
+      super(val.to_s)
     end
   end
 
@@ -1762,7 +1785,13 @@ class User < ActiveRecord::Base
   end
 
   def preferences
-    read_or_initialize_attribute(:preferences, {})
+    self["preferences"] ||= {}
+  end
+
+  def speed_grader_settings
+    {
+      grade_by_question: preferences.fetch(:enable_speedgrader_grade_by_question, false)
+    }
   end
 
   def new_user_tutorial_statuses
@@ -1843,6 +1872,10 @@ class User < ActiveRecord::Base
     else
       "default"
     end
+  end
+
+  def grade_by_question_in_speedgrader?
+    preferences.fetch(:enable_speedgrader_grade_by_question, false)
   end
 
   def course_nickname(course)
@@ -1982,20 +2015,24 @@ class User < ActiveRecord::Base
     !!preferences[:collapse_course_nav]
   end
 
+  def text_editor_preference
+    preferences[:text_editor_preference]
+  end
+
   # ***** OHI If you're going to add a lot of data into `preferences` here maybe take a look at app/models/user_preference_value.rb instead ***
   # it will store the data in a separate table on the db and lighten the load on poor `users`
 
   def uuid
-    unless read_attribute(:uuid)
+    unless super
       update_attribute(:uuid, CanvasSlug.generate_securish_uuid)
     end
-    read_attribute(:uuid)
+    super
   end
 
   def heap_id(root_account: nil)
     # this is called in read-only contexts where we can't create a missing uuid
     # (uuid-less users should be rare in real life but they exist in specs and maybe unauthenticated requests)
-    return nil unless read_attribute(:uuid)
+    return nil unless self["uuid"]
 
     # for an explanation of these, see
     # https://instructure.atlassian.net/wiki/spaces/HEAP/pages/85854749165/RFC+Advanced+HEAP+installation
@@ -2364,7 +2401,7 @@ class User < ActiveRecord::Base
     end
   end
 
-  def submissions_for_course_ids(course_ids, start_at: nil, limit: 20)
+  def submissions_for_course_ids(course_ids, start_at: nil, limit: 20, exclude_parent_assignment_submissions: false)
     return [] unless course_ids.present?
 
     shard.activate do
@@ -2393,7 +2430,12 @@ class User < ActiveRecord::Base
           submissions.first(limit)
 
           ActiveRecord::Associations.preload(submissions, [{ assignment: :context }, :user, :submission_comments])
-          submissions
+
+          if exclude_parent_assignment_submissions
+            submissions.delete_if { |s| s.assignment.has_sub_assignments? }
+          else
+            submissions
+          end
         end
       end
     end
@@ -2403,14 +2445,14 @@ class User < ActiveRecord::Base
   def recent_feedback(
     course_ids: nil,
     contexts: nil,
-    **opts # forwarded to submissions_for_course_ids
+    ** # forwarded to submissions_for_course_ids
   )
     course_ids ||= if contexts
                      contexts.select { |c| c.is_a?(Course) }.map(&:id)
                    else
                      participating_student_course_ids
                    end
-    submissions_for_course_ids(course_ids, **opts)
+    submissions_for_course_ids(course_ids, **)
   end
 
   def visible_stream_item_instances(opts = {})
@@ -2530,6 +2572,23 @@ class User < ActiveRecord::Base
       events += select_available_assignments(
         select_upcoming_assignments(assignments.map { |a| a.overridden_for(self) }, opts.merge(time: now))
       )
+    end
+
+    if opts[:include_sub_assignments]
+      sub_assignments = SubAssignment.published
+                                     .for_context_codes(context_codes)
+                                     .due_between_with_overrides(now, opts[:end_at])
+                                     .include_submitted_count.to_a
+
+      if sub_assignments.any?
+        if AssignmentOverrideApplicator.should_preload_override_students?(sub_assignments, self, "upcoming_events")
+          AssignmentOverrideApplicator.preload_assignment_override_students(sub_assignments, self)
+        end
+
+        events += select_available_assignments(
+          select_upcoming_assignments(sub_assignments.map { |a| a.overridden_for(self) }, opts.merge(time: now))
+        )
+      end
     end
 
     sorted_events = events.sort_by do |e|
@@ -2807,7 +2866,7 @@ class User < ActiveRecord::Base
   end
 
   def quota
-    return read_attribute(:storage_quota) if read_attribute(:storage_quota)
+    return storage_quota if storage_quota
 
     accounts = associated_root_accounts.reject(&:site_admin?)
     if accounts.empty?
@@ -2819,11 +2878,6 @@ class User < ActiveRecord::Base
 
   def self.default_storage_quota
     Setting.get("user_default_quota", 50.decimal_megabytes.to_s).to_i
-  end
-
-  def update_last_user_note
-    note = user_notes.active.order("user_notes.created_at").last
-    self.last_user_note = note ? note.created_at : nil
   end
 
   TAB_PROFILE = 0
@@ -3110,7 +3164,7 @@ class User < ActiveRecord::Base
   end
 
   def crocodoc_id!
-    cid = read_attribute(:crocodoc_id)
+    cid = crocodoc_id
     return cid if cid
 
     Setting.transaction do
@@ -3308,6 +3362,10 @@ class User < ActiveRecord::Base
     @all_active_pseudonyms ||= pseudonyms.shard(self).active.to_a
   end
 
+  def pseudonyms_visible_to(_user)
+    all_active_pseudonyms
+  end
+
   def preferred_gradebook_version
     get_preference(:gradebook_version) || "default"
   end
@@ -3456,11 +3514,15 @@ class User < ActiveRecord::Base
   end
 
   def pronouns
-    translate_pronouns(read_attribute(:pronouns))
+    # For jobs/rails consoles/specs where domain root account is not set
+    acc = Account.current_domain_root_account || account
+    return nil unless acc.can_add_pronouns?
+
+    translate_pronouns(super)
   end
 
   def pronouns=(pronouns)
-    write_attribute(:pronouns, untranslate_pronouns(pronouns))
+    super(untranslate_pronouns(pronouns))
   end
 
   def create_courses_right(account)

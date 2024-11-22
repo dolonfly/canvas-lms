@@ -42,14 +42,14 @@ class Types::DiscussionCheckpointDateSetType < Types::BaseEnum
 end
 
 class Mutations::DiscussionCheckpointDate < GraphQL::Schema::InputObject
-  argument :id, Integer, required: false
-  argument :type, Types::DiscussionCheckpointDateType, required: true
   argument :due_at, Types::DateTimeType, required: false
+  argument :id, Integer, required: false
   argument :lock_at, Types::DateTimeType, required: false
-  argument :unlock_at, Types::DateTimeType, required: false
-  argument :student_ids, [Integer], required: false
-  argument :set_type, Types::DiscussionCheckpointDateSetType, required: false
   argument :set_id, Integer, required: false
+  argument :set_type, Types::DiscussionCheckpointDateSetType, required: false
+  argument :student_ids, [Integer], required: false
+  argument :type, Types::DiscussionCheckpointDateType, required: true
+  argument :unlock_at, Types::DateTimeType, required: false
 
   def to_object
     {
@@ -74,22 +74,22 @@ end
 
 class Mutations::DiscussionBase < Mutations::BaseMutation
   argument :allow_rating, Boolean, required: false
+  argument :checkpoints, [Mutations::DiscussionCheckpoints], required: false
   argument :delayed_post_at, Types::DateTimeType, required: false
+  argument :file_id, ID, required: false, prepare: GraphQLHelpers.relay_or_legacy_id_prepare_func("Attachment")
   argument :group_category_id, ID, required: false
   argument :lock_at, Types::DateTimeType, required: false
   argument :locked, Boolean, required: false
   argument :message, String, required: false
   argument :only_graders_can_rate, Boolean, required: false
   argument :only_visible_to_overrides, Boolean, required: false
-  argument :published, Boolean, required: false
-  argument :require_initial_post, Boolean, required: false
-  argument :title, String, required: false
-  argument :todo_date, Types::DateTimeType, required: false
   argument :podcast_enabled, Boolean, required: false
   argument :podcast_has_student_posts, Boolean, required: false
+  argument :published, Boolean, required: false
+  argument :require_initial_post, Boolean, required: false
   argument :specific_sections, String, required: false
-  argument :file_id, ID, required: false, prepare: GraphQLHelpers.relay_or_legacy_id_prepare_func("Attachment")
-  argument :checkpoints, [Mutations::DiscussionCheckpoints], required: false
+  argument :title, String, required: false
+  argument :todo_date, Types::DateTimeType, required: false
 
   field :discussion_topic, Types::DiscussionType, null:
 
@@ -128,24 +128,24 @@ class Mutations::DiscussionBase < Mutations::BaseMutation
     if discussion_topic.unlock_at_changed? || discussion_topic.delayed_post_at_changed? || discussion_topic.lock_at_changed?
       # only apply post_delayed if the topic is set to published
       discussion_topic.workflow_state = (discussion_topic.should_not_post_yet && discussion_topic.workflow_state == "active") ? "post_delayed" : discussion_topic.workflow_state
-      if discussion_topic.should_lock_yet
-        discussion_topic.lock(without_save: true)
-      else
-        discussion_topic.unlock(without_save: true)
-      end
     end
   end
 
-  def process_locked_parameter(locked, discussion_topic)
-    return unless locked != discussion_topic.locked? && !discussion_topic.lock_at_changed?
+  def save_lock_preferences(locked, discussion_topic)
+    return if @current_user.nil?
+    return unless discussion_topic.is_announcement
 
+    @current_user.create_announcements_unlocked(!locked)
+    @current_user.save!
+  end
+
+  def process_locked_parameter(locked, discussion_topic)
     # TODO: Remove this comment when reused for Create/Update...
     # This makes no sense now but will help in the future when we
     # want to update the locked state of a discussion topic
     if locked
       discussion_topic.lock(without_save: true)
     else
-      discussion_topic.lock_at = nil
       discussion_topic.unlock(without_save: true)
     end
   end
@@ -162,6 +162,7 @@ class Mutations::DiscussionBase < Mutations::BaseMutation
       end
     else
       discussion_topic.is_section_specific = false
+      discussion_topic.course_sections = []
     end
   end
 

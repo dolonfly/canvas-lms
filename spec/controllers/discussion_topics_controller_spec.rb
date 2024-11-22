@@ -265,6 +265,59 @@ describe DiscussionTopicsController do
           expect(assigns[:topics]).to include(@topic)
         end
       end
+
+      context "un-graded section specific discussions" do
+        before(:once) do
+          @shard1.activate do
+            @student = user_factory(active_all: true)
+          end
+          course_with_teacher(active_course: true)
+          @course.enroll_student(@student, enrollment_state: "active")
+          @section = @course.course_sections.create!(name: "test section")
+          student_in_section(@section, user: @student)
+          @topic = @course.discussion_topics.create!(user: @teacher, message: "hello my favorite section!")
+          @topic.is_section_specific = true
+          @topic.course_sections = [@section]
+          @topic.save!
+        end
+
+        it "is visible to student" do
+          user_session(@student)
+          @shard1.activate do
+            get "index", params: { course_id: @course }, format: :json
+            parsed_json = json_parse(response.body)
+            visible_ids_to_student = parsed_json.pluck("id")
+
+            expect(response).to have_http_status(:success)
+            expect(visible_ids_to_student).to include(@topic.id)
+          end
+        end
+
+        it "is visible to teacher" do
+          @shard1.activate do
+            @account_admin = account_admin_user(account: @course.root_account)
+          end
+          @topic = @course.discussion_topics.create!(title: "student topic", message: "Hello", user: @account_admin)
+          @topic.update!(only_visible_to_overrides: true)
+          @topic.assignment_overrides.create!(set: @course_section)
+          @shard2.activate do
+            @teacher = user_factory(active_all: true)
+          end
+          Enrollment.limit_privileges_to_course_section!(@course, @teacher, true)
+          @course.enroll_teacher(@teacher, section: @course_section, allow_multiple_enrollments: true).accept!
+
+          user_session(@teacher)
+          @shard2.activate do
+            get "index", params: { course_id: @course }, format: :json
+            parsed_json = json_parse(response.body)
+            visible_ids_to_teacher = parsed_json.pluck("id")
+
+            expect(@topic.visible_for?(@teacher)).to be_truthy
+            expect(response).to have_http_status(:success)
+            expect(visible_ids_to_teacher).to include(@topic.id)
+          end
+        end
+      end
     end
 
     it "returns non-graded group discussions properly" do
@@ -441,7 +494,6 @@ describe DiscussionTopicsController do
           get "index", params: { course_id: @course.id }, format: :json
           parsed_json = json_parse(response.body)
           visible_ids_to_student_2 = parsed_json.pluck("id")
-
           expect(response).to have_http_status(:success)
           expect(visible_ids_to_student_2).to include(@topic_visible_to_everyone.id)
           expect(visible_ids_to_student_2).to include(@topic.id)
@@ -1701,6 +1753,23 @@ describe DiscussionTopicsController do
       get :new, params: { course_id: @course.id }
       expect(assigns[:js_env][:DISCUSSION_CHECKPOINTS_ENABLED]).to be_truthy
     end
+
+    it "js_env GROUP_CATEGORIES excludes non_collaborative and student_organized categories regardless of :differentiation_tags ff state" do
+      Account.site_admin.enable_feature!(:differentiation_tags)
+
+      user_session(@teacher)
+      @course.group_categories.create!(name: "non_colaborative_category", non_collaborative: true)
+      @course.group_categories.create!(name: "student_organized_category", role: "student_organized")
+      regular_category = @course.group_categories.create!(name: "regular_category")
+
+      get :new, params: { course_id: @course.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
+
+      Account.site_admin.disable_feature!(:differentiation_tags)
+
+      get :new, params: { course_id: @course.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
+    end
   end
 
   describe "GET 'edit'" do
@@ -1763,6 +1832,23 @@ describe DiscussionTopicsController do
       ann.save!
       get :edit, params: { course_id: @course.id, id: ann.id }
       assert_unauthorized
+    end
+
+    it "js_env GROUP_CATEGORIES excludes non_collaborative and student_organized categories regardless of :differentiation_tags ff state" do
+      Account.site_admin.enable_feature!(:differentiation_tags)
+
+      user_session(@teacher)
+      @course.group_categories.create!(name: "non_colaborative_category", non_collaborative: true)
+      @course.group_categories.create!(name: "student_organized_category", role: "student_organized")
+      regular_category = @course.group_categories.create!(name: "regular_category")
+
+      get :edit, params: { course_id: @course.id, id: @topic.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
+
+      Account.site_admin.disable_feature!(:differentiation_tags)
+
+      get :edit, params: { course_id: @course.id, id: @topic.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
     end
 
     it "js_env SELECTED_SECTION_LIST is set correctly for section specific announcements" do
@@ -1840,6 +1926,22 @@ describe DiscussionTopicsController do
       expect(assigns[:js_env][:DISCUSSION_CHECKPOINTS_ENABLED]).to be_truthy
     end
 
+    it "js_env RESTRICT_QUANTITATIVE_DATA is set to true if enabled in course" do
+      user_session(@teacher)
+      @course.restrict_quantitative_data = true
+      @course.save!
+      get :edit, params: { course_id: @course.id, id: @topic.id }
+      expect(assigns[:js_env][:RESTRICT_QUANTITATIVE_DATA]).to be_truthy
+    end
+
+    it "js_env RESTRICT_QUANTITATIVE_DATA is set to false if disabled in course" do
+      user_session(@teacher)
+      @course.restrict_quantitative_data = false
+      @course.save!
+      get :edit, params: { course_id: @course.id, id: @topic.id }
+      expect(assigns[:js_env][:RESTRICT_QUANTITATIVE_DATA]).to be_falsy
+    end
+
     context "conditional-release" do
       before do
         user_session(@teacher)
@@ -1882,36 +1984,16 @@ describe DiscussionTopicsController do
         end
       end
 
-      context "with usage_rights_discussion_topics disabled" do
-        before { @course.root_account.disable_feature!(:usage_rights_discussion_topics) }
+      context "enabled on course" do
+        before { @course.update!(usage_rights_required: true) }
 
-        context "enabled on course" do
-          before { @course.update!(usage_rights_required: true) }
-
-          include_examples "no usage rights returned"
-        end
-
-        context "disabled on course" do
-          before { @course.update!(usage_rights_required: false) }
-
-          include_examples "no usage rights returned"
-        end
+        include_examples "usage rights returned"
       end
 
-      context "with usage_rights_discussion_topics enabled" do
-        before { @course.root_account.enable_feature!(:usage_rights_discussion_topics) }
+      context "disabled on course" do
+        before { @course.update!(usage_rights_required: false) }
 
-        context "enabled on course" do
-          before { @course.update!(usage_rights_required: true) }
-
-          include_examples "usage rights returned"
-        end
-
-        context "disabled on course" do
-          before { @course.update!(usage_rights_required: false) }
-
-          include_examples "no usage rights returned"
-        end
+        include_examples "no usage rights returned"
       end
     end
   end
@@ -1925,7 +2007,7 @@ describe DiscussionTopicsController do
       user_session(@teacher)
       todo_date = 1.day.from_now.in_time_zone("America/New_York")
       post "create", params: { course_id: @course.id, todo_date:, title: "Discussion 1" }, format: "json"
-      expect(response.parsed_body["todo_date"]).to eq todo_date.in_time_zone("UTC").iso8601
+      expect(response.parsed_body["todo_date"]).to eq todo_date.utc.iso8601
     end
 
     it "updates a topic with a todo date" do
@@ -2009,21 +2091,21 @@ describe DiscussionTopicsController do
 
     it "includes absolute path for rel='self' link" do
       get "public_feed", params: { feed_code: @course.feed_code }, format: "atom"
-      feed = Feedjira.parse(response.body) rescue nil
+      feed = Feedjira.parse(response.body)
       expect(feed).not_to be_nil
       expect(feed.feed_url).to match(%r{http://})
     end
 
     it "does not include entries in an anonymous feed" do
       get "public_feed", params: { feed_code: @course.feed_code }, format: "atom"
-      feed = Feedjira.parse(response.body) rescue nil
+      feed = Feedjira.parse(response.body)
       expect(feed).not_to be_nil
       expect(feed.entries).to be_empty
     end
 
     it "includes an author for each entry with an enrollment feed" do
       get "public_feed", params: { feed_code: @course.teacher_enrollments.first.feed_code }, format: "atom"
-      feed = Feedjira.parse(response.body) rescue nil
+      feed = Feedjira.parse(response.body)
       expect(feed).not_to be_nil
       expect(feed.entries).not_to be_empty
       expect(feed.entries.all? { |e| e.author.present? }).to be_truthy
@@ -2226,7 +2308,7 @@ describe DiscussionTopicsController do
         user_session @teacher
         post "create", params: group_topic_params(group, { anonymous_state: "full_anonymity" }), format: :json
         expect(response).to have_http_status :bad_request
-        expect(response.parsed_body["errors"]).to(include { "anonymous_state" => "Group discussions cannot be anonymous." })
+        expect(response.parsed_body["errors"]).to include({ "anonymous_state" => "Group discussions cannot be anonymous." })
       end
 
       it "returns an error for creating anonymous discussions assigned to a Group Category in a Course" do
@@ -2235,7 +2317,7 @@ describe DiscussionTopicsController do
         user_session @teacher
         post "create", params: topic_params(@course, { anonymous_state: "full_anonymity", group_category_id: group_category.id }), format: :json
         expect(response).to have_http_status :bad_request
-        expect(response.parsed_body["errors"]).to(include { "anonymous_state" => "Group discussions cannot be anonymous." })
+        expect(response.parsed_body["errors"]).to include({ "anonymous_state" => "Group discussions cannot be anonymous." })
       end
 
       it "returns an error for creating a graded anonymous discussion" do
@@ -2244,7 +2326,7 @@ describe DiscussionTopicsController do
         user_session(@teacher)
         post "create", params: obj_params, format: :json
         expect(response).to have_http_status :bad_request
-        expect(response.parsed_body["errors"]).to(include { "anonymous_state" => "Anonymous discussions cannot be graded" })
+        expect(response.parsed_body["errors"]).to include({ "anonymous_state" => "Anonymous discussions cannot be graded" })
       end
 
       it "allows partial_anonymity" do
@@ -2418,36 +2500,16 @@ describe DiscussionTopicsController do
         end
       end
 
-      context "with usage_rights_discussion_topics disabled" do
-        before { @course.root_account.disable_feature!(:usage_rights_discussion_topics) }
+      context "enabled on course" do
+        before { @course.update!(usage_rights_required: true) }
 
-        context "enabled on course" do
-          before { @course.update!(usage_rights_required: true) }
-
-          include_examples "no usage rights set"
-        end
-
-        context "disabled on course" do
-          before { @course.update!(usage_rights_required: false) }
-
-          include_examples "no usage rights set"
-        end
+        include_examples "usage rights set"
       end
 
-      context "with usage_rights_discussion_topics enabled" do
-        before { @course.root_account.enable_feature!(:usage_rights_discussion_topics) }
+      context "disabled on course" do
+        before { @course.update!(usage_rights_required: false) }
 
-        context "enabled on course" do
-          before { @course.update!(usage_rights_required: true) }
-
-          include_examples "usage rights set"
-        end
-
-        context "disabled on course" do
-          before { @course.update!(usage_rights_required: false) }
-
-          include_examples "no usage rights set"
-        end
+        include_examples "no usage rights set"
       end
     end
   end
@@ -2732,8 +2794,8 @@ describe DiscussionTopicsController do
 
     it "deletes attachments" do
       attachment = @topic.attachment = attachment_model(context: @course)
-      @topic.lock_at = Time.now + 1.week
-      @topic.delayed_post_at = Time.now - 1.week
+      @topic.lock_at = 1.week.from_now
+      @topic.delayed_post_at = 1.week.ago
       @topic.save!
       @topic.unlock!
       put("update", params: { course_id: @course.id, topic_id: @topic.id, remove_attachment: "1" }, format: "json")
@@ -2819,7 +2881,7 @@ describe DiscussionTopicsController do
         user_session(@teacher)
         put "update", params: { course_id: @course.id, topic_id: full_anon.id, group_category_id: group_category.id }, format: "json"
         expect(response).to have_http_status :bad_request
-        expect(response.parsed_body["errors"]).to(include { "anonymous_state" => "Group discussions cannot be anonymous." })
+        expect(response.parsed_body["errors"]).to include({ "anonymous_state" => "Group discussions cannot be anonymous." })
       end
 
       it "returns an error when turning a partially anonymous discussion into a group discussion" do
@@ -2829,7 +2891,7 @@ describe DiscussionTopicsController do
         user_session(@teacher)
         put "update", params: { course_id: @course.id, topic_id: partial_anon.id, group_category_id: group_category.id }, format: "json"
         expect(response).to have_http_status :bad_request
-        expect(response.parsed_body["errors"]).to(include { "anonymous_state" => "Group discussions cannot be anonymous." })
+        expect(response.parsed_body["errors"]).to include({ "anonymous_state" => "Group discussions cannot be anonymous." })
       end
 
       it "saves when turning a regular discussion into a group discussion" do

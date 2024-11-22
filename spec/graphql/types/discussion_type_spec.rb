@@ -226,7 +226,7 @@ RSpec.shared_examples "DiscussionType" do
     expect(discussion_type.resolve("discussionEntriesConnection(sortOrder: asc, rootEntries: true) { nodes { _id } }")).to eq [de.id, de2.id, de3.id].map(&:to_s)
     expect(discussion_type.resolve("discussionEntriesConnection(sortOrder: desc, rootEntries: true) { nodes { _id } }")).to eq [de3.id, de2.id, de.id].map(&:to_s)
     discussion.discussion_entries.create!(message: "sub entry", user: @teacher, parent_id: de3.id)
-    expect(discussion_type.resolve("discussionEntriesConnection(sortOrder: desc, rootEntries: true) { nodes { _id } }")).to eq [de3.id, de2.id, de.id].map(&:to_s)
+    expect(discussion_type.resolve("discussionEntriesConnection(sortOrder: desc,rootEntries: true) { nodes { _id } }")).to eq [de3.id, de2.id, de.id].map(&:to_s)
   end
 
   it "loads discussion_entry_drafts" do
@@ -826,7 +826,7 @@ describe Types::DiscussionType do
         workflow_state: "published"
       )
       @context_module = @course.context_modules.create!(name: "some module")
-      @context_module.unlock_at = Time.now + 1.day
+      @context_module.unlock_at = 1.day.from_now
       @context_module.add_item(type: "discussion_topic", id: @topic.id)
       @context_module.save!
     end

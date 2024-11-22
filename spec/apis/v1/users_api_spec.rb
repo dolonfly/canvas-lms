@@ -44,7 +44,7 @@ class TestUserApi
   def initialize
     @domain_root_account = Account.default
     @params = {}
-    @request = OpenStruct.new
+    @request = ActionDispatch::Request.new({})
   end
 end
 
@@ -62,7 +62,7 @@ describe Api::V1::User do
   before do
     @test_api = TestUserApi.new
     @test_api.services_enabled = []
-    @test_api.request.protocol = "http"
+    allow(@test_api.request).to receive_messages(protocol: "http://", host: "host")
   end
 
   context "user_json" do
@@ -83,7 +83,7 @@ describe Api::V1::User do
       @student.account.set_service_availability(:avatars, true)
       @student.account.save!
       expect(@test_api.user_json(@student, @admin, {}, [], @course)).not_to have_key("avatar_url")
-      expect(@test_api.user_json(@student, @admin, {}, ["avatar_url"], @course)["avatar_url"]).to match("h:/images/messages/avatar-50.png")
+      expect(@test_api.user_json(@student, @admin, {}, ["avatar_url"], @course)["avatar_url"]).to eql "http://host/images/messages/avatar-50.png"
     end
 
     it "only loads pseudonyms for the user once, even if there are multiple enrollments" do
@@ -779,7 +779,7 @@ describe "Users API", type: :request do
       json.each { |j| expect(j["url"]).to eq "http://www.example.com/courses/1" }
       expect(json[0]["created_at"]).to be > json[1]["created_at"]
       expect(json[0]["app_name"]).to be_nil
-      expect(json[1]["app_name"]).to eq "User-Generated"
+      expect(json[1]["app_name"]).to eq DeveloperKey::DEFAULT_KEY_NAME
       expect(response.headers["Link"]).to match(/next/)
       response.headers["Link"].split(",").find { |l| l =~ /<([^>]+)>.+next/ }
       url = $1
@@ -999,6 +999,19 @@ describe "Users API", type: :request do
                         expected_status: 404)
         expect(json.keys).not_to include("errors")
         expect(json["merged_into_user_id"]).to eq u3.id
+      end
+
+      it "404s but still returns the user on a deleted user in circular merge for a site admin" do
+        u3 = User.create!
+        UserMerge.from(@other_user).into(u3)
+        UserMerge.from(u3).into(@other_user)
+        account_admin_user(account: Account.site_admin)
+        json = api_call(:get,
+                        "/api/v1/users/#{@other_user.id}",
+                        { controller: "users", action: "api_show", id: @other_user.id.to_param, format: "json" },
+                        {},
+                        expected_status: 404)
+        expect(json["id"]).to eq @other_user.id
       end
     end
 
@@ -2055,7 +2068,7 @@ describe "Users API", type: :request do
             json = api_call(:put, @path, @path_options, { user: { pronouns: approved_pronoun } })
             expect(json["pronouns"]).to eq approved_pronoun
             expect(@student.reload.pronouns).to eq approved_pronoun
-            expect(@student.read_attribute(:pronouns)).to eq "he_him"
+            expect(@student["pronouns"]).to eq "he_him"
           end
 
           it "fixes the case when pronoun does not match default pronoun case" do
@@ -2064,7 +2077,7 @@ describe "Users API", type: :request do
             json = api_call(:put, @path, @path_options, { user: { pronouns: wrong_case_pronoun } })
             expect(json["pronouns"]).to eq expected_pronoun
             expect(@student.reload.pronouns).to eq expected_pronoun
-            expect(@student.read_attribute(:pronouns)).to eq "he_him"
+            expect(@student["pronouns"]).to eq "he_him"
           end
 
           it "fixes the case when pronoun does not match custom pronoun case" do
@@ -2077,11 +2090,11 @@ describe "Users API", type: :request do
             json = api_call(:put, @path, @path_options, { user: { pronouns: wrong_case_pronoun } })
             expect(json["pronouns"]).to eq expected_pronoun
             expect(@student.reload.pronouns).to eq expected_pronoun
-            expect(@student.read_attribute(:pronouns)).to eq expected_pronoun
+            expect(@student["pronouns"]).to eq expected_pronoun
           end
 
           it "does not update when pronoun is not approved" do
-            @student.pronouns = "She/Her"
+            @student.reload.pronouns = "She/Her"
             @student.save!
             original_pronoun = @student.pronouns
             unapproved_pronoun = "Unapproved/Unapproved"
@@ -2134,15 +2147,42 @@ describe "Users API", type: :request do
         expect(user.profile.reload.title).to eq another_title
       end
 
-      it "can update name pronunciation in user's profile if name pronunciation is enabled" do
+      it "will get an error when updating name pronunciation in user's profile if name pronunciation is enabled but base role is disabled" do
         Account.default.tap do |a|
           a.settings[:enable_profiles] = true
           a.settings[:enable_name_pronunciation] = true
+          a.settings[:allow_name_pronunciation_edit_for_students] = false
           a.save!
         end
 
+        @student.profile.pronunciation = "My name pronunciation"
+        @student.profile.save!
+
+        original_pronunciation = @student.reload.profile.pronunciation
         new_pronunciation = "Burni Nator"
-        json = api_call(:put, @path, @path_options, {
+
+        raw_api_call(:put, @path, @path_options, { user: { pronunciation: new_pronunciation } })
+        json = JSON.parse(response.body)
+
+        expect(response).to have_http_status :unauthorized
+        expect(json["status"]).to eq "unauthorized"
+        expect(json["errors"][0]["message"]).to eq "user not authorized to perform that action"
+        expect(@student.reload.profile.pronunciation).to eq original_pronunciation
+      end
+
+      it "can update name pronunciation in user's profile if name pronunciation is enabled and base role is enabled" do
+        Account.default.tap do |a|
+          a.settings[:enable_profiles] = true
+          a.settings[:enable_name_pronunciation] = true
+          a.settings[:allow_name_pronunciation_edit_for_admins] = true
+          a.save!
+        end
+
+        admin_path = "/api/v1/users/#{@admin.id}"
+        admin_options = { controller: "users", action: "update", format: "json", id: @admin.id.to_param }
+
+        new_pronunciation = "Burni Nator"
+        json = api_call(:put, admin_path, admin_options, {
                           user: { pronunciation: new_pronunciation }
                         })
         expect(json["pronunciation"]).to eq new_pronunciation
@@ -2150,7 +2190,7 @@ describe "Users API", type: :request do
         expect(user.profile.pronunciation).to eq new_pronunciation
 
         another_pronunciation = "another pronunciation"
-        api_call(:put, @path, @path_options, {
+        api_call(:put, admin_path, admin_options, {
                    user: { pronunciation: another_pronunciation }
                  })
         expect(user.reload.profile.pronunciation).to eq another_pronunciation
@@ -2342,7 +2382,7 @@ describe "Users API", type: :request do
             a.save!
           end
 
-          @student.pronouns = "She/Her"
+          @student.reload.pronouns = "She/Her"
           @student.save!
           original_pronoun = @student.pronouns
           test_pronoun = "He/Him"
@@ -3306,6 +3346,14 @@ describe "Users API", type: :request do
     end
 
     it "returns unsubmitted assignments due in the past" do
+      json = api_call(:get, @path, @params)
+      expect(json.length).to be 2
+    end
+
+    it "returns unsubmitted assignments due in the past excluding manually changed to 'none'" do
+      assignment = @course.assignments.create!(due_at: 2.days.ago, workflow_state: "published", submission_types: "online_text_entry")
+      assignment.grade_student(@student, grade: nil, grader: @teacher, late_policy_status: "none")
+
       json = api_call(:get, @path, @params)
       expect(json.length).to be 2
     end

@@ -23,6 +23,9 @@ class AccessToken < ActiveRecord::Base
   extend RootAccountResolver
 
   workflow do
+    state :pending do
+      event :activate, transitions_to: :active
+    end
     state :active
     state :deleted
   end
@@ -52,22 +55,40 @@ class AccessToken < ActiveRecord::Base
     p.dispatch :manually_created_access_token_created
     p.to(&:user)
     p.whenever do |access_token|
-      access_token.crypted_token_previously_changed? && access_token.manually_created?
+      access_token.crypted_token_previously_changed? && access_token.manually_created? &&
+        access_token.active?
+    end
+    p.dispatch :access_token_created_on_behalf_of_user
+    p.to(&:user)
+    p.whenever do |access_token|
+      access_token.crypted_token_previously_changed? && access_token.manually_created? &&
+        access_token.pending?
+    end
+    p.dispatch :access_token_deleted
+    p.to(&:user)
+    p.whenever do |access_token|
+      access_token.manually_created? && access_token.deleted?
     end
   end
 
   set_policy do
     given do |user|
-      !user.account.feature_enabled?(:admin_manage_access_tokens) ||
-        !user.account.limit_personal_access_tokens? ||
-        self.user.check_accounts_right?(user, :manage_access_tokens)
+      user.id == user_id && (
+        !user.account.feature_enabled?(:admin_manage_access_tokens) ||
+        !user.account.limit_personal_access_tokens?
+      )
+    end
+    can :create and can :update
+
+    given do |user|
+      self.user.check_accounts_right?(user, :create_access_tokens)
     end
     can :create and can :update
 
     given { |user| user.id == user_id }
-    can :delete
+    can :read and can :delete
 
-    given { |user| self.user.check_accounts_right?(user, :manage_access_tokens) }
+    given { |user| self.user.check_accounts_right?(user, :delete_access_tokens) }
     can :delete
   end
 
@@ -77,7 +98,7 @@ class AccessToken < ActiveRecord::Base
   # yet been implemented)
 
   scope :active, -> { not_deleted.where("permanent_expires_at IS NULL OR permanent_expires_at>?", Time.now.utc) }
-  scope :not_deleted, -> { where(workflow_state: "active") }
+  scope :not_deleted, -> { where.not(workflow_state: "deleted") }
 
   TOKEN_SIZE = 64
   TOKEN_TYPES = [:crypted_token, :crypted_refresh_token].freeze
@@ -95,16 +116,24 @@ class AccessToken < ActiveRecord::Base
     run_callbacks(:destroy) { save! }
   end
 
-  def self.authenticate(token_string, token_key = :crypted_token, access_token = nil)
+  def self.authenticate(token_string, token_key = :crypted_token, access_token = nil, load_pseudonym_from_access_token: false)
     # hash the user supplied token with all of our known keys
     # attempt to find a token that matches one of the hashes
     hashed_tokens = all_hashed_tokens(token_string)
-    token = access_token || not_deleted.where(token_key => hashed_tokens).first
+    token =
+      if access_token.present?
+        access_token
+      else
+        scope = load_pseudonym_from_access_token ? self : not_deleted
+        scope.where(token_key => hashed_tokens).order(Arel.sql("workflow_state = 'active' DESC, workflow_state")).first
+      end
     if token && token.send(token_key) != hashed_tokens.first
       # we found the token but, its hashed using an old key. save the updated hash
       token.send(:"#{token_key}=", hashed_tokens.first)
       token.save!
     end
+    return token if load_pseudonym_from_access_token
+
     token = nil unless token&.usable?(token_key)
     token
   end
@@ -140,8 +169,25 @@ class AccessToken < ActiveRecord::Base
     !!authenticate(token_string)&.site_admin?
   end
 
+  def localized_workflow_state
+    if expired?
+      I18n.t("expired")
+    elsif pending?
+      I18n.t("pending")
+    elsif active?
+      I18n.t("active")
+    else
+      workflow_state
+    end
+  end
+
+  def set_permanent_expiration
+    expires_in = developer_key.tokens_expire_in
+    self.permanent_expires_at = Time.now.utc + expires_in if expires_in
+  end
+
   def usable?(token_key = :crypted_token)
-    return false if expired?
+    return false if expired? || pending?
 
     if !developer_key_id || developer_key&.usable?
       return false if token_key != :crypted_refresh_token && needs_refresh?
@@ -237,18 +283,14 @@ class AccessToken < ActiveRecord::Base
     @plaintext_refresh_token = new_token
   end
 
-  def generate_refresh_token
-    self.refresh_token = CanvasSlug.generate(nil, TOKEN_SIZE) unless crypted_refresh_token
+  def generate_refresh_token(overwrite: false)
+    if !crypted_refresh_token || overwrite
+      self.refresh_token = CanvasSlug.generate(nil, TOKEN_SIZE)
+    end
   end
 
   def clear_plaintext_refresh_token!
     @plaintext_refresh_token = nil
-  end
-
-  def regenerate=(val)
-    if val == "1" && manually_created?
-      generate_token(true)
-    end
   end
 
   def regenerate_access_token

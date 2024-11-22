@@ -43,11 +43,13 @@ describe('CourseCopyImporter', () => {
           {
             id: '0',
             label: 'Mathmatics',
+            term: 'Default term',
             blueprint: true,
           },
           {
             id: '1',
             label: 'Biology',
+            term: 'Other term',
             blueprint: false,
           },
         ],
@@ -57,22 +59,36 @@ describe('CourseCopyImporter', () => {
 
   afterEach(() => jest.clearAllMocks())
 
-  it('searches for matching courses', async () => {
+  it('searches for matching courses and includes concluded by default', async () => {
     renderComponent()
     await userEvent.type(screen.getByRole('combobox', {name: 'Search for a course'}), 'math')
     await waitFor(() => {
-      expect(doFetchApi).toHaveBeenCalledWith({path: '/users/0/manageable_courses?term=math'})
+      expect(doFetchApi).toHaveBeenCalledWith({
+        path: '/users/0/manageable_courses?term=math&include=concluded'
+      })
     })
     expect(screen.getByText('Mathmatics')).toBeInTheDocument()
   })
 
-  it('searches for matching courses including concluded', async () => {
+  it('searches for matching courses and display proper terms', async () => {
+    renderComponent()
+    await userEvent.type(screen.getByRole('combobox', {name: 'Search for a course'}), 'math')
+    await waitFor(() => {
+      expect(doFetchApi).toHaveBeenCalledWith({
+        path: '/users/0/manageable_courses?term=math&include=concluded'
+      })
+    })
+    expect(screen.getByText('Term: Default term')).toBeInTheDocument()
+    expect(screen.getByText('Term: Other term')).toBeInTheDocument()
+  })
+
+  it('searches for matching courses excluding concluded', async () => {
     renderComponent()
     await userEvent.click(screen.getByRole('checkbox', {name: 'Include completed courses'}))
     await userEvent.type(screen.getByRole('combobox', {name: 'Search for a course'}), 'math')
     await waitFor(() => {
       expect(doFetchApi).toHaveBeenCalledWith({
-        path: '/users/0/manageable_courses?term=math&include=concluded',
+        path: '/users/0/manageable_courses?term=math',
       })
     })
     expect(screen.getByText('Mathmatics')).toBeInTheDocument()

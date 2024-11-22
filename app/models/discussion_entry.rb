@@ -31,17 +31,17 @@ class DiscussionEntry < ActiveRecord::Base
   attr_readonly :discussion_topic_id, :user_id, :parent_id, :is_anonymous_author
   has_many :discussion_entry_drafts, inverse_of: :discussion_entry
   has_many :discussion_entry_versions, -> { order(version: :desc) }, inverse_of: :discussion_entry, dependent: :destroy
-  has_many :legacy_subentries, class_name: "DiscussionEntry", foreign_key: "parent_id"
-  has_many :root_discussion_replies, -> { where("parent_id=root_entry_id") }, class_name: "DiscussionEntry", foreign_key: "root_entry_id"
-  has_many :discussion_subentries, -> { order(:created_at) }, class_name: "DiscussionEntry", foreign_key: "parent_id"
-  has_many :unordered_discussion_subentries, class_name: "DiscussionEntry", foreign_key: "parent_id"
-  has_many :flattened_discussion_subentries, class_name: "DiscussionEntry", foreign_key: "root_entry_id"
+  has_many :legacy_subentries, class_name: "DiscussionEntry", foreign_key: "parent_id", inverse_of: :parent_entry
+  has_many :root_discussion_replies, -> { where("parent_id=root_entry_id") }, class_name: "DiscussionEntry", foreign_key: "root_entry_id", inverse_of: :root_entry
+  has_many :discussion_subentries, -> { order(:created_at) }, class_name: "DiscussionEntry", foreign_key: "parent_id", inverse_of: :parent_entry
+  has_many :unordered_discussion_subentries, class_name: "DiscussionEntry", foreign_key: "parent_id", inverse_of: :parent_entry
+  has_many :flattened_discussion_subentries, class_name: "DiscussionEntry", foreign_key: "root_entry_id", inverse_of: :root_entry
   has_many :discussion_entry_participants
-  has_one :last_discussion_subentry, -> { order(created_at: :desc) }, class_name: "DiscussionEntry", foreign_key: "root_entry_id"
+  has_one :last_discussion_subentry, -> { order(created_at: :desc) }, class_name: "DiscussionEntry", foreign_key: "root_entry_id", inverse_of: :root_entry
   belongs_to :discussion_topic, inverse_of: :discussion_entries
   belongs_to :quoted_entry, class_name: "DiscussionEntry"
   # null if a root entry
-  belongs_to :parent_entry, class_name: "DiscussionEntry", foreign_key: :parent_id
+  belongs_to :parent_entry, class_name: "DiscussionEntry", foreign_key: :parent_id, inverse_of: :discussion_subentries
   # also null if a root entry
   belongs_to :root_entry, class_name: "DiscussionEntry"
   belongs_to :user
@@ -51,6 +51,7 @@ class DiscussionEntry < ActiveRecord::Base
   belongs_to :root_account, class_name: "Account"
   has_one :external_feed_entry, as: :asset
 
+  before_save :set_edited_at
   before_create :infer_root_entry_id
   before_create :set_root_account_id
   after_save :update_discussion
@@ -252,6 +253,34 @@ class DiscussionEntry < ActiveRecord::Base
   end
 
   def update_topic_submission
+    if discussion_topic&.assignment&.checkpoints_parent?
+      entry_checkpoint_type = parent_id ? CheckpointLabels::REPLY_TO_ENTRY : CheckpointLabels::REPLY_TO_TOPIC
+      submission = if entry_checkpoint_type == CheckpointLabels::REPLY_TO_TOPIC
+                     discussion_topic.reply_to_topic_checkpoint.submissions.find_by(user_id:)
+                   else
+                     discussion_topic.reply_to_entry_checkpoint.submissions.find_by(user_id:)
+                   end
+      return unless submission
+
+      entries = if entry_checkpoint_type == CheckpointLabels::REPLY_TO_TOPIC
+                  discussion_topic.discussion_entries.active.where(user_id:, parent_id: nil)
+                else
+                  discussion_topic.discussion_entries.active.where(user_id:).where.not(parent_id: nil)
+                end
+
+      should_unsubmit_reply_to_topic = entry_checkpoint_type == CheckpointLabels::REPLY_TO_TOPIC && entries.none?
+      should_unsubmit_reply_to_entry = entry_checkpoint_type == CheckpointLabels::REPLY_TO_ENTRY && (
+        entries.none? || (entries.any? && (entries.length < discussion_topic.reply_to_entry_required_count))
+      )
+      if should_unsubmit_reply_to_topic || should_unsubmit_reply_to_entry
+        submission.workflow_state = "unsubmitted"
+        submission.submission_type = nil
+        submission.submitted_at = nil
+        submission.save! # aggregate_checkpoint_submissions will be called in the after_save hook
+      end
+      return
+    end
+
     if discussion_topic.for_assignment?
       entries = discussion_topic.discussion_entries.where(user_id:, workflow_state: "active")
       submission = discussion_topic.assignment.submissions.find_by(user_id:)
@@ -714,5 +743,11 @@ class DiscussionEntry < ActiveRecord::Base
     final_counts["total"] = final_counts["inappropriate_count"] + final_counts["offensive_count"] + final_counts["other_count"]
 
     final_counts
+  end
+
+  def set_edited_at
+    if will_save_change_to_message? && !new_record?
+      self.edited_at = Time.now.utc
+    end
   end
 end

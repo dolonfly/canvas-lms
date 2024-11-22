@@ -29,6 +29,8 @@ class AssignmentsController < ApplicationController
   include Api::V1::Outcome
   include Api::V1::ExternalTools
   include Api::V1::ContextModule
+  include Api::V1::Rubric
+  include Api::V1::RubricAssociation
 
   include KalturaHelper
   include ObserverEnrollmentsHelper
@@ -154,7 +156,7 @@ class AssignmentsController < ApplicationController
              grading_scheme: grading_standard.data,
              points_based: grading_standard.points_based?,
              scaling_factor: grading_standard.scaling_factor,
-             enhanced_rubrics_enabled: Rubric.enhanced_rubrics_enabled_for_context?(@context),
+             enhanced_rubrics_enabled: @context.feature_enabled?(:enhanced_rubrics),
            })
 
     if peer_review_mode_enabled
@@ -339,8 +341,13 @@ class AssignmentsController < ApplicationController
 
         env = js_env({
                        COURSE_ID: @context.id,
-                       ROOT_OUTCOME_GROUP: outcome_group_json(@context.root_outcome_group, @current_user, session)
+                       ROOT_OUTCOME_GROUP: outcome_group_json(@context.root_outcome_group, @current_user, session),
+                       HAS_GRADING_PERIODS: @context.grading_periods?,
+                       VALID_DATE_RANGE: CourseDateRange.new(@context),
+                       POST_TO_SIS: Assignment.sis_grade_export_enabled?(@context),
+                       DUE_DATE_REQUIRED_FOR_ACCOUNT: AssignmentUtil.due_date_required_for_account?(@context)
                      })
+        set_section_list_js_env
         submission = @assignment.submissions.find_by(user: @current_user)
         if submission
           js_env({ SUBMISSION_ID: submission.id })
@@ -403,6 +410,14 @@ class AssignmentsController < ApplicationController
            (!params.key?(:assignments_2) || value_to_boolean(params[:assignments_2])) &&
            can_do(@context, @current_user, :read_as_admin)
           css_bundle :assignments_2_teacher
+          js_bundle :assignments_show_teacher_deprecated
+          render html: "", layout: true
+          return
+        end
+
+        if @context.root_account.feature_enabled?(:assignment_enhancements_teacher_view) &&
+           can_do(@context, @current_user, :read_as_admin)
+          css_bundle :assignment_enhancements_teacher_view
           js_bundle :assignments_show_teacher
           render html: "", layout: true
           return
@@ -429,10 +444,22 @@ class AssignmentsController < ApplicationController
         permissions = {
           context: context_rights,
           assignment: @assignment.rights_status(@current_user, session, :update, :submit),
-          can_manage_groups: can_do(@context.groups.temp_record, @current_user, :create)
+          can_manage_groups: can_do(@context.groups.temp_record, @current_user, :create),
+          manage_rubrics: @context.grants_right?(@current_user, session, :manage_rubrics)
         }
 
         @similarity_pledge = pledge_text
+
+        rubric_association = nil
+        assigned_rubric = nil
+        if @assignment.active_rubric_association? && Rubric.enhanced_rubrics_assignments_enabled?(@context)
+          rubric_association = @assignment.rubric_association
+          can_update_rubric = can_do(rubric_association.rubric, @current_user, :update)
+          assigned_rubric = rubric_json(rubric_association.rubric, @current_user, session, style: "full")
+          assigned_rubric[:unassessed] = Rubric.active.unassessed.where(id: rubric_association.rubric.id).exists?
+          assigned_rubric[:can_update] = can_update_rubric
+          rubric_association = rubric_association_json(rubric_association, @current_user, session)
+        end
 
         hash = {
           EULA_URL: tool_eula_url,
@@ -444,6 +471,8 @@ class AssignmentsController < ApplicationController
           EMOJI_DENY_LIST: @context.root_account.settings[:emoji_deny_list],
           USER_ASSET_STRING: @current_user&.asset_string,
           OUTCOMES_NEW_DECAYING_AVERAGE_CALCULATION: @context.root_account.feature_enabled?(:outcomes_new_decaying_average_calculation),
+          assigned_rubric:,
+          rubric_association:
         }
 
         append_default_due_time_js_env(@context, hash)
@@ -764,6 +793,16 @@ class AssignmentsController < ApplicationController
     rce_js_env
     @assignment ||= @context.assignments.active.find(params[:id])
     add_crumb_on_new_quizzes(false)
+
+    if @context.root_account.feature_enabled?(:assignment_edit_enhancements_teacher_view) &&
+       authorized_action(@assignment, @current_user, @assignment.new_record? ? :create : :update)
+      js_env({ ASSIGNMENT_EDIT_ENHANCEMENTS_TEACHER_VIEW: true, ASSIGNMENT_ID: params[:id], COURSE_ID: @context.id })
+      css_bundle :assignment_enhancements_teacher_view
+      js_bundle :assignment_edit
+      render html: "", layout: true
+      return
+    end
+
     if authorized_action(@assignment, @current_user, @assignment.new_record? ? :create : :update)
       @assignment.title = params[:title] if params[:title]
       @assignment.due_at = params[:due_at] if params[:due_at]
@@ -789,7 +828,7 @@ class AssignmentsController < ApplicationController
 
       assignment_groups = @context.assignment_groups.active
       group_categories = @context.group_categories
-                                 .reject(&:student_organized?)
+                                 .reject { |c| c.student_organized? || c.non_collaborative? }
                                  .map { |c| { id: c.id, name: c.name } }
 
       # if assignment has student submissions and is attached to a deleted group category,

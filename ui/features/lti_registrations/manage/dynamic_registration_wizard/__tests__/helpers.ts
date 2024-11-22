@@ -18,19 +18,20 @@
 
 import type {LtiPlacement} from '../../model/LtiPlacement'
 import {ZLtiRegistrationId} from '../../model/LtiRegistrationId'
-import {LtiScopes} from '../../model/LtiScope'
+import {LtiScopes} from '@canvas/lti/model/LtiScope'
 import {ZDeveloperKeyId} from '../../model/developer_key/DeveloperKeyId'
 import type {LtiImsRegistration} from '../../model/lti_ims_registration/LtiImsRegistration'
 import {ZLtiImsRegistrationId} from '../../model/lti_ims_registration/LtiImsRegistrationId'
 import type {LtiConfiguration} from '../../model/lti_tool_configuration/LtiConfiguration'
 import type {DynamicRegistrationWizardService} from '../DynamicRegistrationWizardService'
 
-export const mockService = (
+export const mockDynamicRegistrationWizardService = (
   mocked?: Partial<DynamicRegistrationWizardService>
 ): DynamicRegistrationWizardService => ({
   fetchRegistrationToken: jest.fn(),
   deleteDeveloperKey: jest.fn(),
   getRegistrationByUUID: jest.fn(),
+  getRegistrationById: jest.fn(),
   updateDeveloperKeyWorkflowState: jest.fn(),
   updateRegistrationOverlay: jest.fn(),
   updateAdminNickname: jest.fn(),

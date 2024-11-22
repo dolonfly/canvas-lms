@@ -22,13 +22,11 @@ require "active_support/callbacks/suspension"
 class ActiveRecord::Base
   self.cache_timestamp_format = :usec
 
-  public :write_attribute
-
   class << self
     delegate :distinct_on, :find_ids_in_batches, :explain, to: :all
 
-    def find_ids_in_ranges(loose: true, **kwargs, &block)
-      all.find_ids_in_ranges(loose:, **kwargs, &block)
+    def find_ids_in_ranges(loose: true, **, &)
+      all.find_ids_in_ranges(loose:, **, &)
     end
 
     attr_accessor :in_migration
@@ -75,11 +73,6 @@ class ActiveRecord::Base
     end
   end
 
-  def read_or_initialize_attribute(attr_name, default_value)
-    # have to read the attribute again because serialized attributes in Rails 4.2 get duped
-    read_attribute(attr_name) || (write_attribute(attr_name, default_value) && read_attribute(attr_name))
-  end
-
   alias_method :clone, :dup
 
   # See ActiveModel#serializable_add_includes
@@ -90,7 +83,7 @@ class ActiveRecord::Base
   end
 
   def feed_code
-    id = uuid rescue self.id
+    id = try(:uuid) || self.id
     "#{self.class.reflection_type_name}_#{id}"
   end
 
@@ -206,8 +199,8 @@ class ActiveRecord::Base
         res = super
         if !res && #{string_version_name}.present?
           type, id = ActiveRecord::Base.parse_asset_string(#{string_version_name})
-          write_attribute(:#{association_version_name}_type, type)
-          write_attribute(:#{association_version_name}_id, id)
+          self["#{association_version_name}_type"] = type
+          self["#{association_version_name}_id"] = id
           res = super
         end
         res
@@ -231,7 +224,7 @@ class ActiveRecord::Base
     if respond_to?(:context)
       code = respond_to?(:context_code) ? context_code : context.asset_string
       @cached_context_name ||= Rails.cache.fetch(["short_name_lookup", code].cache_key) do
-        context.short_name rescue ""
+        context.short_name
       end
     else
       raise "Can only call cached_context_short_name on items with a context"
@@ -337,8 +330,8 @@ class ActiveRecord::Base
     self.class.to_s
   end
 
-  def sanitize_sql(*args)
-    self.class.send :sanitize_sql_for_conditions, *args
+  def sanitize_sql(*)
+    self.class.send(:sanitize_sql_for_conditions, *)
   end
 
   def self.reflection_type_name
@@ -353,8 +346,8 @@ class ActiveRecord::Base
     base_class
   end
 
-  ruby2_keywords def wildcard(*args)
-    self.class.wildcard(*args)
+  ruby2_keywords def wildcard(*)
+    self.class.wildcard(*)
   end
 
   def self.wildcard(*args, type: :full, delimiter: nil, case_sensitive: false)
@@ -699,9 +692,9 @@ class ActiveRecord::Base
     end
   end
 
-  def self.create_and_ignore_on_duplicate(*args)
+  def self.create_and_ignore_on_duplicate(*)
     # FIXME: handle array fields and setting of nulls where those are not the default
-    model = new(*args)
+    model = new(*)
     attributes = []
     values = []
 
@@ -729,7 +722,7 @@ class ActiveRecord::Base
         )
         SELECT * FROM new_row
         UNION
-        #{except(:select).where(*args).to_sql}
+        #{except(:select).where(*).to_sql}
       SQL
 
       find_by_sql(insert_sql).first
@@ -779,33 +772,33 @@ class ActiveRecord::Base
     override
   end
 
-  def self.with_pgvector(&)
-    vector_schema = connection.extension("vector").schema
-    connection.add_schema_to_search_path(vector_schema, &)
-  end
-
   def insert(on_conflict: -> { raise ActiveRecord::RecordNotUnique })
-    new_id = nil
-    timestamp = Time.now
+    validate!
 
     run_callbacks :save do
-      self.created_at ||= timestamp
-      self.updated_at ||= timestamp
+      run_callbacks :create do
+        timestamp = Time.now
 
-      content = attributes.compact
+        self.created_at ||= timestamp
+        self.updated_at ||= timestamp
 
-      result = self.class.insert(content)
-      new_id = result.first&.fetch("id")
+        content = attributes.compact
+
+        result = self.class.insert(content)
+        new_id = result.first&.fetch("id")
+
+        # if insert was not successful, return with callback
+        return on_conflict.call unless new_id
+
+        # otherwise update the state of the model
+        self.id = new_id
+        @new_record = false
+        @previously_new_record = true
+        changes_applied
+      end
     end
 
-    if new_id
-      self.id = new_id
-      changes_applied
-      @new_record = false
-      self
-    else
-      on_conflict.call
-    end
+    self
   end
 end
 
@@ -1221,13 +1214,13 @@ module UsefulBatchEnumerator
     enum
   end
 
-  def pluck(*args)
-    return to_enum(:pluck, *args) unless block_given?
+  def pluck(*)
+    return to_enum(:pluck, *) unless block_given?
 
     @relation.except(:select)
-             .select(*args)
+             .select(*)
              .in_batches(strategy: @strategy, load: false, **@kwargs) do |relation|
-      yield relation.pluck(*args)
+      yield relation.pluck(*)
     end
   end
 
@@ -1367,7 +1360,7 @@ ActiveRecord::Relation.class_eval do
 
     relation = clone
     old_select = relation.select_values
-    relation.select_values = [+"DISTINCT ON (#{args.join(", ")}) "]
+    relation.select_values = ["DISTINCT ON (#{args.join(", ")}) "]
     relation.distinct_value = false
 
     relation.select_values.first << (old_select.empty? ? "*" : old_select.uniq.join(", "))
@@ -1393,7 +1386,7 @@ ActiveRecord::Relation.class_eval do
       end.join(" UNION ALL ")
       return unscoped.where("#{table}.#{connection.quote_column_name(primary_key)} IN (#{sub_query})") unless from
 
-      sub_query = +"(#{sub_query}) #{(from == true) ? table : from}"
+      sub_query = "(#{sub_query}) #{(from == true) ? table : from}"
       unscoped.from(sub_query)
     end
   end
@@ -1509,7 +1502,7 @@ module UpdateAndDeleteWithJoins
   def delete_all
     return super if joins_values.empty?
 
-    sql = +"DELETE FROM #{quoted_table_name} "
+    sql = "DELETE FROM #{quoted_table_name} "
 
     join_sql = arel.join_sources.map(&:to_sql).join(" ")
     tables, join_conditions = deconstruct_joins(join_sql)
@@ -1596,21 +1589,6 @@ ActiveRecord::Associations::CollectionProxy.class_eval do
   end
 end
 
-ActiveRecord::ConnectionAdapters::AbstractAdapter.class_eval do
-  def bulk_insert(table_name, records)
-    keys = records.first.keys
-    quoted_keys = keys.map { |k| quote_column_name(k) }.join(", ")
-    records.each do |record|
-      execute <<~SQL.squish
-        INSERT INTO #{quote_table_name(table_name)}
-          (#{quoted_keys})
-        VALUES
-          (#{keys.map { |k| quote(record[k]) }.join(", ")})
-      SQL
-    end
-  end
-end
-
 class ActiveRecord::ConnectionAdapters::AbstractAdapter
   # for functions that differ from one adapter to the next, use the following
   # method (overriding as needed in non-standard adapters), e.g.
@@ -1685,7 +1663,7 @@ class ActiveRecord::Migration
 end
 
 class ActiveRecord::MigrationProxy
-  delegate :connection, :cassandra_cluster, to: :migration
+  delegate :connection, to: :migration
 
   def initialize(*)
     super
@@ -1756,7 +1734,7 @@ module Migrator
 end
 ActiveRecord::Migrator.prepend(Migrator)
 
-ActiveRecord::Migrator.migrations_paths.concat Dir[Rails.root.join("gems/plugins/*/db/migrate")]
+ActiveRecord::Migrator.migrations_paths.concat Rails.root.glob("gems/plugins/*/db/migrate")
 
 ActiveRecord::Tasks::DatabaseTasks.migrations_paths = ActiveRecord::Migrator.migrations_paths
 

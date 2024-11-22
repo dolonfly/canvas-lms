@@ -16,7 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import ReactDOM from 'react-dom'
+import ReactDOM from 'react-dom/client'
 import React from 'react'
 import {
   createBrowserRouter,
@@ -27,12 +27,10 @@ import {
 import {Spinner} from '@instructure/ui-spinner'
 import accountGradingSettingsRoutes from '../../features/account_grading_settings/routes/accountGradingSettingsRoutes'
 import {RubricRoutes} from '../../features/rubrics/routes/rubricRoutes'
+import {NewLoginRoutes} from '../../features/new_login/routes/NewLoginRoutes'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import {QueryProvider} from '@canvas/query'
-import {
-  LearnerPassportLearnerRoutes,
-  LearnerPassportAdminRoutes,
-} from '../../features/learner_passport/routes/LearnerPassportRoutes'
+import {AUPRoutes} from '../../features/acceptable_use_policy/routes/AUPRoutes'
 
 const portalRouter = createBrowserRouter(
   createRoutesFromElements(
@@ -44,6 +42,10 @@ const portalRouter = createBrowserRouter(
       <Route
         path="/users/:userId/masquerade"
         lazy={() => import('../../features/act_as_modal/react/ActAsModalRoute')}
+      />
+      <Route
+        path="/accounts"
+        lazy={() => import('../../features/account_manage/react/AccountListRoute')}
       />
 
       {accountGradingSettingsRoutes}
@@ -57,10 +59,11 @@ const portalRouter = createBrowserRouter(
           />
         ))}
 
-      {window.ENV.enhanced_rubrics_enabled && RubricRoutes}
+      {window.ENV.FEATURES.login_registration_ui_identity && NewLoginRoutes}
 
-      {window.ENV.FEATURES.learner_passport && LearnerPassportLearnerRoutes}
-      {window.ENV.FEATURES.learner_passport && LearnerPassportAdminRoutes}
+      {AUPRoutes}
+
+      {window.ENV.enhanced_rubrics_enabled && RubricRoutes}
 
       <Route path="*" element={<></>} />
     </Route>
@@ -72,14 +75,14 @@ export function loadReactRouter() {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const I18n = useI18nScope('main')
   if (mountNode) {
-    ReactDOM.render(
+    const root = ReactDOM.createRoot(mountNode)
+    root.render(
       <QueryProvider>
         <RouterProvider
           router={portalRouter}
           fallbackElement={<Spinner renderTitle={I18n.t('Loading page')} />}
         />
-      </QueryProvider>,
-      mountNode
+      </QueryProvider>
     )
   }
 }

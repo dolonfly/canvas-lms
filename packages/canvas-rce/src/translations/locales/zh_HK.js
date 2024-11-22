@@ -287,7 +287,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "編輯圖示" },
   "edit_link_7f53bebb": { "message": "編輯連結" },
-  "editor_statusbar_26ac81fc": { "message": "編輯器狀態欄" },
+  "editor_status_bar_653f44ee": { "message": "編輯器狀態列" },
   "element_starting_with_start_91bf4c3b": {
     "message": "以 { start } 開始的元素"
   },
@@ -549,6 +549,7 @@ const locale = {
   },
   "links_14b70841": { "message": "連結" },
   "links_to_an_external_site_de74145d": { "message": "連結到外部網站。" },
+  "lists_cd1336fc": { "message": "清單" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "列表應使用清單格式。"
   },
@@ -916,6 +917,7 @@ const locale = {
   "studio_media_options_tray_cfb94654": { "message": "Studio 媒體選項收集箱" },
   "styles_2aa721ef": { "message": "樣式" },
   "submit_a3cc6859": { "message": "提交" },
+  "submitting_b90fac62": { "message": "正在提交..." },
   "subscript_59744f96": { "message": "下標" },
   "subset_19c1a92f": { "message": "子集合" },
   "subset_strict_8d8948d6": { "message": "子集合（嚴格）" },

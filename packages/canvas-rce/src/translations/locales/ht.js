@@ -302,7 +302,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Chanje Ikòn" },
   "edit_link_7f53bebb": { "message": "Chanje Lyen" },
-  "editor_statusbar_26ac81fc": { "message": "Editè Ba Estati" },
+  "editor_status_bar_653f44ee": { "message": "Ba Eta Editè" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Eleman kòmanse a { start }"
   },
@@ -584,6 +584,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Lyen pou ale sou sit ekstèn."
   },
+  "lists_cd1336fc": { "message": "Lis" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Lis yo dwe fòmate tankou lis."
   },
@@ -981,6 +982,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Stil" },
   "submit_a3cc6859": { "message": "Soumèt" },
+  "submitting_b90fac62": { "message": "Soumisyon..." },
   "subscript_59744f96": { "message": "Endis" },
   "subset_19c1a92f": { "message": "Sou Ansanm" },
   "subset_strict_8d8948d6": { "message": "Sou ansanm (Estrik)" },

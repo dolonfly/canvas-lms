@@ -647,8 +647,8 @@
     "edit_link_7f53bebb": {
         "message": "Rediger link"
     },
-    "editor_statusbar_26ac81fc": {
-        "message": "Editor-statusbar"
+    "editor_status_bar_653f44ee": {
+        "message": "Redaktørstatuslinje"
     },
     "element_starting_with_start_91bf4c3b": {
         "message": "Element begynder med { start }"
@@ -1294,6 +1294,9 @@
     },
     "links_to_an_external_site_de74145d": {
         "message": "Links til en ekstern webside."
+    },
+    "lists_cd1336fc": {
+        "message": "Lister"
     },
     "lists_should_be_formatted_as_lists_f862de8d": {
         "message": "Lister skal have listeformat."
@@ -2176,6 +2179,9 @@
     },
     "submit_a3cc6859": {
         "message": "Aflever"
+    },
+    "submitting_b90fac62": {
+        "message": "Afleverer ..."
     },
     "subscript_59744f96": {
         "message": "Sænket skrift"

@@ -358,6 +358,136 @@ describe LearningObjectDatesController do
                                })
     end
 
+    it "returns correct date details for a checkpointed discussion" do
+      @course.root_account.enable_feature!(:discussion_checkpoints)
+      discussion = DiscussionTopic.create_graded_topic!(course: @course, title: "graded topic")
+
+      c1_due_at = "2022-05-05T12:00:00Z"
+      c1_unlock_at = "2022-05-04T12:00:00Z"
+      c1_lock_at = "2022-05-08T12:00:00Z"
+      c1_override_due_at = "2022-04-06T12:00:00Z"
+      c1_override_unlock_at = "2022-04-05T12:00:00Z"
+      c1_override_lock_at = "2022-04-07T12:00:00Z"
+
+      Checkpoints::DiscussionCheckpointCreatorService.call(
+        discussion_topic: discussion,
+        checkpoint_label: CheckpointLabels::REPLY_TO_TOPIC,
+        dates: [
+          {
+            type: "everyone",
+            due_at: c1_due_at,
+            unlock_at: c1_unlock_at,
+            lock_at: c1_lock_at,
+          },
+          {
+            type: "override",
+            set_type: "CourseSection",
+            set_id: @course.default_section.id,
+            due_at: c1_override_due_at,
+            unlock_at: c1_override_unlock_at,
+            lock_at: c1_override_lock_at
+          },
+        ],
+        points_possible: 5
+      )
+
+      c2_due_at = "2022-05-06T12:00:00Z"
+      c2_unlock_at = "2022-05-05T12:00:00Z"
+      c2_lock_at = "2022-05-07T12:00:00Z"
+      c2_override_due_at = "2022-04-06T12:00:00Z"
+      c2_override_unlock_at = "2022-04-05T12:00:00Z"
+      c2_override_lock_at = "2022-04-07T12:00:00Z"
+
+      Checkpoints::DiscussionCheckpointCreatorService.call(
+        discussion_topic: discussion,
+        checkpoint_label: CheckpointLabels::REPLY_TO_ENTRY,
+        dates: [
+          {
+            type: "everyone",
+            due_at: c2_due_at,
+            unlock_at: c2_unlock_at,
+            lock_at: c2_lock_at,
+          },
+          {
+            type: "override",
+            set_type: "CourseSection",
+            set_id: @course.default_section.id,
+            due_at: c2_override_due_at,
+            unlock_at: c2_override_unlock_at,
+            lock_at: c2_override_lock_at
+          },
+        ],
+        points_possible: 10,
+        replies_required: 2
+      )
+
+      # Refresh the discussion object to get the updated dates
+      discussion.reload
+
+      get :show, params: { course_id: @course.id, discussion_topic_id: discussion.id }
+      expect(response).to be_successful
+      json = json_parse
+
+      # Test base discussion attributes
+      expect(json).to include(
+        "id" => discussion.id,
+        "due_at" => nil,
+        "unlock_at" => c2_unlock_at,  # Should be synced to the latest unlock_at
+        "lock_at" => c2_lock_at,      # Should be synced to the latest lock_at
+        "only_visible_to_overrides" => false,
+        "visible_to_everyone" => true,
+        "group_category_id" => nil,
+        "graded" => true
+      )
+
+      # Test checkpoints
+      expect(json["checkpoints"].length).to eq(2)
+
+      # Find checkpoints by tag
+      reply_to_topic = json["checkpoints"].find { |cp| cp["tag"] == CheckpointLabels::REPLY_TO_TOPIC }
+      reply_to_entry = json["checkpoints"].find { |cp| cp["tag"] == CheckpointLabels::REPLY_TO_ENTRY }
+
+      # Test reply_to_topic checkpoint
+      expect(reply_to_topic).to include(
+        "tag" => CheckpointLabels::REPLY_TO_TOPIC,
+        "due_at" => c1_due_at,
+        "unlock_at" => c2_unlock_at,  # Should be synced to the latest unlock_at
+        "lock_at" => c2_lock_at,      # Should be synced to the latest lock_at
+        "only_visible_to_overrides" => false,
+        "points_possible" => 5.0
+      )
+
+      expect(reply_to_topic["overrides"][0]).to include(
+        "title" => "Unnamed Course",
+        "due_at" => c1_override_due_at,
+        "all_day" => false,
+        "all_day_date" => c1_override_due_at.to_date.to_s,
+        "unlock_at" => c1_override_unlock_at,
+        "lock_at" => c1_override_lock_at,
+        "course_section_id" => @course.default_section.id
+      )
+
+      # Test reply_to_entry checkpoint
+      expect(reply_to_entry).to include(
+        "tag" => CheckpointLabels::REPLY_TO_ENTRY,
+        "due_at" => c2_due_at,
+        "unlock_at" => c2_unlock_at,
+        "lock_at" => c2_lock_at,
+        "only_visible_to_overrides" => false,
+        "points_possible" => 10.0
+      )
+
+      expect(reply_to_entry["overrides"][0]).to include(
+        "title" => "Unnamed Course",
+        "due_at" => c2_override_due_at,
+        "all_day" => false,
+        "all_day_date" => c2_override_due_at.to_date.to_s,
+        "unlock_at" => c2_override_unlock_at,
+        "lock_at" => c2_override_lock_at,
+        "course_section_id" => @course.default_section.id
+      )
+    end
+
     it "returns date details for a file" do
       attachment = @course.attachments.create!(filename: "coolpdf.pdf",
                                                uploaded_data: StringIO.new("test"),
@@ -846,6 +976,301 @@ describe LearningObjectDatesController do
         RoleOverride.create!(context: @course.account, permission: "manage_assignments_edit", role: teacher_role, enabled: false)
         put :update, params: { **default_params, unlock_at: "2021-01-01T00:00:00Z" }
         expect(response).to be_unauthorized
+      end
+    end
+
+    context "checkpointed discussions" do
+      before do
+        @course.root_account.enable_feature! :discussion_checkpoints
+
+        @default_override_due_at = "2022-01-02T05:00:00Z"
+        @default_override_unlock_at = "2022-01-01T00:00:00Z"
+        @default_override_lock_at = "2022-01-03T01:00:00Z"
+
+        discussion = DiscussionTopic.create_graded_topic!(course: @course, title: "checkpointed discussion")
+        Checkpoints::DiscussionCheckpointCreatorService.call(
+          discussion_topic: discussion,
+          checkpoint_label: CheckpointLabels::REPLY_TO_TOPIC,
+          dates: [
+            {
+              type: "everyone",
+              due_at: default_due_date[:due_at],
+              unlock_at: default_availability_dates[:unlock_at],
+              lock_at: default_availability_dates[:lock_at],
+            },
+            {
+              type: "override",
+              set_type: "CourseSection",
+              set_id: @course.default_section.id,
+              due_at: @default_override_due_at,
+              unlock_at: @default_override_unlock_at,
+              lock_at: @default_override_lock_at
+            },
+          ],
+          points_possible: 5
+        )
+
+        Checkpoints::DiscussionCheckpointCreatorService.call(
+          discussion_topic: discussion,
+          checkpoint_label: CheckpointLabels::REPLY_TO_ENTRY,
+          dates: [
+            {
+              type: "everyone",
+              due_at: default_due_date[:due_at],
+              unlock_at: default_availability_dates[:unlock_at],
+              lock_at: default_availability_dates[:lock_at],
+            },
+            {
+              type: "override",
+              set_type: "CourseSection",
+              set_id: @course.default_section.id,
+              due_at: @default_override_due_at,
+              unlock_at: @default_override_unlock_at,
+              lock_at: @default_override_lock_at
+            },
+          ],
+          points_possible: 10,
+          replies_required: 2
+        )
+        @discussion = discussion.reload
+
+        @default_params = {
+          course_id: @course.id,
+          discussion_topic_id: @discussion.id
+        }
+      end
+
+      it "updates overrides" do
+        override_params = [{ id: @discussion.assignment.assignment_overrides.first.id, unlock_at: "2020-02-01T01:00:00Z" }]
+        override_params[0][:reply_to_topic_due_at] = "2024-02-02T01:00:00Z"
+        override_params[0][:required_replies_due_at] = "2024-02-03T01:00:00Z"
+
+        put :update, params: { **@default_params, assignment_overrides: override_params }
+        expect(response).to be_no_content
+
+        # Verify that the everyone override did not change
+        expect(@discussion.assignment.sub_assignments.first.due_at).to eq default_due_date[:due_at]
+        expect(@discussion.assignment.sub_assignments.first.unlock_at).to eq default_availability_dates[:unlock_at]
+        expect(@discussion.assignment.sub_assignments.first.lock_at).to eq default_availability_dates[:lock_at]
+
+        # Verify that the parent_override dates were updated correctly
+        expect(@discussion.assignment.assignment_overrides.active.count).to eq 1
+        expect(@discussion.assignment.assignment_overrides.first.unlock_at).to eq "2020-02-01T01:00:00Z"
+
+        # Get the correct sub_assignments
+        reply_to_topic = @discussion.assignment.sub_assignments.find do |sub_assignment|
+          sub_assignment.sub_assignment_tag == CheckpointLabels::REPLY_TO_TOPIC
+        end
+        reply_to_entry = @discussion.assignment.sub_assignments.find do |sub_assignment|
+          sub_assignment.sub_assignment_tag == CheckpointLabels::REPLY_TO_ENTRY
+        end
+
+        # Verify that the sub_assignment overrides were updated correctly
+        expect(reply_to_topic.assignment_overrides.active.count).to eq 1
+        expect(reply_to_topic.assignment_overrides.first.due_at).to eq "2024-02-02T01:00:00Z"
+        expect(reply_to_topic.assignment_overrides.first.unlock_at).to eq "2020-02-01T01:00:00Z"
+
+        expect(reply_to_entry.assignment_overrides.active.count).to eq 1
+        expect(reply_to_entry.assignment_overrides.first.due_at).to eq "2024-02-03T01:00:00Z"
+        expect(reply_to_entry.assignment_overrides.first.unlock_at).to eq "2020-02-01T01:00:00Z"
+      end
+
+      it "updates base dates" do
+        request_params = {
+          **@default_params,
+          reply_to_topic_due_at: "2023-01-02T05:00:00Z",
+          required_replies_due_at: "2023-01-02T05:00:00Z",
+          unlock_at: "2023-01-01T00:00:00Z",
+          lock_at: "2023-01-07T08:00:00Z",
+          only_visible_to_overrides: false
+        }
+
+        put :update, params: request_params
+        expect(response).to be_no_content
+        @discussion.reload
+        expect(@discussion.assignment.unlock_at.iso8601).to eq "2023-01-01T00:00:00Z"
+        expect(@discussion.assignment.lock_at.iso8601).to eq "2023-01-07T08:00:00Z"
+        expect(@discussion.assignment.only_visible_to_overrides).to be false
+
+        expect(@discussion.assignment.sub_assignments.first.due_at.iso8601).to eq request_params[:reply_to_topic_due_at]
+        expect(@discussion.assignment.sub_assignments.second.due_at.iso8601).to eq request_params[:required_replies_due_at]
+      end
+
+      it "does not touch other object attributes" do
+        original_title = @discussion.title
+        put :update, params: { **@default_params, reply_to_topic_due_at: "2022-01-02T01:00:00Z" }
+        expect(response).to be_no_content
+        expect(@discussion.reload.title).to eq original_title
+      end
+
+      it "works if only some arguments are passed" do
+        put :update, params: { **@default_params, unlock_at: "2020-01-01T00:00:00Z" }
+        expect(response).to be_no_content
+        updated_discussion_assigment = @discussion.assignment.reload
+        expect(updated_discussion_assigment.unlock_at.iso8601).to eq "2020-01-01T00:00:00Z"
+        expect(updated_discussion_assigment.lock_at.iso8601).to eq "2022-01-03T01:00:00Z"
+      end
+
+      it "removes overrides" do
+        expect(@discussion.assignment.assignment_overrides.active.count).to eq 1
+        put :update, params: { **@default_params, assignment_overrides: [] }
+        expect(response).to be_no_content
+        @discussion.reload
+        expect(@discussion.assignment.assignment_overrides.active.count).to eq 0
+      end
+
+      it "updates multiple overrides" do
+        student2 = student_in_course(name: "Student 2").user
+        section2 = @course.course_sections.create!(name: "Section 2")
+
+        put :update, params: {
+          **@default_params,
+          assignment_overrides: [
+            { course_section_id: section2.id, unlock_at: "2024-01-01T01:00:00Z", reply_to_topic_due_at: "2024-01-15T01:00:00Z", required_replies_due_at: "2024-01-20T01:00:00Z" },
+            { student_ids: [student2.id], unlock_at: "2024-02-01T01:00:00Z", reply_to_topic_due_at: "2024-02-15T01:00:00Z", required_replies_due_at: "2024-02-20T01:00:00Z" }
+          ]
+        }
+
+        expect(response).to be_no_content
+        @discussion.reload
+
+        # Check the number of active overrides
+        expect(@discussion.assignment.assignment_overrides.active.count).to eq 2
+
+        # Find sub-assignments
+        reply_to_topic = @discussion.assignment.sub_assignments.find { |sa| sa.sub_assignment_tag == CheckpointLabels::REPLY_TO_TOPIC }
+        reply_to_entry = @discussion.assignment.sub_assignments.find { |sa| sa.sub_assignment_tag == CheckpointLabels::REPLY_TO_ENTRY }
+
+        # Check the number of active overrides for each sub-assignment
+        expect(reply_to_topic.assignment_overrides.active.count).to eq 2
+        expect(reply_to_entry.assignment_overrides.active.count).to eq 2
+
+        # Course Section Override checks
+        course_section_parent_override = @discussion.assignment.assignment_overrides.active.find { |ao| ao.set_type == "CourseSection" }
+        course_section_reply_to_topic_override = reply_to_topic.assignment_overrides.active.find { |ao| ao.set_type == "CourseSection" }
+        course_section_reply_to_entry_override = reply_to_entry.assignment_overrides.active.find { |ao| ao.set_type == "CourseSection" }
+
+        expect(course_section_parent_override.set).to eq section2
+        expect(course_section_parent_override.unlock_at.iso8601).to eq "2024-01-01T01:00:00Z"
+        expect(course_section_parent_override.due_at).to be_nil
+        expect(course_section_parent_override.lock_at).to be_nil
+
+        expect(course_section_reply_to_topic_override.set).to eq section2
+        expect(course_section_reply_to_topic_override.unlock_at.iso8601).to eq "2024-01-01T01:00:00Z"
+        expect(course_section_reply_to_topic_override.due_at.iso8601).to eq "2024-01-15T01:00:00Z"
+        expect(course_section_reply_to_topic_override.lock_at).to be_nil
+
+        expect(course_section_reply_to_entry_override.set).to eq section2
+        expect(course_section_reply_to_entry_override.unlock_at.iso8601).to eq "2024-01-01T01:00:00Z"
+        expect(course_section_reply_to_entry_override.due_at.iso8601).to eq "2024-01-20T01:00:00Z"
+        expect(course_section_reply_to_entry_override.lock_at).to be_nil
+
+        # Student Override checks
+        student_parent_override = @discussion.assignment.assignment_overrides.active.find { |ao| ao.set_type == "ADHOC" }
+        student_reply_to_topic_override = reply_to_topic.assignment_overrides.active.find { |ao| ao.set_type == "ADHOC" }
+        student_reply_to_entry_override = reply_to_entry.assignment_overrides.active.find { |ao| ao.set_type == "ADHOC" }
+
+        expect(student_parent_override.set).to eq [student2]
+        expect(student_parent_override.unlock_at.iso8601).to eq "2024-02-01T01:00:00Z"
+        expect(student_parent_override.due_at).to be_nil
+        expect(student_parent_override.lock_at).to be_nil
+
+        expect(student_reply_to_topic_override.set).to eq [student2]
+        expect(student_reply_to_topic_override.unlock_at.iso8601).to eq "2024-02-01T01:00:00Z"
+        expect(student_reply_to_topic_override.due_at.iso8601).to eq "2024-02-15T01:00:00Z"
+        expect(student_reply_to_topic_override.lock_at).to be_nil
+
+        expect(student_reply_to_entry_override.set).to eq [student2]
+        expect(student_reply_to_entry_override.unlock_at.iso8601).to eq "2024-02-01T01:00:00Z"
+        expect(student_reply_to_entry_override.due_at.iso8601).to eq "2024-02-20T01:00:00Z"
+        expect(student_reply_to_entry_override.lock_at).to be_nil
+      end
+
+      it "returns not_found if discussion is deleted" do
+        @discussion.destroy!
+        put :update, params: { **@default_params, reply_to_topic_due_at: "2020-03-02T05:59:00Z" }
+        expect(response).to be_not_found
+      end
+
+      it "returns not_found if discussion is not in course" do
+        course_with_teacher(active_all: true, user: @teacher)
+        put :update, params: { **@default_params, course_id: @course.id, reply_to_topic_due_at: "2020-03-02T05:59:00Z" }
+        expect(response).to be_not_found
+      end
+
+      it "returns unauthorized for students" do
+        course_with_student_logged_in(course: @course)
+        put :update, params: { **@default_params, unlock_at: "2020-03-02T05:59:00Z" }
+        expect(response).to be_unauthorized
+      end
+    end
+
+    context "basic checkpointed discussions w/all dates" do
+      before do
+        @course.root_account.enable_feature! :discussion_checkpoints
+
+        @reply_to_topic_due_at = 7.days.from_now
+        @reply_to_entry_due_at = 14.days.from_now
+        @unlock_at = 5.days.from_now
+        @lock_at = 16.days.from_now
+
+        discussion = DiscussionTopic.create_graded_topic!(course: @course, title: "checkpointed discussion")
+
+        Checkpoints::DiscussionCheckpointCreatorService.call(
+          discussion_topic: discussion,
+          checkpoint_label: CheckpointLabels::REPLY_TO_TOPIC,
+          dates: [
+            {
+              type: "everyone",
+              due_at: @reply_to_topic_due_at,
+              unlock_at: @unlock_at,
+              lock_at: @lock_at,
+            },
+          ],
+          points_possible: 5
+        )
+
+        Checkpoints::DiscussionCheckpointCreatorService.call(
+          discussion_topic: discussion,
+          checkpoint_label: CheckpointLabels::REPLY_TO_ENTRY,
+          dates: [
+            {
+              type: "everyone",
+              due_at: @reply_to_entry_due_at,
+              unlock_at: @unlock_at,
+              lock_at: @lock_at,
+            },
+          ],
+          points_possible: 15,
+          replies_required: 3
+        )
+
+        @discussion = discussion.reload
+
+        @default_params = {
+          course_id: @course.id,
+          discussion_topic_id: @discussion.id
+        }
+      end
+
+      it "clearing all dates updates as expected" do
+        put :update, params: { **@default_params, unlock_at: nil, lock_at: nil, reply_to_topic_due_at: nil, required_replies_due_at: nil }
+        expect(response).to be_no_content
+
+        @discussion.reload
+
+        reply_to_topic_checkpoint = @discussion.assignment.sub_assignments.find { |sa| sa.sub_assignment_tag == CheckpointLabels::REPLY_TO_TOPIC }
+        reply_to_entry_checkpoint = @discussion.assignment.sub_assignments.find { |sa| sa.sub_assignment_tag == CheckpointLabels::REPLY_TO_ENTRY }
+
+        expect(reply_to_topic_checkpoint.due_at).to be_nil
+        expect(reply_to_topic_checkpoint.unlock_at).to be_nil
+        expect(reply_to_topic_checkpoint.lock_at).to be_nil
+        expect(reply_to_topic_checkpoint.only_visible_to_overrides).to be false
+
+        expect(reply_to_entry_checkpoint.due_at).to be_nil
+        expect(reply_to_entry_checkpoint.unlock_at).to be_nil
+        expect(reply_to_entry_checkpoint.lock_at).to be_nil
+        expect(reply_to_entry_checkpoint.only_visible_to_overrides).to be false
       end
     end
 

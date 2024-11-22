@@ -29,7 +29,7 @@ import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {Text} from '@instructure/ui-text'
 import {Heading} from '@instructure/ui-heading'
 import {Spinner} from '@instructure/ui-spinner'
-import ItemAssignToTray from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToTray'
+import ItemAssignToManager from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToManager'
 
 import DirectShareCourseTray from '@canvas/direct-sharing/react/components/DirectShareCourseTray'
 import DirectShareUserModal from '@canvas/direct-sharing/react/components/DirectShareUserModal'
@@ -45,6 +45,7 @@ import {
 } from './DiscussionBackgrounds'
 import {ConnectedIndexHeader} from './IndexHeader'
 import DiscussionsDeleteModal from './DiscussionsDeleteModal'
+import DisallowThreadedFixAlert from './DisallowThreadedFixAlert'
 
 import {renderTray} from '@canvas/move-item-tray'
 import select from '@canvas/obj-select'
@@ -55,6 +56,8 @@ import actions from '../actions'
 import {reorderDiscussionsURL} from '../utils'
 import {CONTENT_SHARE_TYPES} from '@canvas/content-sharing/react/proptypes/contentShare'
 import WithBreakpoints, {breakpointsShape} from '@canvas/with-breakpoints'
+import TopNavPortalWithDefaults from '@canvas/top-navigation/react/TopNavPortalWithDefaults'
+
 const I18n = useI18nScope('discussions_v2')
 
 export default class DiscussionsIndex extends Component {
@@ -324,7 +327,7 @@ export default class DiscussionsIndex extends Component {
         {ENV?.FEATURES?.selective_release_ui_api &&
           this.state.showAssignToTray &&
           this.props.contextType === 'course' && (
-            <ItemAssignToTray
+            <ItemAssignToManager
               open={this.state.showAssignToTray}
               onClose={this.closeAssignToTray}
               onDismiss={this.closeAssignToTray}
@@ -337,6 +340,7 @@ export default class DiscussionsIndex extends Component {
               locale={ENV.LOCALE || 'en'}
               timezone={ENV.TIMEZONE || 'UTC'}
               removeDueDateInput={!this.state?.discussionDetails?.assignment_id}
+              isCheckpointed={this.state?.discussionDetails.is_checkpointed}
             />
           )}
       </View>
@@ -345,17 +349,24 @@ export default class DiscussionsIndex extends Component {
 
   render() {
     return (
-      <div className="discussions-v2__wrapper">
-        <ScreenReaderContent>
-          <Heading level="h1">{I18n.t('Discussions')}</Heading>
-        </ScreenReaderContent>
-        <ConnectedIndexHeader />
-        {this.props.isLoadingDiscussions
-          ? this.renderSpinner(I18n.t('Loading Discussions'))
-          : this.props.permissions.moderate || this.props.DIRECT_SHARE_ENABLED
-          ? this.renderTeacherView()
-          : this.renderStudentView()}
-      </div>
+      <>
+        <TopNavPortalWithDefaults
+          currentPageName={I18n.t('Discussions')}
+          useStudentView={true}
+        />
+        <div className="discussions-v2__wrapper">
+          <ScreenReaderContent>
+            <Heading level="h1">{I18n.t('Discussions')}</Heading>
+          </ScreenReaderContent>
+          <ConnectedIndexHeader breakpoints={this.props.breakpoints} />
+          {ENV?.FEATURES?.disallow_threaded_replies_fix_alert && <DisallowThreadedFixAlert />}
+          {this.props.isLoadingDiscussions
+            ? this.renderSpinner(I18n.t('Loading Discussions'))
+            : this.props.permissions.moderate || this.props.DIRECT_SHARE_ENABLED
+            ? this.renderTeacherView()
+            : this.renderStudentView()}
+        </div>
+      </>
     )
   }
 }

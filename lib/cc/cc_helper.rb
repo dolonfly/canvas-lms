@@ -202,8 +202,6 @@ module CC
       linked_objects
     end
 
-    require "set"
-
     class HtmlContentExporter
       attr_reader :course, :user, :used_media_objects, :media_object_flavor, :media_object_infos
       attr_accessor :referenced_files, :referenced_assessment_question_files
@@ -471,6 +469,14 @@ module CC
       # media object, the file will get reactivated when they export
       unless attachment
         att = obj.attachment || Attachment.find_by(media_entry_id: obj.media_id)
+        if course && !att
+          unless obj.context_id
+            obj.context = course
+            obj.save
+          end
+          obj.create_attachment
+          att = obj.attachment
+        end
         attachment = att.copy_to_folder!(Folder.media_folder(course))
       end
       updates = {}

@@ -306,7 +306,7 @@
   },
   "edit_icon_2c6b0e91": { "message": "Uredi ikono" },
   "edit_link_7f53bebb": { "message": "Uredi povezavo" },
-  "editor_statusbar_26ac81fc": { "message": "Vrstica stanja urejevalnika" },
+  "editor_status_bar_653f44ee": { "message": "Statusna vrstica urejevalnika" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Element, ki se začne s/z { start }"
   },
@@ -600,6 +600,7 @@
   "links_to_an_external_site_de74145d": {
     "message": "Povezave na zunanje mesto."
   },
+  "lists_cd1336fc": { "message": "Seznami" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Seznami morajo biti oblikovani kot seznami."
   },
@@ -1035,6 +1036,7 @@
   },
   "styles_2aa721ef": { "message": "Slogi" },
   "submit_a3cc6859": { "message": "Pošlji" },
+  "submitting_b90fac62": { "message": "Pošiljanje ..." },
   "subscript_59744f96": { "message": "Podpisano" },
   "subset_19c1a92f": { "message": "Podmnožica" },
   "subset_strict_8d8948d6": { "message": "Podmnožica (strogo)" },

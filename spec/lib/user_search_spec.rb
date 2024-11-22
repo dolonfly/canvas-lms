@@ -259,7 +259,7 @@ describe UserSearch do
 
       it "returns the last_login column when searching and sorting" do
         results = UserSearch.for_user_in_context("UNIQUE_ID", course, user, nil, sort: "last_login")
-        expect(results.first.read_attribute("last_login")).to eq(Time.utc(2019, 11, 11))
+        expect(results.first["last_login"]).to eq(Time.utc(2019, 11, 11))
       end
 
       it "can match an SIS id and a user name in the same query" do
@@ -291,6 +291,17 @@ describe UserSearch do
                                                                account_id: course.root_account_id)
         users = UserSearch.for_user_in_context("Tyler", course, user, nil, sort: "integration_id")
         expect(users.map(&:name)).to eq ["Tyler Pickett", "Rose Tyler", "Tyler Teacher"]
+      end
+
+      it "chooses user pseudonym based on collation_key" do
+        # the unique_id "a" is the chosen pseudonym since we sort by collation_key
+        User.find_by(name: "Rose Tyler").pseudonyms.create!(unique_id: "b", sis_user_id: "9", account_id: course.root_account_id)
+        User.find_by(name: "Rose Tyler").pseudonyms.create!(unique_id: "a", sis_user_id: "1", account_id: course.root_account_id)
+        User.find_by(name: "Tyler Pickett").pseudonyms.create!(unique_id: "tyler.pickett@example.com",
+                                                               sis_user_id: "5",
+                                                               account_id: course.root_account_id)
+        users = UserSearch.for_user_in_context("Tyler", course, user, nil, sort: "sis_id")
+        expect(users.map(&:name)).to eq ["Rose Tyler", "Tyler Pickett", "Tyler Teacher"]
       end
 
       it "does not return users twice if it matches their name and an old login" do
@@ -369,6 +380,16 @@ describe UserSearch do
           course.enroll_student(user)
           expect(UserSearch.for_user_in_context(user.global_id, course, user)).to eq [user]
           expect(UserSearch.for_user_in_context(user.global_id, course.account, user)).to eq [user]
+        end
+
+        it "doesn't try to query cross-shard when the search term is a foreign global id in account context with include_deleted_users" do
+          user = @shard1.activate { user_model }
+          course.enroll_student(user)
+          scope = UserSearch.for_user_in_context(user.global_id, Account.default, account_admin_user, nil, include_deleted_users: true)
+          sql = scope.to_sql
+          expect(sql).to include user.global_id.to_s
+          expect(sql).not_to include(@shard1.activate { User.quoted_table_name })
+          expect(scope).to include user
         end
       end
     end

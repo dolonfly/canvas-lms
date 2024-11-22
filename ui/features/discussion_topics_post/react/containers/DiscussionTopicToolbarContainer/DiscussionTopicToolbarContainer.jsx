@@ -28,6 +28,8 @@ import {
 import {View} from '@instructure/ui-view'
 import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {TranslationControls} from '../../components/TranslationControls/TranslationControls'
+import {useMutation} from '@apollo/react-hooks'
+import {UPDATE_DISCUSSION_SORT_ORDER, UPDATE_DISCUSSION_EXPANDED} from '../../../graphql/Mutations'
 
 export const DiscussionTopicToolbarContainer = props => {
   const {searchTerm, filter, sort, setSearchTerm, setFilter, setSort} = useContext(SearchContext)
@@ -48,8 +50,31 @@ export const DiscussionTopicToolbarContainer = props => {
     setFilter(value.value)
   }
 
+  const [updateDiscussionSortOrder] = useMutation(UPDATE_DISCUSSION_SORT_ORDER)
+  const [updateDiscussionExpanded] = useMutation(UPDATE_DISCUSSION_EXPANDED)
+
   const onSortClick = () => {
-    sort === 'asc' ? setSort('desc') : setSort('asc')
+    let newOrder = null
+    if (sort === null) {
+      newOrder = props.discussionTopic.sortOrder === 'asc' ? 'desc' : 'asc'
+    } else {
+      newOrder = sort === 'asc' ? 'desc' : 'asc'
+    }
+    setSort(newOrder)
+    updateDiscussionSortOrder({
+      variables: {
+        discussionTopicId: props.discussionTopic._id,
+        sortOrder: newOrder,
+      },
+    })
+  }
+  const onExpandCollapseClick = bool => {
+    updateDiscussionExpanded({
+      variables: {
+        discussionTopicId: props.discussionTopic._id,
+        expanded: bool,
+      },
+    })
   }
 
   const onSummarizeClick = () => {
@@ -79,12 +104,12 @@ export const DiscussionTopicToolbarContainer = props => {
         canEdit={props.discussionTopic.permissions.update}
         childTopics={getGroupsMenuTopics()}
         selectedView={filter}
-        sortDirection={sort}
-        isCollapsedReplies={true}
+        sortDirection={props.discussionTopic.sortOrder}
+        isExpanded={props.discussionTopic.expanded}
         onSearchChange={value => setCurrentSearchValue(value)}
         onViewFilter={onViewFilter}
         onSortClick={onSortClick}
-        onCollapseRepliesToggle={() => {}}
+        onCollapseRepliesToggle={onExpandCollapseClick}
         onTopClick={() => {}}
         searchTerm={currentSearchValue}
         discussionAnonymousState={props.discussionTopic.anonymousState}
@@ -103,6 +128,7 @@ export const DiscussionTopicToolbarContainer = props => {
         contextType={props.discussionTopic.contextType}
         manageAssignTo={props.discussionTopic.permissions.manageAssignTo}
         isGroupDiscussion={props.discussionTopic.groupSet !== null}
+        isCheckpointed={props?.discussionTopic?.assignment?.checkpoints?.length > 0}
       />
       {showTranslationControl && <TranslationControls />}
     </View>

@@ -22,11 +22,15 @@ class Lti::IMS::Registration < ApplicationRecord
   extend RootAccountResolver
   self.table_name = "lti_ims_registrations"
 
-  REQUIRED_GRANT_TYPES = ["client_credentials", "implicit"].freeze
-  REQUIRED_RESPONSE_TYPES = ["id_token"].freeze
+  # These attributes are in the spec (config JSON) but not stored in the
+  # database because the particular values are required/implied.
+  IMPLIED_SPEC_ATTRIBUTES = %w[grant_types response_types application_type token_endpoint_auth_method].freeze
+  REQUIRED_GRANT_TYPES = %w[client_credentials implicit].freeze
+  REQUIRED_RESPONSE_TYPE = "id_token"
   REQUIRED_APPLICATION_TYPE = "web"
   REQUIRED_TOKEN_ENDPOINT_AUTH_METHOD = "private_key_jwt"
-  PLACEMENT_VISIBILITY_OPTIONS = %(admins members public)
+
+  PLACEMENT_VISIBILITY_OPTIONS = %w[admins members public].freeze
 
   CANVAS_EXTENSION_LABEL = "canvas.instructure.com"
   CANVAS_EXTENSION_PREFIX = "https://#{CANVAS_EXTENSION_LABEL}/lti".freeze
@@ -38,8 +42,6 @@ class Lti::IMS::Registration < ApplicationRecord
   LAUNCH_HEIGHT_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/launch_height".freeze
   TOOL_ID_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/tool_id".freeze
 
-  self.ignored_columns += %i[application_type grant_types response_types token_endpoint_auth_method]
-
   validates :redirect_uris,
             :initiate_login_uri,
             :client_name,
@@ -49,7 +51,8 @@ class Lti::IMS::Registration < ApplicationRecord
 
   validate :redirect_uris_contains_uris,
            :lti_tool_configuration_is_valid,
-           :scopes_are_valid
+           :scopes_are_valid,
+           :validate_overlay
 
   validates :initiate_login_uri,
             :jwks_uri,
@@ -106,27 +109,33 @@ class Lti::IMS::Registration < ApplicationRecord
     }.with_indifferent_access
   end
 
-  # This method converts an IMS Registration into a "Tool Configuration V2",
-  # the flattened and standardized version of the Canvas proprietary configuration
-  # format meant for internal use with LTI Registrations.
-  def registration_configuration
-    config = lti_tool_configuration
+  def self.to_internal_lti_configuration(registration)
+    config = registration.lti_tool_configuration
 
     {
-      name: client_name,
+      title: registration.client_name,
       description: config["description"],
-      domain: config["domain"],
       custom_fields: config["custom_parameters"],
       target_link_uri: config["target_link_uri"],
-      privacy_level:,
-      icon_url: logo_uri,
-      oidc_initiation_url: initiate_login_uri,
-      redirect_uris:,
-      public_jwk_url: jwks_uri,
-      scopes: overlaid_scopes,
-      placements:,
-      tool_id:
-    }.with_indifferent_access
+      oidc_initiation_url: registration.initiate_login_uri,
+      public_jwk_url: registration.jwks_uri,
+      scopes: registration.overlaid_scopes,
+      redirect_uris: registration.redirect_uris,
+      domain: config["domain"],
+      tool_id: registration.tool_id,
+      privacy_level: registration.privacy_level,
+      placements: registration.placements,
+      launch_settings: {
+        icon_url: registration.logo_uri,
+      }
+    }.compact.with_indifferent_access
+  end
+
+  # This method converts an IMS Registration into an "InternalLtiConfiguration",
+  # the flattened and standardized version of the Canvas proprietary configuration
+  # format meant for internal use with LTI Registrations.
+  def internal_lti_configuration
+    Lti::IMS::Registration.to_internal_lti_configuration(self)
   end
 
   def importable_configuration
@@ -190,7 +199,7 @@ class Lti::IMS::Registration < ApplicationRecord
 
     text = apply_overlay ? (placement_overlay["label"] || message["label"]) : message["label"]
     icon_url = apply_overlay ? (placement_overlay["icon_url"] || message["icon_uri"]) : message["icon_uri"]
-    enabled = apply_overlay ? !placement_disabled?(placement_type) : true
+    enabled = apply_overlay ? !placement_disabled?(placement_name) : true
     default = if apply_overlay && placement_name == "course_navigation"
                 # The placement overlay stores everything in the Canvas proprietary format, in which
                 # default is either 'enabled' or 'disabled', so we can fetch the
@@ -205,14 +214,22 @@ class Lti::IMS::Registration < ApplicationRecord
         placement: placement_name,
         enabled:,
         message_type: message["type"],
-        target_link_uri: message["target_link_uri"],
         text:,
-        icon_url:,
+        # TODO: add support for i18n titles
+        # labels: ,
         custom_fields: message["custom_parameters"],
+        # TODO: add support for height/width in dyn reg
+        # selection_height:,
+        # selection_width:,
+        # launch_height:,
+        # launch_width:,
+
+        icon_url:,
+        target_link_uri: message["target_link_uri"],
         display_type:,
         windowTarget: window_target,
-        default:,
         visibility: placement_visibility(message),
+        default:,
       }.merge(width_and_height_settings(message, placement_name)).compact
     ]
   end
@@ -238,8 +255,8 @@ class Lti::IMS::Registration < ApplicationRecord
     registration_overlay["placements"]&.find { |p| p["type"] == placement_type }
   end
 
-  def placement_disabled?(placement_type)
-    registration_overlay["disabledPlacements"]&.include?(placement_type) || false
+  def placement_disabled?(placement_name)
+    registration_overlay["disabledPlacements"]&.include?(placement_name) || false
   end
 
   def canvas_extensions
@@ -255,25 +272,6 @@ class Lti::IMS::Registration < ApplicationRecord
     extension
   end
 
-  def new_external_tool(context, existing_tool: nil)
-    # disabled tools should stay disabled while getting updated
-    # deleted tools are never updated during a dev key update so can be safely ignored
-    tool_is_disabled = existing_tool&.workflow_state == ContextExternalTool::DISABLED_STATE
-
-    tool = existing_tool || ContextExternalTool.new(context:)
-    Importers::ContextExternalToolImporter.import_from_migration(
-      importable_configuration,
-      context,
-      nil,
-      tool,
-      false
-    )
-    tool.developer_key = developer_key
-    tool.workflow_state = (tool_is_disabled && ContextExternalTool::DISABLED_STATE) || privacy_level || DEFAULT_PRIVACY_LEVEL
-    tool.use_1_3 = true
-    tool
-  end
-
   def as_json(options = {})
     {
       id: global_id.to_s,
@@ -283,7 +281,7 @@ class Lti::IMS::Registration < ApplicationRecord
       lti_tool_configuration:,
       application_type: REQUIRED_APPLICATION_TYPE,
       grant_types: REQUIRED_GRANT_TYPES,
-      response_types: REQUIRED_RESPONSE_TYPES,
+      response_types: [REQUIRED_RESPONSE_TYPE],
       redirect_uris:,
       initiate_login_uri:,
       client_name:,
@@ -303,6 +301,10 @@ class Lti::IMS::Registration < ApplicationRecord
     }.as_json(options)
   end
 
+  def tool_id
+    lti_tool_configuration[TOOL_ID_EXTENSION]
+  end
+
   private
 
   def redirect_uris_contains_uris
@@ -319,7 +321,7 @@ class Lti::IMS::Registration < ApplicationRecord
   end
 
   def lti_tool_configuration_is_valid
-    config_errors = Schemas::Lti::IMS::LtiToolConfiguration.simple_validation_errors(
+    config_errors = Schemas::Lti::IMS::LtiToolConfiguration.simple_validation_first_error(
       lti_tool_configuration,
       error_format: :hash
     )
@@ -330,6 +332,15 @@ class Lti::IMS::Registration < ApplicationRecord
       # Convert errors represented as a Hash to JSON
       config_errors.is_a?(Hash) ? config_errors.to_json : config_errors
     )
+  end
+
+  def validate_overlay
+    return if registration_overlay.blank?
+
+    overlay_errors = Schemas::Lti::IMS::RegistrationOverlay.simple_validation_errors(registration_overlay)
+    if overlay_errors.present?
+      errors.add(:registration_overlay, overlay_errors.join("; "))
+    end
   end
 
   def canvas_placement_name(placement)
@@ -374,9 +385,5 @@ class Lti::IMS::Registration < ApplicationRecord
     else
       "anonymous"
     end
-  end
-
-  def tool_id
-    lti_tool_configuration[TOOL_ID_EXTENSION]
   end
 end

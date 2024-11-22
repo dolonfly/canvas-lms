@@ -339,17 +339,18 @@ RSpec.describe ApplicationController do
       end
 
       it "gets appropriate settings from the root account" do
-        root_account = double(global_id: 1, id: 1, feature_enabled?: false, open_registration?: true, can_add_pronouns?: true, settings: {}, cache_key: "key", uuid: "bleh", salesforce_id: "blah")
+        root_account = double(global_id: 1, id: 1, feature_enabled?: false, open_registration?: true, can_add_pronouns?: true, show_sections_in_course_tray?: true, settings: {}, cache_key: "key", uuid: "bleh", salesforce_id: "blah")
         allow(root_account).to receive(:kill_joy?).and_return(false)
         allow(HostUrl).to receive_messages(file_host: "files.example.com")
         controller.instance_variable_set(:@domain_root_account, root_account)
         expect(controller.js_env[:SETTINGS][:open_registration]).to be_truthy
         expect(controller.js_env[:SETTINGS][:can_add_pronouns]).to be_truthy
+        expect(controller.js_env[:SETTINGS][:show_sections_in_course_tray]).to be_truthy
         expect(controller.js_env[:KILL_JOY]).to be_falsey
       end
 
       it "disables fun when set" do
-        root_account = double(global_id: 1, id: 1, feature_enabled?: false, open_registration?: true, can_add_pronouns?: true, settings: {}, cache_key: "key", uuid: "blah", salesforce_id: "bleh")
+        root_account = double(global_id: 1, id: 1, feature_enabled?: false, open_registration?: true, can_add_pronouns?: true, show_sections_in_course_tray?: true, settings: {}, cache_key: "key", uuid: "blah", salesforce_id: "bleh")
         allow(root_account).to receive(:kill_joy?).and_return(true)
         allow(HostUrl).to receive_messages(file_host: "files.example.com")
         controller.instance_variable_set(:@domain_root_account, root_account)
@@ -364,22 +365,6 @@ RSpec.describe ApplicationController do
 
           it "populates js_env with elementary theme setting" do
             expect(controller.js_env[:FEATURES]).to include(:canvas_k6_theme)
-          end
-        end
-
-        context "usage_rights_discussion_topics" do
-          before do
-            controller.instance_variable_set(:@domain_root_account, Account.default)
-          end
-
-          it "is false if the feature flag is off" do
-            Account.default.disable_feature!(:usage_rights_discussion_topics)
-            expect(controller.js_env[:FEATURES][:usage_rights_discussion_topics]).to be_falsey
-          end
-
-          it "is true if the feature flag is on" do
-            Account.default.enable_feature!(:usage_rights_discussion_topics)
-            expect(controller.js_env[:FEATURES][:usage_rights_discussion_topics]).to be_truthy
           end
         end
       end
@@ -763,6 +748,17 @@ RSpec.describe ApplicationController do
         locale = nil
         expect { locale = I18n.localizer.call }.to_not raise_error
         expect(locale).to eq("en") # default locale
+      end
+
+      it "finds a deleted course if an access token is used" do
+        course_model
+        @course.delete
+
+        controller.instance_variable_set(:@domain_root_account, Account.default)
+        controller.instance_variable_set(:@token, "just some random thing here")
+        allow(controller).to receive_messages(params: { course_id: @course.id })
+        controller.send(:get_context)
+        expect(controller.instance_variable_get(:@context)).to eq @course
       end
     end
 
@@ -1541,7 +1537,8 @@ RSpec.describe ApplicationController do
             user:,
             session_id: nil,
             placement: nil,
-            launch_type: :content_item
+            launch_type: :content_item,
+            launch_url: "http://www.example.com/basic_lti"
           )
         end
 
@@ -1786,6 +1783,7 @@ RSpec.describe ApplicationController do
 
         context "lti_placement_restrictions FF on" do
           before do
+            allow(Account.site_admin).to receive(:feature_enabled?).with(:instructure_identity_global_flag)
             expect(Account.site_admin).to receive(:feature_enabled?).with(:lti_placement_restrictions).and_return(true)
           end
 
@@ -1801,6 +1799,7 @@ RSpec.describe ApplicationController do
 
         context "lti_placement_restrictions FF off" do
           before do
+            allow(Account.site_admin).to receive(:feature_enabled?).with(:instructure_identity_global_flag)
             expect(Account.site_admin).to receive(:feature_enabled?).with(:lti_placement_restrictions).and_return(false)
           end
 
@@ -1910,12 +1909,12 @@ RSpec.describe ApplicationController do
 
       context "when external tool has postMessage scopes" do
         it "adds tool scopes to the js_env" do
-          @tool.developer_key = DeveloperKey.create!(scopes: [TokenScopes::LTI_PAGE_CONTENT_SHOW_SCOPE])
+          @tool.developer_key = DeveloperKey.create!(scopes: TokenScopes::LTI_POSTMESSAGE_SCOPES)
           @tool.save!
 
           controller.external_tools_display_hashes(:account_navigation, @course)
 
-          expect(controller.js_env[:LTI_TOOL_SCOPES]).to eq("http://example.com" => [TokenScopes::LTI_PAGE_CONTENT_SHOW_SCOPE])
+          expect(controller.js_env[:LTI_TOOL_SCOPES]).to eq("http://example.com" => TokenScopes::LTI_POSTMESSAGE_SCOPES)
         end
       end
 
@@ -2750,6 +2749,70 @@ RSpec.describe ApplicationController do
           allow(controller).to receive(:request).and_return(double({ path: }))
           expect(controller.send(:should_show_migration_limitation_message)).to be(false)
         end
+      end
+    end
+  end
+
+  describe "#js_env_root_account_settings" do
+    subject { controller.js_env_root_account_settings }
+
+    before do
+      Account.default[:settings] = { calendar_contexts_limit: 5, open_registration: false }
+      Account.default.save!
+    end
+
+    context "when inbox settings feature is disabled" do
+      it "returns default settings" do
+        expect(subject).to match_array([:calendar_contexts_limit, :open_registration])
+      end
+    end
+
+    context "when inbox settings feature is enabled" do
+      before do
+        Account.site_admin.enable_feature!(:inbox_settings)
+      end
+
+      it "returns default settings and inbox settings" do
+        expect(subject).to match_array(
+          %i[
+            calendar_contexts_limit
+            open_registration
+            inbox_auto_response
+            inbox_signature_block
+            inbox_auto_response_for_students
+            inbox_signature_block_for_students
+          ]
+        )
+      end
+    end
+  end
+
+  describe "#cached_js_env_root_account_settings" do
+    subject { controller.cached_js_env_root_account_settings }
+
+    before do
+      Account.default[:settings] = { calendar_contexts_limit: 10, open_registration: true }
+      Account.default.save!
+      controller.instance_variable_set(:@domain_root_account, Account.default)
+    end
+
+    context "when domain root account has settings attribute" do
+      it "fetches settings from cache" do
+        js_env_settings_hash = Digest::SHA256.hexdigest([:calendar_contexts_limit, :open_registration].sort.join(","))
+        account_settings_hash = Digest::SHA256.hexdigest(Account.default[:settings].to_s)
+        cache_key = ["js_env_root_account_settings", js_env_settings_hash, account_settings_hash].cache_key
+
+        expect(MultiCache).to receive(:fetch).and_call_original
+        expect(MultiCache).to receive(:fetch).with(cache_key).and_yield
+        expect(subject).to match(hash_including(calendar_contexts_limit: 10, open_registration: true))
+      end
+
+      it "returns only the available settings if some domain root account settings are not set" do
+        Account.default[:settings].delete(:calendar_contexts_limit)
+        Account.default.save!
+
+        expect(subject).to have_key(:open_registration)
+        expect(subject).not_to have_key(:calendar_contexts_limit)
       end
     end
   end

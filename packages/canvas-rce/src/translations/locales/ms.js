@@ -314,7 +314,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Edit Ikon" },
   "edit_link_7f53bebb": { "message": "Edit Pautan" },
-  "editor_statusbar_26ac81fc": { "message": "Bar Status Editor" },
+  "editor_status_bar_653f44ee": { "message": "Bar Status Editor" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Elemen bermula dengan { start }"
   },
@@ -610,6 +610,7 @@ const locale = {
   },
   "links_14b70841": { "message": "Pautan" },
   "links_to_an_external_site_de74145d": { "message": "Pautan ke laman luar." },
+  "lists_cd1336fc": { "message": "Senarai" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Senarai sepatutnya diformatkan sebagai senarai."
   },
@@ -1017,6 +1018,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Gaya" },
   "submit_a3cc6859": { "message": "Serahkan" },
+  "submitting_b90fac62": { "message": "Menyerahkan..." },
   "subscript_59744f96": { "message": "Subskrip" },
   "subset_19c1a92f": { "message": "Subset" },
   "subset_strict_8d8948d6": { "message": "Subset (Wajar)" },

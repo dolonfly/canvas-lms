@@ -647,8 +647,8 @@
     "edit_link_7f53bebb": {
         "message": "Modifier le lien"
     },
-    "editor_statusbar_26ac81fc": {
-        "message": "Barre d''état de l''éditeur"
+    "editor_status_bar_653f44ee": {
+        "message": "Barre d’état de l’éditeur"
     },
     "element_starting_with_start_91bf4c3b": {
         "message": "Élément commençant par { start }"
@@ -1294,6 +1294,9 @@
     },
     "links_to_an_external_site_de74145d": {
         "message": "Liens vers un site externe."
+    },
+    "lists_cd1336fc": {
+        "message": "Listes"
     },
     "lists_should_be_formatted_as_lists_f862de8d": {
         "message": "Les listes doivent être formatées comme une liste."
@@ -2177,6 +2180,9 @@
     "submit_a3cc6859": {
         "message": "Envoyer"
     },
+    "submitting_b90fac62": {
+        "message": "Envoi en cours..."
+    },
     "subscript_59744f96": {
         "message": "Description"
     },
@@ -2229,7 +2235,7 @@
         "message": "Basculez vers l’éditeur de texte enrichi"
     },
     "syllabus_f191f65b": {
-        "message": "Programme"
+        "message": "Plan de cours"
     },
     "system_audio_allowed_b2508f8c": {
         "message": "Système audio autorisé"

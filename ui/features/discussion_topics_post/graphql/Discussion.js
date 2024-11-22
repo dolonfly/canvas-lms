@@ -39,6 +39,7 @@ export const Discussion = {
       message
       createdAt
       updatedAt
+      editedAt
       postedAt
       requireInitialPost
       initialPostRequiredForCurrentUser
@@ -59,6 +60,8 @@ export const Discussion = {
       replyToEntryRequiredCount
       contextType
       lockInformation
+      subscriptionDisabledForUser
+      expanded
       editor {
         ...User
       }
@@ -108,6 +111,7 @@ export const Discussion = {
     message: string,
     createdAt: string,
     updatedAt: string,
+    editedAt: string,
     postedAt: string,
     requireInitialPost: bool,
     initialPostRequiredForCurrentUser: bool,
@@ -145,6 +149,9 @@ export const Discussion = {
     rootTopic: RootTopic.shape,
     rootEntriesTotalPages: number,
     entriesTotalPages: number,
+    subscriptionDisabledForUser: bool,
+    sortOrder: string,
+    expanded: bool,
   }),
 
   mock: ({
@@ -154,6 +161,7 @@ export const Discussion = {
     message = 'This is a Discussion Topic Message',
     createdAt = '2020-11-23T11:40:44-07:00',
     updatedAt = '2021-04-22T12:41:56-06:00',
+    editedAt = '2021-04-22T12:41:56-06:00',
     postedAt = '2020-11-23T11:40:44-07:00',
     requireInitialPost = false,
     initialPostRequiredForCurrentUser = false,
@@ -191,11 +199,14 @@ export const Discussion = {
     groupSet = GroupSet.mock(),
     rootTopic = RootTopic.mock(),
     entriesTotalPages = 2,
+    sortOrder = 'desc',
+    expanded = false,
     discussionEntriesConnection = {
       nodes: [DiscussionEntry.mock()],
       pageInfo: PageInfo.mock(),
       __typename: 'DiscussionEntriesConnection',
     },
+    subscriptionDisabledForUser = false,
   } = {}) => ({
     id,
     _id,
@@ -203,6 +214,7 @@ export const Discussion = {
     message,
     createdAt,
     updatedAt,
+    editedAt,
     postedAt,
     requireInitialPost,
     initialPostRequiredForCurrentUser,
@@ -237,6 +249,9 @@ export const Discussion = {
     searchEntryCount,
     entriesTotalPages,
     discussionEntriesConnection,
+    subscriptionDisabledForUser,
+    sortOrder,
+    expanded,
     __typename: 'Discussion',
   }),
 }

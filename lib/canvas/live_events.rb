@@ -19,8 +19,7 @@
 
 module Canvas::LiveEvents
   def self.post_event_stringified(event_name, payload, context = nil)
-    ctx = LiveEvents.get_context || {}
-    payload.compact! if ctx[:compact_live_events].present?
+    payload.compact!
 
     StringifyIds.recursively_stringify_ids(payload)
     StringifyIds.recursively_stringify_ids(context)
@@ -682,10 +681,10 @@ module Canvas::LiveEvents
 
   def self.content_migration_data(content_migration)
     context = content_migration.context
-    import_quizzes_next =
-      content_migration.migration_settings&.[](:import_quizzes_next) == true
+    import_quizzes_next = content_migration.migration_settings&.[](:import_quizzes_next) == true
+    quiz_next_imported = content_migration.migration_settings&.[](:quiz_next_imported) == true
     link_migration_during_import = import_quizzes_next && content_migration.asset_map_v2?
-    need_resource_map = content_migration.source_course&.has_new_quizzes? || link_migration_during_import
+    need_resource_map = content_migration.source_course&.has_new_quizzes? || link_migration_during_import || quiz_next_imported
 
     payload = {
       content_migration_id: content_migration.global_id,
@@ -722,6 +721,10 @@ module Canvas::LiveEvents
 
   def self.quizzes_next_migration_urls_complete(payload)
     post_event_stringified("quizzes_next_migration_urls_complete", payload)
+  end
+
+  def self.outcomes_retry_outcome_alignment_clone(payload)
+    post_event_stringified("outcomes.retry_outcome_alignment_clone", payload)
   end
 
   def self.get_course_section_data(section)

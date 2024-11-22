@@ -170,7 +170,7 @@ const locale = {
     "message": "Cliceáil chun réamhamharc a thaispeáint"
   },
   "close_a_menu_or_dialog_also_returns_you_to_the_edi_739079e6": {
-    "message": "Dún roghchlár nó dialóg. Tugann sé ar ais go dtí an limistéar eagarthóireachta tú freisin"
+    "message": "Dún roghchlár nó dialóg. Cuireann sé ar ais go dtí an limistéar eagarthóireachta thú freisin"
   },
   "close_accessibility_checker_29d1c51e": {
     "message": "Dún Seiceálaí Inrochtaineachta"
@@ -215,7 +215,7 @@ const locale = {
   },
   "count_40eced3b": { "message": "Áireamh" },
   "count_plural_0_0_words_one_1_word_other_words_acf32eca": {
-    "message": "{ count, plural,\n     =0 {0 focal}\n    one {1 focal}\n  other {# focail}\n}"
+    "message": "{ count, plural,\n     =0 {0 focal}\n    one {1 focal}\n  other {An líon seo focail: #}\n}"
   },
   "count_plural_one_item_loaded_other_items_loaded_857023b7": {
     "message": "{ count, plural,\n    one {# mír lódáite}\n  other {# míreanna lódáilte}\n}"
@@ -329,7 +329,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Cuir Deilbhín in Eagar" },
   "edit_link_7f53bebb": { "message": "Cuir Nasc in Eagar" },
-  "editor_statusbar_26ac81fc": { "message": "Barra Stádas Eagarthóra" },
+  "editor_status_bar_653f44ee": { "message": "Barra Stádais Eagarthóra" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Eilimint ag tosú le { start }"
   },
@@ -411,7 +411,7 @@ const locale = {
   },
   "flat_music_76d5a5c3": { "message": "Maol (Ceol)" },
   "focus_element_options_toolbar_18d993e": {
-    "message": "Barra uirlisí roghanna eilimint fócas"
+    "message": "Barra uirlisí roghanna gné fócais"
   },
   "folder_tree_fbab0726": { "message": "Crann fillteáin" },
   "for_all_b919f972": { "message": "Do Chách" },
@@ -631,6 +631,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Naisc chuig suíomh seachtrach."
   },
+  "lists_cd1336fc": { "message": "Liostaí" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Ba cheart liostaí a fhormáidiú mar liostaí."
   },
@@ -1052,6 +1053,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Stíleanna" },
   "submit_a3cc6859": { "message": "Cuir isteach" },
+  "submitting_b90fac62": { "message": "Á chur isteach..." },
   "subscript_59744f96": { "message": "Foscript" },
   "subset_19c1a92f": { "message": "Fothacar" },
   "subset_strict_8d8948d6": { "message": "Fothacar (dian)" },

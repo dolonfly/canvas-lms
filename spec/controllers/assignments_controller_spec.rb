@@ -1224,6 +1224,37 @@ describe AssignmentsController do
       end
     end
 
+    describe "assignment_enhancements_teacher_view" do
+      before do
+        @course.root_account.enable_feature!(:assignment_enhancements_teacher_view)
+        @course.save!
+      end
+
+      it "does not render the 'old' assignment page layout" do
+        get :show, params: { course_id: @course.id, id: @assignment.id }
+        expect(response).not_to render_template("assignments/show")
+      end
+    end
+
+    describe "assignment_edit_enhancements_teacher_view" do
+      before do
+        @course.root_account.enable_feature!(:assignment_edit_enhancements_teacher_view)
+        @course.save!
+      end
+
+      it "does not render the 'old' edit assignment page layout" do
+        user_session(@teacher)
+        get :edit, params: { course_id: @course.id, id: @assignment.id }
+        expect(response).not_to render_template("assignments/edit")
+      end
+
+      it "does not render the 'old' create assignment page layout" do
+        user_session(@teacher)
+        get :new, params: { course_id: @course.id }
+        expect(response).not_to render_template("assignments/edit")
+      end
+    end
+
     it "does not show locked external tool assignments" do
       user_session(@student)
 
@@ -1738,6 +1769,40 @@ describe AssignmentsController do
           expect(assigns[:js_env][:DEFAULT_DUE_TIME]).to eq "22:00:00"
         end
       end
+
+      context "assigned_rubric and rubric_association" do
+        before do
+          Account.site_admin.enable_feature!(:enhanced_rubrics_assignments)
+          @course.enable_feature!(:enhanced_rubrics)
+          rubric = @course.rubrics.create! { |r| r.user = @teacher }
+          rubric_association_params = ActiveSupport::HashWithIndifferentAccess.new({
+                                                                                     hide_score_total: "0",
+                                                                                     purpose: "grading",
+                                                                                     skip_updating_points_possible: false,
+                                                                                     update_if_existing: true,
+                                                                                     use_for_grading: "1",
+                                                                                     association_object: @assignment
+                                                                                   })
+          rubric_assoc = RubricAssociation.generate(@teacher, rubric, @course, rubric_association_params)
+          @assignment.rubric_association = rubric_assoc
+          @assignment.save!
+        end
+
+        it "sets assigned_rubric and rubric_association in the ENV when FF is ON" do
+          get :show, params: { course_id: @course.id, id: @assignment.id }
+          expect(assigns[:js_env][:assigned_rubric][:id]).to eq @assignment.rubric_association.rubric_id
+          expect(assigns[:js_env][:assigned_rubric][:title]).to eq "Unnamed Course Rubric"
+          expect(assigns[:js_env][:assigned_rubric][:can_update]).to be_truthy
+          expect(assigns[:js_env][:rubric_association][:id]).to eq @assignment.rubric_association.id
+        end
+
+        it "does not set assigned_rubric and rubric_association in the ENV when FF is OFF" do
+          Account.site_admin.disable_feature!(:enhanced_rubrics_assignments)
+          get :show, params: { course_id: @course.id, id: @assignment.id }
+          expect(assigns[:js_env][:assigned_rubric]).to be_nil
+          expect(assigns[:js_env][:rubric_association]).to be_nil
+        end
+      end
     end
   end
 
@@ -2048,6 +2113,23 @@ describe AssignmentsController do
         expect(assigns[:_crumbs]).to include(["Quizzes", "/courses/#{@course.id}/quizzes", {}])
       end
     end
+
+    it "js_env GROUP_CATEGORIES excludes non_collaborative and student_organized categories regardless of :differentiation_tags ff state" do
+      Account.site_admin.enable_feature!(:differentiation_tags)
+
+      user_session(@teacher)
+      @course.group_categories.create!(name: "non_colaborative_category", non_collaborative: true)
+      @course.group_categories.create!(name: "student_organized_category", role: "student_organized")
+      regular_category = @course.group_categories.create!(name: "regular_category")
+
+      get :new, params: { course_id: @course.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
+
+      Account.site_admin.disable_feature!(:differentiation_tags)
+
+      get :new, params: { course_id: @course.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
+    end
   end
 
   describe "POST 'create'" do
@@ -2316,8 +2398,7 @@ describe AssignmentsController do
         let(:domain) { "justanexamplenotarealwebsite.com" }
 
         let(:tool) do
-          factory_with_protected_attributes(
-            @course.context_external_tools,
+          @course.context_external_tools.create!(
             domain:,
             url: "http://www.justanexamplenotarealwebsite.com/tool1",
             shared_secret: "test123",
@@ -2651,6 +2732,30 @@ describe AssignmentsController do
         get "edit", params: { course_id: @course.id, id: @assignment.id }
         expect(assigns[:js_env][:HIDE_ZERO_POINT_QUIZZES_OPTION_ENABLED]).to be(false)
       end
+    end
+
+    it "sets COURSE_ID in js_env if assignment_edit_enhancements_teacher_view FF is enabled" do
+      user_session(@teacher)
+      @course.root_account.enable_feature!(:assignment_edit_enhancements_teacher_view)
+      get "edit", params: { course_id: @course.id, id: @assignment.id }
+      expect(assigns[:js_env][:COURSE_ID]).to be(@course.id)
+    end
+
+    it "js_env GROUP_CATEGORIES excludes non_collaborative and student_organized categories regardless of :differentiation_tags ff state" do
+      Account.site_admin.enable_feature!(:differentiation_tags)
+
+      user_session(@teacher)
+      @course.group_categories.create!(name: "non_colaborative_category", non_collaborative: true)
+      @course.group_categories.create!(name: "student_organized_category", role: "student_organized")
+      regular_category = @course.group_categories.create!(name: "regular_category")
+
+      get :edit, params: { course_id: @course.id, id: @assignment.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
+
+      Account.site_admin.disable_feature!(:differentiation_tags)
+
+      get :edit, params: { course_id: @course.id, id: @assignment.id }
+      expect(assigns[:js_env][:GROUP_CATEGORIES].pluck(:id)).to match_array [regular_category.id]
     end
   end
 

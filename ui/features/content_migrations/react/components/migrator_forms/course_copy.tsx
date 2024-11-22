@@ -34,6 +34,7 @@ const I18n = useI18nScope('content_migrations_redesign')
 type CourseOption = {
   id: string
   label: string
+  term: string
 }
 
 type CourseCopyImporterProps = {
@@ -47,7 +48,7 @@ export const CourseCopyImporter = ({onSubmit, onCancel, isSubmitting}: CourseCop
   const [courseOptions, setCourseOptions] = useState<any>([])
   const [selectedCourse, setSelectedCourse] = useState<any>(false)
   const [selectedCourseError, setSelectedCourseError] = useState<boolean>(false)
-  const [includeCompletedCourses, setIncludeCompletedCourses] = useState<boolean>(false)
+  const [includeCompletedCourses, setIncludeCompletedCourses] = useState<boolean>(true)
 
   const throttledCourseFetch = useRef(
     throttle(
@@ -149,6 +150,11 @@ export const CourseCopyImporter = ({onSubmit, onCancel, isSubmitting}: CourseCop
               return (
                 <Select.Option id={option.id} key={option.id} value={option.id}>
                   {option.label}
+                  {!!option.term && (
+                    <Text as="div" size="x-small" color="secondary">
+                      {I18n.t('Term: %{termName}', {termName: option.term})}
+                    </Text>
+                  )}
                 </Select.Option>
               )
             })
@@ -160,6 +166,7 @@ export const CourseCopyImporter = ({onSubmit, onCancel, isSubmitting}: CourseCop
       <View as="div" margin="small none none none">
         <Checkbox
           disabled={isSubmitting}
+          checked={includeCompletedCourses}
           name="include_completed_courses"
           label={I18n.t('Include completed courses')}
           onChange={(e: React.SyntheticEvent<Element, Event>) => {

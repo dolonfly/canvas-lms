@@ -254,6 +254,12 @@ export const handlers = [
     })
   }),
 
+  graphql.query('GetUserInboxLabels', ({variables}) => {
+    return HttpResponse.json({
+      data: {legacyNode: {id: 'VXNlci0x', inboxLabels: ['LabelA', 'LabelB'], __typename: 'User'}},
+    })
+  }),
+
   graphql.query('GetConversationMessagesQuery', ({variables}) => {
     if (variables.conversationID === CONVERSATION_ID_WHERE_CAN_REPLY_IS_FALSE) {
       return HttpResponse.json({
@@ -287,6 +293,7 @@ export const handlers = [
                 __typename: 'Assignment',
               },
               comment: 'my student comment',
+              htmlComment: '<p>my student comment</p>',
               course: Course.mock(),
               read: true,
               __typename: 'SubmissionComment',
@@ -315,6 +322,7 @@ export const handlers = [
           nodes: [
             {
               _id: '9',
+              readState: null,
               commentsConnection: {
                 nodes: [
                   {
@@ -332,6 +340,7 @@ export const handlers = [
                       __typename: 'Assignment',
                     },
                     comment: 'my student comment',
+                    htmlComment: '<p>my student comment</p>',
                     course: Course.mock(),
                     read: true,
                     __typename: 'SubmissionComment',
@@ -343,6 +352,7 @@ export const handlers = [
             },
             {
               _id: '10',
+              readState: null,
               commentsConnection: {
                 nodes: [
                   {
@@ -360,6 +370,7 @@ export const handlers = [
                       __typename: 'Assignment',
                     },
                     comment: 'my student comment',
+                    htmlComment: '<p>my student comment</p>',
                     course: Course.mock(),
                     read: true,
                     __typename: 'SubmissionComment',
@@ -753,7 +764,10 @@ export const handlers = [
     const SUBMISSION_ID_THAT_RETURNS_ERROR = '440'
     const data = {
       createSubmissionComment: {
-        submissionComment: SubmissionComment.mock({comment: variables.body}),
+        submissionComment: SubmissionComment.mock({
+          comment: variables.body,
+          htmlComment: variables.body,
+        }),
         errors: null,
         __typename: 'CreateSubmissionCommentPayload',
       },

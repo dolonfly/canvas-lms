@@ -75,19 +75,6 @@ describe('RubricAssessmentTray Tests', () => {
       expect(getByTestId('rubric-assessment-footer')).toBeInTheDocument()
     })
 
-    it('should render the vertical view option by default if a criterion has greater than 5 ratings', () => {
-      const rubric = {...RUBRIC_DATA}
-      rubric.criteria = [...rubric.criteria]
-      const ratings = [...rubric.criteria[0].ratings]
-      ratings.push({description: '6', points: 6, id: '6', longDescription: '6th rating'})
-      rubric.criteria[0] = {...rubric.criteria[0], ratings}
-      const {getByTestId, queryAllByTestId} = renderComponent({rubric})
-      const viewModeSelect = getByTestId('rubric-assessment-view-mode-select') as HTMLSelectElement
-
-      expect(viewModeSelect.value).toBe('Vertical')
-      expect(queryAllByTestId('rubric-assessment-vertical-display')).toHaveLength(2)
-    })
-
     it('should switch to the horizontal view when the horizontal option is selected', () => {
       const {getByTestId, queryAllByTestId, queryByRole} = renderComponent()
       const viewModeSelect = getByTestId('rubric-assessment-view-mode-select') as HTMLSelectElement
@@ -169,6 +156,19 @@ describe('RubricAssessmentTray Tests', () => {
 
       expect(getByTestId('rubric-assessment-instructor-score')).toHaveTextContent('10 pts')
       expect(getByTestId('traditional-criterion-2-ratings-0-selected')).toBeInTheDocument()
+    })
+
+    it('should not render score input if criterion is ignoreForScoring', () => {
+      const updatedRubric = {
+        ...RUBRIC_DATA,
+        criteria: RUBRIC_DATA.criteria.map(criterion =>
+          criterion.id === '2' ? {...criterion, ignoreForScoring: true} : criterion
+        ),
+      }
+
+      const {queryByTestId} = renderComponent({rubric: updatedRubric})
+      expect(queryByTestId('criterion-score-1')).toBeInTheDocument()
+      expect(queryByTestId('criterion-score-2')).not.toBeInTheDocument()
     })
 
     it('should not select a rating when user entered points do not match a rating points value', () => {
@@ -289,6 +289,44 @@ describe('RubricAssessmentTray Tests', () => {
         fireEvent.blur(input2)
 
         expect(getByTestId('rubric-assessment-instructor-score')).toHaveTextContent('9 pts')
+      })
+
+      it('should set comment text when multiple comments are available and selected', () => {
+        const {getByTestId} = renderFreeformComponent({
+          rubricSavedComments: {1: ['Great work!', 'Needs improvement', 'Excellent effort']},
+        })
+
+        const commentLibrary = getByTestId('comment-library-1')
+        fireEvent.click(commentLibrary)
+
+        const firstCommentOption = getByTestId('comment-library-option-1-0') as HTMLElement
+        fireEvent.click(firstCommentOption)
+
+        const commentTextArea = getByTestId('free-form-comment-area-1')
+        expect(commentTextArea).toHaveValue('Great work!')
+
+        fireEvent.click(commentLibrary)
+        const secondCommentOption = getByTestId('comment-library-option-1-1') as HTMLElement
+        fireEvent.click(secondCommentOption)
+
+        expect(commentTextArea).toHaveValue('Needs improvement')
+        fireEvent.click(commentLibrary)
+
+        const thirdCommentOption = getByTestId('comment-library-option-1-2') as HTMLElement
+        fireEvent.click(thirdCommentOption)
+
+        expect(commentTextArea).toHaveValue('Excellent effort')
+      })
+
+      it('should update comment text when a custom comment is typed', () => {
+        const {getByTestId} = renderFreeformComponent({
+          rubricSavedComments: {1: ['Good job', 'Needs improvement']},
+        })
+
+        const commentTextArea = getByTestId('free-form-comment-area-1')
+        fireEvent.change(commentTextArea, {target: {value: 'This is a custom comment'}})
+
+        expect(commentTextArea).toHaveValue('This is a custom comment')
       })
     })
   })
@@ -476,6 +514,21 @@ describe('RubricAssessmentTray Tests', () => {
           expect(queryByTestId('save-comment-checkbox-2')).not.toBeInTheDocument()
         })
       })
+
+      it('should not render score input if criterion is ignoreForScoring', () => {
+        const updatedRubric = {
+          ...RUBRIC_DATA,
+          criteria: RUBRIC_DATA.criteria.map(criterion =>
+            criterion.id === '2' ? {...criterion, ignoreForScoring: true} : criterion
+          ),
+        }
+
+        const {queryByTestId} = renderComponentModern('Horizontal', false, false, {
+          rubric: updatedRubric,
+        })
+        expect(queryByTestId('criterion-score-1')).toBeInTheDocument()
+        expect(queryByTestId('criterion-score-2')).not.toBeInTheDocument()
+      })
     })
 
     describe('Vertical Display tests', () => {
@@ -553,6 +606,21 @@ describe('RubricAssessmentTray Tests', () => {
 
         expect(queryByRole('option', {name: 'Vertical'}) as HTMLElement).not.toBeInTheDocument()
       })
+
+      it('should not render score input if criterion is ignoreForScoring', () => {
+        const updatedRubric = {
+          ...RUBRIC_DATA,
+          criteria: RUBRIC_DATA.criteria.map(criterion =>
+            criterion.id === '2' ? {...criterion, ignoreForScoring: true} : criterion
+          ),
+        }
+
+        const {queryByTestId} = renderComponentModern('Vertical', false, false, {
+          rubric: updatedRubric,
+        })
+        expect(queryByTestId('criterion-score-1')).toBeInTheDocument()
+        expect(queryByTestId('criterion-score-2')).not.toBeInTheDocument()
+      })
     })
 
     it('should keep the selected rating when switching between view modes', () => {
@@ -586,31 +654,13 @@ describe('RubricAssessmentTray Tests', () => {
   })
 
   describe('Peer Review tests', () => {
-    const rubricAssessors = [
-      {id: '1', name: 'Teacher'},
-      {id: '2', name: 'Peer Reviewer'},
-    ]
-
     const renderPeerReviewComponent = () => {
-      return renderComponent({isPeerReview: true, rubricAssessors, rubricAssessmentId: '2'})
+      return renderComponent({isPeerReview: true})
     }
 
     it('should display the peer review text when in peer review mode', () => {
       const {getByTestId} = renderPeerReviewComponent()
       expect(getByTestId('rubric-assessment-header')).toHaveTextContent('Peer Review')
-    })
-
-    it('should render the peer review assessment dropdown', () => {
-      const {getByTestId, queryAllByRole} = renderPeerReviewComponent()
-      const assessorSelect = getByTestId('rubric-assessment-accessor-select') as HTMLSelectElement
-      expect(assessorSelect).toBeInTheDocument()
-      expect(assessorSelect.value).toBe('Peer Reviewer')
-
-      fireEvent.click(assessorSelect)
-      const assessors = queryAllByRole('option') as HTMLElement[]
-      expect(assessors.length).toBe(2)
-      expect(assessors[0].innerHTML).toBe('Teacher')
-      expect(assessors[1].innerHTML).toBe('Peer Reviewer')
     })
   })
 

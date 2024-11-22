@@ -56,7 +56,7 @@
 <td class="right">
   {{#ifAny canManage canRemoveUsers}}
   <div class="admin-links">
-    <a role="button" class="al-trigger al-trigger-gray" href="javascript:void(0)" data-popup-my="left top" data-popup-at="left bottom">
+    <a role="button" class="al-trigger al-trigger-gray" href="javascript:void(0)">
       <i class="icon-more" aria-hidden="true"></i>
       <span class="screenreader-only">{{#t "manage_user"}}Manage {{name}}{{/t}}</span></a>
     <ul class="al-options">
@@ -75,10 +75,6 @@
       {{/if}}
       {{#if canEditRoles}}
       <li><a href="#" data-event="editRoles"><i class="icon-edit" aria-hidden="true"></i> {{#t}}Edit Role{{/t}}</a></li>
-      {{/if}}
-      {{#if canManageUserNotes}}
-      <li><a href={{faculyJournalUrl}}><i class="icon-note-light" aria-hidden="true"></i> {{#t}}Faculty
-          Journal{{/t}}</a></li>
       {{/if}}
       {{/if}}
       <li><a href="{{url}}"><i class="icon-user" aria-hidden="true"></i> {{#t "links.user_details"}}User

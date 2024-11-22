@@ -647,8 +647,8 @@
     "edit_link_7f53bebb": {
         "message": "編輯連結"
     },
-    "editor_statusbar_26ac81fc": {
-        "message": "編輯器狀態欄"
+    "editor_status_bar_653f44ee": {
+        "message": "編輯器狀態列"
     },
     "element_starting_with_start_91bf4c3b": {
         "message": "以 { start } 開始的元素"
@@ -1294,6 +1294,9 @@
     },
     "links_to_an_external_site_de74145d": {
         "message": "連結到外部網站。"
+    },
+    "lists_cd1336fc": {
+        "message": "清單"
     },
     "lists_should_be_formatted_as_lists_f862de8d": {
         "message": "列表應使用清單格式。"
@@ -2176,6 +2179,9 @@
     },
     "submit_a3cc6859": {
         "message": "提交"
+    },
+    "submitting_b90fac62": {
+        "message": "正在提交..."
     },
     "subscript_59744f96": {
         "message": "下標"

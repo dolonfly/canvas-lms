@@ -73,6 +73,11 @@ describe "Common Cartridge exporting" do
       @manifest_doc = Nokogiri::XML.parse(@manifest_body)
     end
 
+    def run_export_without_file_parse(opts = {})
+      @ce.export(opts, synchronous: true)
+      expect(@ce.error_messages).to eq []
+    end
+
     def mig_id(obj)
       CC::CCHelper.create_key(obj, global: true)
     end
@@ -227,7 +232,8 @@ describe "Common Cartridge exporting" do
     end
 
     it "creates a quizzes-only export" do
-      @q1 = @course.quizzes.create!(title: "quiz1")
+      att = attachment_model(uploaded_data: fixture_file_upload("test_image.jpg"))
+      @q1 = @course.quizzes.create!(title: "quiz1", description: %(<p><img src="/courses/#{@course.id}/files/#{att.id}/preview" width="150" height="150" /></p>"))
       @q2 = @course.quizzes.create!(title: "quiz2")
 
       @ce.export_type = ContentExport::QTI
@@ -242,7 +248,13 @@ describe "Common Cartridge exporting" do
       check_resource_node(@q2, CC::CCHelper::QTI_ASSESSMENT_TYPE)
 
       alt_mig_id1 = CC::CCHelper.create_key(@q1, "canvas_", global: true)
+      att_mig_id = CC::CCHelper.create_key(att, global: true)
+
       expect(@manifest_doc.at_css("resource[identifier=#{alt_mig_id1}][type=\"#{CC::CCHelper::LOR}\"]")).not_to be_nil
+      expect(@manifest_doc.at_css("resource[identifier=#{att_mig_id}][type=\"#{CC::CCHelper::WEBCONTENT}\"]")).not_to be_nil
+      doc = Nokogiri::XML.parse(@zip_file.read("#{CC::CCHelper.create_key(@q1, global: true)}/assessment_meta.xml"))
+      expect(@zip_file.read("web_resources/test_image.jpg")).not_to be_nil
+      expect(doc.at_css("description").text).to include("$IMS-CC-FILEBASE$/test_image.jpg")
 
       alt_mig_id2 = CC::CCHelper.create_key(@q2, "canvas_", global: true)
       expect(@manifest_doc.at_css("resource[identifier=#{alt_mig_id2}][type=\"#{CC::CCHelper::LOR}\"]")).not_to be_nil
@@ -353,7 +365,7 @@ describe "Common Cartridge exporting" do
                     migration_id: "QUE_1017_A2", text: "False", weight: 0, id: 2279
                   }]
       }.with_indifferent_access
-      qq.write_attribute(:question_data, data)
+      qq["question_data"] = data
       qq.save!
 
       @ce.export_type = ContentExport::QTI
@@ -393,7 +405,7 @@ describe "Common Cartridge exporting" do
                question_text: %(Image yo: <img src="/courses/#{@course.id}/files/#{att1.id}/preview">),
                answers: [{ migration_id: "QUE_1016_A1", text: "True", weight: 100, id: 8080 },
                          { migration_id: "QUE_1017_A2", text: "False", weight: 0, id: 2279 }] }.with_indifferent_access
-      qq.write_attribute(:question_data, data)
+      qq["question_data"] = data
       qq.save!
 
       attachment_model(uploaded_data: stub_png_data)
@@ -510,7 +522,7 @@ describe "Common Cartridge exporting" do
                     migration_id: "QUE_1017_A2", text: "False", weight: 0, id: 2279
                   }]
       }.with_indifferent_access
-      qq.write_attribute(:question_data, data)
+      qq["question_data"] = data
       qq.save!
 
       @ce.export_type = ContentExport::QTI
@@ -712,7 +724,7 @@ describe "Common Cartridge exporting" do
                question_text: "Image yo: <img src=\"/courses/#{@course.id}/files/#{@att.id}/preview\">",
                answers: [{ migration_id: "QUE_1016_A1", text: "True", weight: 100, id: 8080 },
                          { migration_id: "QUE_1017_A2", text: "False", weight: 0, id: 2279 }] }.with_indifferent_access
-      qq.write_attribute(:question_data, data)
+      qq["question_data"] = data
       qq.save!
 
       @ce.export_type = ContentExport::COMMON_CARTRIDGE
@@ -762,7 +774,7 @@ describe "Common Cartridge exporting" do
                "assessment_question_id" => nil,
                "question_name" => "personality",
                "points_possible" => 1 }.with_indifferent_access
-      qq.write_attribute(:question_data, data)
+      qq["question_data"] = data
       qq.save!
 
       @ce.export_type = ContentExport::QTI
@@ -1327,6 +1339,12 @@ describe "Common Cartridge exporting" do
         check_resource_node(page, CC::CCHelper::WEBCONTENT, false)
       end
 
+      it "includes wiki page with future availability for teacher" do
+        page = @course.wiki_pages.create!(title: "wiki", body: "ohai", unlock_at: 1.week.from_now)
+        run_export
+        check_resource_node(page, CC::CCHelper::WEBCONTENT)
+      end
+
       describe "for teachers in concluded courses" do
         before :once do
           teacher_in_course active_all: true
@@ -1470,6 +1488,36 @@ describe "Common Cartridge exporting" do
             doc = Nokogiri::XML.parse(@zip_file.read("#{assignment_id}/assignment_settings.xml"))
             expect(doc).to_not be_nil
           end
+        end
+      end
+    end
+
+    describe "setting is_discussion_checkpoints_enabled ff on BP export" do
+      subject { run_export_without_file_parse }
+
+      before do
+        @ce.update!(export_type: ContentExport::COURSE_TEMPLATE_COPY)
+      end
+
+      context "when is_discussion_checkpoints_enabled is disabled" do
+        let(:expected_settings) { { is_discussion_checkpoints_enabled: false } }
+
+        before { @course.root_account.disable_feature!(:discussion_checkpoints) }
+
+        it "calls converter_class with proper settings" do
+          expect(CC::Importer::Canvas::Converter).to receive(:new).with(hash_including(expected_settings)).and_call_original
+          subject
+        end
+      end
+
+      context "when is_discussion_checkpoints_enabled is enabled" do
+        let(:expected_settings) { { is_discussion_checkpoints_enabled: true } }
+
+        before { @course.root_account.enable_feature!(:discussion_checkpoints) }
+
+        it "calls converter_class with proper settings" do
+          expect(CC::Importer::Canvas::Converter).to receive(:new).with(hash_including(expected_settings)).and_call_original
+          subject
         end
       end
     end

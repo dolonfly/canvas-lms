@@ -89,7 +89,7 @@ class CommunicationChannel < ActiveRecord::Base
   # as TYPE_EMAIL.  It is just kept distinct for the purposes of customers
   # querying records in Canvas Data.
   def path_type
-    raw_value = read_attribute(:path_type)
+    raw_value = super
     return TYPE_EMAIL if raw_value == TYPE_PERSONAL_EMAIL
 
     raw_value
@@ -295,9 +295,25 @@ class CommunicationChannel < ActiveRecord::Base
     !raw_number.start_with?(Login::OtpHelper::DEFAULT_US_COUNTRY_CODE)
   end
 
+  def send_dsr_notification!(dsr_request)
+    account = dsr_request.account
+    download_url = dsr_request.access_url
+    tz = dsr_request.requestor.time_zone || "UTC"
+    request_time = dsr_request.updated_at.in_time_zone(tz).strftime("%B%e, %Y at%l:%M %p")
+
+    m = messages.temp_record
+    m.to = path
+    m.context = account || Account.default
+    m.user = user
+    m.notification = Notification.new(name: "dsr_request", category: "Registration")
+    m.data = { download_url:, request_time: }
+    m.parse!("email")
+    m.subject = "Canvas DSR Code"
+    Mailer.deliver(Mailer.create_message(m))
+  end
+
   def send_otp!(code, account = nil)
     message = t :body, "Your Canvas verification code is %{verification_code}", verification_code: code
-
     case path_type
     when TYPE_SMS
       if Setting.get("mfa_via_sms", true) == "true" && e164_path && account&.feature_enabled?(:notification_service)

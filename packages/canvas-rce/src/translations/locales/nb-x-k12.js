@@ -313,7 +313,9 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Rediger ikon" },
   "edit_link_7f53bebb": { "message": "Rediger lenke" },
-  "editor_statusbar_26ac81fc": { "message": "Redigering Statusbar" },
+  "editor_status_bar_653f44ee": {
+    "message": "Statuslinje for redigeringsverktøy"
+  },
   "element_starting_with_start_91bf4c3b": {
     "message": "Element som starter med { start }"
   },
@@ -605,6 +607,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Lenker til en ekstern side."
   },
+  "lists_cd1336fc": { "message": "Lister" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Lister må formateres som lister."
   },
@@ -1016,6 +1019,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Stiler" },
   "submit_a3cc6859": { "message": "Send inn" },
+  "submitting_b90fac62": { "message": "Sender inn…" },
   "subscript_59744f96": { "message": "Senket skrift" },
   "subset_19c1a92f": { "message": "Delsett" },
   "subset_strict_8d8948d6": { "message": "Delsett (streng)" },

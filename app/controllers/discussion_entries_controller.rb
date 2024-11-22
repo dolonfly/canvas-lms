@@ -24,6 +24,7 @@ class DiscussionEntriesController < ApplicationController
 
   def show
     @entry = @context.discussion_entries.find(params[:id]).tap { |e| e.current_user = @current_user }
+    page_has_instui_topnav
     if @entry.deleted?
       flash[:notice] = t :deleted_entry_notice, "That entry has been deleted"
       redirect_to named_context_url(@context, :context_discussion_topic_url, @entry.discussion_topic_id)
@@ -38,7 +39,7 @@ class DiscussionEntriesController < ApplicationController
 
   def create
     @topic = @context.discussion_topics.active.find(params[:discussion_entry].delete(:discussion_topic_id))
-    params[:discussion_entry].delete :remove_attachment rescue nil
+    params[:discussion_entry].delete(:remove_attachment)
     parent_id = params[:discussion_entry].delete(:parent_id)
 
     entry_params = params.require(:discussion_entry).permit(:message, :plaintext_message)

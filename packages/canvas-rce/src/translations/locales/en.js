@@ -312,7 +312,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Edit Icon" },
   "edit_link_7f53bebb": { "message": "Edit Link" },
-  "editor_statusbar_26ac81fc": { "message": "Editor Statusbar" },
+  "editor_status_bar_653f44ee": { "message": "Editor Status Bar" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Element starting with { start }"
   },
@@ -1003,6 +1003,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Styles" },
   "submit_a3cc6859": { "message": "Submit" },
+  "submitting_b90fac62": { "message": "Submitting..." },
   "subscript_59744f96": { "message": "Subscript" },
   "subset_19c1a92f": { "message": "Subset" },
   "subset_strict_8d8948d6": { "message": "Subset (Strict)" },

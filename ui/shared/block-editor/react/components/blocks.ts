@@ -26,18 +26,20 @@ import {IconBlock} from './user/blocks/IconBlock'
 import {PageBlock} from './user/blocks/PageBlock'
 import {ImageBlock} from './user/blocks/ImageBlock'
 import {RCEBlock} from './user/blocks/RCEBlock'
+import {GroupBlock} from './user/blocks/GroupBlock'
+import {DividerBlock} from './user/blocks/DividerBlock'
 
 // sections
 import {ResourcesSection, ResourcesSectionInner} from './user/sections/ResourcesSection'
-import {ColumnsSection} from './user/sections/ColumnsSection'
+import {ColumnsSection, ColumnsSectionInner} from './user/sections/ColumnsSection'
 import {HeroSection, HeroTextHalf} from './user/sections/HeroSection'
 import {NavigationSection, NavigationSectionInner} from './user/sections/NavigationSection'
 import {AboutSection, AboutTextHalf} from './user/sections/AboutSection'
 import {FooterSection} from './user/sections/FooterSection'
-import {QuizSection} from './user/sections/QuizSection'
+import {KnowledgeCheckSection} from './user/sections/KnowledgeCheckSection'
 import {AnnouncementSection} from './user/sections/AnnouncementSection'
 import {BlankSection} from './user/sections/BlankSection'
-import {TabsBlock, TabBlock} from './user/blocks/TabsBlock'
+import {TabsBlock, TabBlock, TabContent} from './user/blocks/TabsBlock'
 
 import {NoSections} from './user/common'
 
@@ -51,11 +53,13 @@ const blocks = {
   IconBlock,
   ImageBlock,
   RCEBlock,
-  QuizSection,
+  KnowledgeCheckSection,
   AnnouncementSection,
   ResourcesSection,
   ResourcesSectionInner,
   ColumnsSection,
+  ColumnsSectionInner,
+  GroupBlock,
   NoSections,
   HeroSection,
   HeroTextHalf,
@@ -67,6 +71,8 @@ const blocks = {
   BlankSection,
   TabsBlock,
   TabBlock,
+  TabContent,
+  DividerBlock,
 }
 
 export {blocks}

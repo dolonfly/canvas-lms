@@ -19,7 +19,7 @@ import React from 'react'
 import {fireEvent, render, screen} from '@testing-library/react'
 import {AddressBook, USER_TYPE, CONTEXT_TYPE, BACK_BUTTON_TYPE} from '../AddressBook'
 import {AlertManagerContext} from '@canvas/alerts/react/AlertManager'
-import {ApolloProvider} from 'react-apollo'
+import {ApolloProvider} from '@apollo/react-common'
 import {handlers} from '../../../../graphql/mswHandlers'
 import {mswClient} from '../../../../../../shared/msw/mswClient'
 import {mswServer} from '../../../../../../shared/msw/mswServer'
@@ -107,7 +107,7 @@ describe('Address Book Component', () => {
 
     it('Should render a text input', async () => {
       const {findByTestId} = setup(defaultProps)
-      const input = await findByTestId('address-book-input')
+      const input = await findByTestId('-address-book-input')
       expect(input).toBeTruthy()
     })
 
@@ -389,7 +389,7 @@ describe('Address Book Component', () => {
     it('Should send search input through onTextChange callback', async () => {
       const onChangeSpy = jest.fn()
       const {findByTestId} = setup({...defaultProps, onTextChange: onChangeSpy})
-      const input = await findByTestId('address-book-input')
+      const input = await findByTestId('-address-book-input')
       fireEvent.change(input, {target: {value: 'Test'}})
       expect(onChangeSpy.mock.calls.length).toBe(1)
     })

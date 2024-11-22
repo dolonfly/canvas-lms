@@ -25,14 +25,14 @@ describe MediaObject do
 
   context "loading with legacy support" do
     it "loads by either media_id or old_media_id" do
-      mo = factory_with_protected_attributes(MediaObject, media_id: "0_abcdefgh", old_media_id: "1_01234567", context: @course)
+      mo = MediaObject.create!(media_id: "0_abcdefgh", old_media_id: "1_01234567", context: @course)
 
       expect(MediaObject.by_media_id("0_abcdefgh").first).to eq mo
       expect(MediaObject.by_media_id("1_01234567").first).to eq mo
     end
 
     it "does not find an arbitrary MediaObject when given a nil id" do
-      factory_with_protected_attributes(MediaObject, media_id: "0_abcdefgh", context: @course)
+      MediaObject.create!(media_id: "0_abcdefgh", context: @course)
       expect(MediaObject.by_media_id(nil).first).to be_nil
     end
 
@@ -722,6 +722,30 @@ describe MediaObject do
       other_attachment = attachment_model(media_entry_id: media_object.media_id)
       attachment_model(media_entry_id: "something else")
       expect(media_object.attachments_by_media_id).to match_array([attachment, other_attachment])
+    end
+  end
+
+  context "validations" do
+    it "validates auto_caption_status" do
+      expect do
+        MediaObject.create!(
+          context: @course,
+          title: "uploaded_video.mp4",
+          media_id: "m-somejunkhere",
+          media_type: "video",
+          auto_caption_status: "non_existent_status"
+        )
+      end.to raise_error(ActiveRecord::RecordInvalid)
+
+      expect do
+        MediaObject.create!(
+          context: @course,
+          title: "uploaded_video.mp4",
+          media_id: "m-somejunkhere",
+          media_type: "video",
+          auto_caption_status: "failed_captions"
+        )
+      end.not_to raise_error
     end
   end
 end

@@ -314,6 +314,7 @@ class AccountsController < ApplicationController
   include Api::V1::Account
   include CustomSidebarLinksHelper
   include DefaultDueTimeHelper
+  include Api::V1::QuizIpFilter
 
   INTEGER_REGEX = /\A[+-]?\d+\z/
   SIS_ASSINGMENT_NAME_LENGTH_DEFAULT = 255
@@ -490,10 +491,16 @@ class AccountsController < ApplicationController
                       microsoft_sync_tenant
                       microsoft_sync_login_attribute
                       microsoft_sync_login_attribute_suffix
-                      microsoft_sync_remote_attribute]
-    public_attrs << :password_policy if @account.password_complexity_enabled? && !@account.site_admin?
+                      microsoft_sync_remote_attribute
+                      enable_as_k5_account
+                      use_classic_font_in_k5]
+    settings_hash = public_attrs.index_with { |key| @account.settings[key] }.compact
 
-    render json: public_attrs.index_with { |key| @account.settings[key] }.compact
+    if @account.password_complexity_enabled? && !@account.site_admin?
+      settings_hash[:password_policy] = @account.password_policy
+    end
+
+    render json: settings_hash
   end
 
   # @API List environment settings
@@ -511,7 +518,7 @@ class AccountsController < ApplicationController
   #   { "calendar_contexts_limit": true, "open_registration": false, ...}
   #
   def environment
-    render json: cached_js_env_account_settings
+    render json: cached_js_env_root_account_settings
   end
 
   # @API Permissions
@@ -740,8 +747,8 @@ class AccountsController < ApplicationController
     order = case params[:sort]
             when "course_status"
               "(CASE
-                WHEN workflow_state = 'available' THEN 1
-                WHEN workflow_state = 'completed' THEN 2
+                WHEN courses.workflow_state = 'available' THEN 1
+                WHEN courses.workflow_state = 'completed' THEN 2
                 ELSE 0
               END)"
             when "course_name"
@@ -918,6 +925,16 @@ class AccountsController < ApplicationController
                  }
   end
 
+  def quiz_ip_filters
+    if authorized_action(@account, @current_user, :read)
+      available_filters = @account.available_ip_filters(params[:search_term]) || []
+
+      paginated_set = Api.paginate(available_filters, self, api_v1_quiz_ip_filters_url)
+      renderable = quiz_ip_filters_json(paginated_set, @context, @current_user, session)
+      render json: renderable
+    end
+  end
+
   # Delegated to by the update action (when the request is an api_request?)
   def update_api
     if authorized_action(@account, @current_user, [:manage_account_settings, :manage_storage_quotas])
@@ -956,8 +973,8 @@ class AccountsController < ApplicationController
       unless account_settings.empty?
         if @account.grants_right?(@current_user, session, :manage_account_settings)
           if account_settings[:settings]
-            if @account.root_account? && @account.feature_enabled?(:password_complexity) && !@account.site_admin?
-              policy_settings = account_settings[:settings][:password_policy].slice(*permitted_password_policy_settings)
+            if @account.password_complexity_enabled? && (policy_settings = account_settings[:settings][:password_policy])
+              policy_settings = policy_settings.slice(*permitted_password_policy_settings)
 
               %w[minimum_character_length maximum_login_attempts].each do |setting|
                 next unless policy_settings.key?(setting)
@@ -966,6 +983,11 @@ class AccountsController < ApplicationController
                 @account.validate_password_policy_for(setting, setting_value)
               end
             end
+
+            enable_k5 = params.dig(:account, :settings, :enable_as_k5_account, :value) || @account.enable_as_k5_account?
+            use_classic_font = params.dig(:account, :settings, :use_classic_font_in_k5, :value) || @account.use_classic_font_in_k5?
+            K5::EnablementService.new(@account).set_k5_settings(value_to_boolean(enable_k5), value_to_boolean(use_classic_font))
+
             account_settings[:settings].slice!(*permitted_api_account_settings)
             account_settings[:settings][:password_policy] = policy_settings if policy_settings
             ensure_sis_max_name_length_value!(account_settings)
@@ -1123,6 +1145,12 @@ class AccountsController < ApplicationController
   #
   #   _Required_ feature option:
   #     Enhance password options
+  #
+  # @argument account[settings][enable_as_k5_account][value] [Boolean]
+  #   Enable or disable Canvas for Elementary for this account
+  #
+  # @argument account[settings][use_classic_font_in_k5][value] [Boolean]
+  #   Whether or not the classic font is used on the dashboard. Only applies if enable_as_k5_account is true.
   #
   # @argument override_sis_stickiness [boolean]
   #   Default is true. If false, any fields containing “sticky” changes will not be updated.
@@ -1344,9 +1372,15 @@ class AccountsController < ApplicationController
     end
   end
 
-  def terms_of_service_custom_content
+  def acceptable_use_policy
     TermsOfService.ensure_terms_for_account(@domain_root_account)
-    render plain: @domain_root_account.terms_of_service.terms_of_service_content&.content
+    # disable navigation_header JavaScript bundle to prevent console errors
+    # caused by missing DOM elements in this bare layout
+    @headers = false
+    respond_to do |format|
+      format.html { render html: "", layout: "bare" }
+      format.json { render json: { content: @domain_root_account.terms_of_service.terms_of_service_content&.content }, status: :ok }
+    end
   end
 
   def settings
@@ -1671,6 +1705,12 @@ class AccountsController < ApplicationController
     redirect_to course_url(params[:id])
   end
 
+  def can_create_dsr
+    Feature.definitions["enable_dsr_requests"] &&
+      @account.root_account&.feature_enabled?(:enable_dsr_requests) &&
+      @account.grants_any_right?(@current_user, session, :manage_dsr_requests)
+  end
+
   def course_user_search
     return unless authorized_action(@account, @current_user, :read)
 
@@ -1695,6 +1735,7 @@ class AccountsController < ApplicationController
     js_permissions = {
       can_read_course_list:,
       can_read_roster:,
+      can_create_dsr:,
       can_create_courses: @account.grants_any_right?(@current_user, session, :manage_courses, :create_courses),
       can_create_users: @account.root_account.grants_right?(@current_user, session, :manage_user_logins),
       analytics: @account.service_enabled?(:analytics),
@@ -1944,6 +1985,7 @@ class AccountsController < ApplicationController
 
   PERMITTED_SETTINGS_FOR_UPDATE = [:admins_can_change_passwords,
                                    :admins_can_view_notifications,
+                                   :allow_name_pronunciation_edit_for_admins,
                                    :allow_additional_email_at_registration,
                                    :allow_invitation_previews,
                                    :allow_sending_scores_in_emails,
@@ -2004,7 +2046,9 @@ class AccountsController < ApplicationController
                                                          minimum_character_length
                                                          maximum_login_attempts
                                                          require_number_characters
-                                                         require_symbol_characters] }.freeze,
+                                                         require_symbol_characters
+                                                         common_passwords_attachment_id
+                                                         common_passwords_folder_id] }.freeze,
                                    :prevent_course_availability_editing_by_teachers,
                                    :prevent_course_renaming_by_teachers,
                                    :restrict_quiz_questions,
@@ -2024,8 +2068,10 @@ class AccountsController < ApplicationController
                                    :strict_sis_check,
                                    :storage_quota,
                                    :students_can_create_courses,
+                                   :allow_name_pronunciation_edit_for_students,
                                    :sub_account_includes,
                                    :teachers_can_create_courses,
+                                   :allow_name_pronunciation_edit_for_teachers,
                                    :trusted_referers,
                                    :turnitin_host,
                                    :turnitin_account_id,
@@ -2050,7 +2096,9 @@ class AccountsController < ApplicationController
                                    :disable_inbox_auto_response_for_students,
                                    :enable_name_pronunciation,
                                    :enable_limited_access_for_students,
-                                   :zhjx_message_api_endpoint].freeze
+                                   :enable_as_k5_account,
+                                   :use_classic_font_in_k5,
+                                   :show_sections_in_course_tray].freeze
 
   def permitted_account_attributes
     [:name,
@@ -2089,7 +2137,9 @@ class AccountsController < ApplicationController
        minimum_character_length
        maximum_login_attempts
        require_number_characters
-       require_symbol_characters]
+       require_symbol_characters
+       common_passwords_attachment_id
+       common_passwords_folder_id]
   end
 
   def strong_account_params

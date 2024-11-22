@@ -317,7 +317,7 @@ const locale = {
   },
   "edit_icon_2c6b0e91": { "message": "Ikona edycji" },
   "edit_link_7f53bebb": { "message": "Edytuj łącze" },
-  "editor_statusbar_26ac81fc": { "message": "Pasek stanu edytora" },
+  "editor_status_bar_653f44ee": { "message": "Pasek stanu edytora" },
   "element_starting_with_start_91bf4c3b": {
     "message": "Element rozpoczynający się od { start }"
   },
@@ -611,6 +611,7 @@ const locale = {
   "links_to_an_external_site_de74145d": {
     "message": "Łącza do strony zewnętrznej."
   },
+  "lists_cd1336fc": { "message": "Listy" },
   "lists_should_be_formatted_as_lists_f862de8d": {
     "message": "Listy należy sformatować jako listy."
   },
@@ -1038,6 +1039,7 @@ const locale = {
   },
   "styles_2aa721ef": { "message": "Style" },
   "submit_a3cc6859": { "message": "Prześlij" },
+  "submitting_b90fac62": { "message": "Przesyłanie..." },
   "subscript_59744f96": { "message": "Indeks dolny" },
   "subset_19c1a92f": { "message": "Podzbiór" },
   "subset_strict_8d8948d6": { "message": "Podzbiór (ścisły)" },

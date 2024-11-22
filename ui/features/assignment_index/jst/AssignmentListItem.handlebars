@@ -252,7 +252,8 @@
                       data-assignment-context-id="{{courseId}}"
                       data-assignment-id="{{id}}"
                       data-assignment-type="{{item_assignment_type}}"
-                      title="<%= {{#t}}Assign this Assignment{{/t}} %>"
+                      data-assignment-has-checkpoint="{{isCheckpoint}}"
+                      title="{{#t}}Assign this Assignment{{/t}}"
                       aria-label="{{#t}}Assign To...{{/t}}"
                       data-focus-returns-to="assign_{{id}}_manage_link"
                     >{{#t}}Assign To...{{/t}}</a>
@@ -426,7 +427,8 @@
                       data-assignment-context-id="{{courseId}}"
                       data-assignment-id="{{id}}"
                       data-assignment-type="{{item_assignment_type}}"
-                      title="<%= {{#t}}Assign this Assignment{{/t}} %>"
+                      data-assignment-has-checkpoint="{{isCheckpoint}}"
+                      title="{{#t}}Assign this Assignment{{/t}}"
                       aria-label="{{#t}}Assign To...{{/t}}"
                       data-focus-returns-to="assign_{{id}}_manage_link"
                     >{{#t}}Assign To...{{/t}}</a>

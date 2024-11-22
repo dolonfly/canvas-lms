@@ -647,7 +647,7 @@
     "edit_link_7f53bebb": {
         "message": "Chỉnh Sửa Liên Kết"
     },
-    "editor_statusbar_26ac81fc": {
+    "editor_status_bar_653f44ee": {
         "message": "Thanh Trạng Thái Trình Chỉnh Sửa"
     },
     "element_starting_with_start_91bf4c3b": {
@@ -1294,6 +1294,9 @@
     },
     "links_to_an_external_site_de74145d": {
         "message": "Liên kết đến một trang bên ngoài."
+    },
+    "lists_cd1336fc": {
+        "message": "Danh Sách"
     },
     "lists_should_be_formatted_as_lists_f862de8d": {
         "message": "Các danh sách phải được định dạng dưới dạng danh sách."
@@ -2176,6 +2179,9 @@
     },
     "submit_a3cc6859": {
         "message": "Nộp"
+    },
+    "submitting_b90fac62": {
+        "message": "Đang nộp..."
     },
     "subscript_59744f96": {
         "message": "Thu Nhỏ Nằm Trên"

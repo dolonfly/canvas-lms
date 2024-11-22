@@ -30,6 +30,34 @@ describe "new groups" do
       course_with_teacher_logged_in
     end
 
+    context "differentiation_tags" do
+      before :once do
+        Account.default.enable_feature!(:differentiation_tags)
+      end
+
+      it "does not have Visit Group Homepage option in group actions for non_collaborative groups" do
+        category = @course.group_categories.build(name: "category 1", non_collaborative: true)
+        category.save!
+        category.groups.create!(context: @course)
+
+        get "/courses/#{@course.id}/groups"
+        f("a[id*='actions']").click
+        expect(fj("li a:contains('Edit')")).to be_present
+        expect(f("body")).not_to contain_jqcss("li a:contains('Visit Group Homepage')")
+      end
+
+      it "has Visit Group Homepage option in group actions for regular groups" do
+        category = @course.group_categories.build(name: "category 1")
+        category.save!
+        category.groups.create!(context: @course)
+
+        get "/courses/#{@course.id}/groups"
+        f("a[id*='actions']").click
+        expect(fj("li a:contains('Edit')")).to be_present
+        expect(fj("li a:contains('Visit Group Homepage')")).to be_present
+      end
+    end
+
     it "allows teachers to add a group set", priority: "1" do
       get "/courses/#{@course.id}/groups"
       click_add_group_set
@@ -623,6 +651,22 @@ describe "new groups" do
       expect(f(".group[data-id=\"#{@testgroup[0].id}\"] .group-summary")).to include_text("4 / 5 students")
       expect(fj(".unassigned-users-heading.group-heading")).to include_text("Unassigned Students (1)")
       expect(fj(drop_target1)).to include_text("Test Student 3")
+    end
+
+    it "shows the users within a group one per line in 320px" do
+      group_test_setup(3, 1, 1)
+      3.times do |n|
+        add_user_to_group(@students[n], @testgroup.first, false)
+      end
+      driver.manage.window.resize_to(320, 900)
+      get "/courses/#{@course.id}/groups"
+
+      f(".group[data-id=\"#{@testgroup.first.id}\"] .toggle-group").click
+      wait_for_ajaximations
+      f(".group[data-id=\"#{@testgroup.first.id}\"] .toggle-group").click
+      # We hide the users in the group to get the width in % instead of px
+
+      expect(f("li.group .group-user").css_value("width")).to eq "93%"
     end
 
     it "moves leader via drag and drop", priority: "1" do

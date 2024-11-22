@@ -27,6 +27,7 @@ import template from '../../jst/WikiPage.handlebars'
 import StickyHeaderMixin from '@canvas/wiki/backbone/views/StickyHeaderMixin'
 import WikiPageDeleteDialog from '@canvas/wiki/backbone/views/WikiPageDeleteDialog'
 import WikiPageReloadView from '@canvas/wiki/backbone/views/WikiPageReloadView'
+import renderChooseEditorModal from '@canvas/block-editor/react/renderChooseEditorModal'
 import PublishButtonView from '@canvas/publish-button-view'
 import {useScope as useI18nScope} from '@canvas/i18n'
 import htmlEscape from '@instructure/html-escape'
@@ -36,7 +37,8 @@ import '../../jquery/content_locks'
 import DirectShareUserModal from '@canvas/direct-sharing/react/components/DirectShareUserModal'
 import DirectShareCourseTray from '@canvas/direct-sharing/react/components/DirectShareCourseTray'
 import {renderFrontPagePill} from '@canvas/wiki/react/renderFrontPagePill'
-import ItemAssignToTray from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToTray'
+import ItemAssignToManager from '@canvas/context-modules/differentiated-modules/react/Item/ItemAssignToManager'
+import doFetchApi from "@canvas/do-fetch-api-effect";
 
 const I18n = useI18nScope('pages')
 
@@ -55,6 +57,8 @@ export default class WikiPageView extends Backbone.View {
 
     this.prototype.events = {
       'click .delete_page': 'deleteWikiPage',
+      'click .edit-wiki': 'openChooseEditorModalMaybe',
+      'keyclick .edit-wiki': 'openChooseEditorModalMaybe',
       'click .use-as-front-page-menu-item': 'useAsFrontPage',
       'click .unset-as-front-page-menu-item': 'unsetAsFrontPage',
       'click .direct-share-send-to-menu-item': 'openSendTo',
@@ -174,7 +178,38 @@ export default class WikiPageView extends Backbone.View {
     } else if (this.$sequenceFooter != null) {
       this.$sequenceFooter.msfAnimation(false)
     }
-    if (this.$sequenceFooter) return this.$sequenceFooter.appendTo($('#module_navigation_target'))
+    if (this.$sequenceFooter) this.$sequenceFooter.appendTo($('#module_navigation_target'))
+
+    this.maybeRenderBlockEditorContent()
+  }
+
+  async openChooseEditorModalMaybe(e) {
+    if (
+      this.model.get('body') === null &&
+      !this.model.get('block_editor_attributes')?.blocks &&
+      ENV.FEATURES?.BLOCK_EDITOR
+    ) {
+      if (window.ENV.text_editor_preference == null) {
+        renderChooseEditorModal(e, async editor => {
+          if (editor === 'block_editor') {
+            await doFetchApi({
+              path: `/courses/${this.course_id}/pages/${this.model.get('url')}/create_block_editor`,
+              method: 'PUT',
+            })
+          }
+          window.location.href = `${window.location.href.split('?')[0]}/edit?editor=${editor}`
+        })
+      } else if (window.ENV.text_editor_preference === 'block_editor') {
+        e.preventDefault();
+        await doFetchApi({
+          path: `/courses/${this.course_id}/pages/${this.model.get('url')}/create_block_editor`,
+          method: 'PUT',
+        })
+        window.location.href = `${window.location.href.split('?')[0]}/edit${
+          window.location.href.split('?')[1] ? `?${window.location.href.split('?')[1]}` : ''
+        }`
+      }
+    }
   }
 
   navigateToLinkAnchor() {
@@ -190,16 +225,20 @@ export default class WikiPageView extends Backbone.View {
     }
   }
 
-  renderBlockEditorContent() {
-    if (ENV.BLOCK_EDITOR && this.model.get('block_editor_attributes')?.blocks?.[0]?.data) {
+  maybeRenderBlockEditorContent() {
+    if (
+      this.model.get('editor') === 'block_editor' &&
+      this.model.get('block_editor_attributes')?.blocks
+    ) {
       import('@canvas/block-editor')
         .then(({renderBlockEditorView}) => {
           const container = document.getElementById('block-editor-content')
           container.classList.add('block-editor-view')
-          const content = JSON.parse(this.model.get('block_editor_attributes').blocks[0].data)
+          const content = this.model.get('block_editor_attributes')
           renderBlockEditorView(content, container)
         })
         .catch(e => {
+          // eslint-disable-next-line no-alert
           window.alert('Error loading block editor content')
         })
     }
@@ -207,7 +246,6 @@ export default class WikiPageView extends Backbone.View {
 
   afterRender() {
     super.afterRender(...arguments)
-    this.renderBlockEditorContent()
     this.navigateToLinkAnchor()
     this.reloadView = new WikiPageReloadView({
       el: this.$pageChangedAlert,
@@ -316,7 +354,7 @@ export default class WikiPageView extends Backbone.View {
     const onTrayExited = () => ReactDOM.unmountComponentAtNode(mountPoint)
 
     ReactDOM.render(
-      <ItemAssignToTray
+      <ItemAssignToManager
         open={open}
         onClose={onTrayClose}
         onDismiss={onTrayClose}
@@ -337,13 +375,8 @@ export default class WikiPageView extends Backbone.View {
   toJSON() {
     const json = super.toJSON(...arguments)
     json.page_id = this.model.get('page_id')
-    if (ENV.BLOCK_EDITOR && json.block_editor_attributes?.blocks?.[0]?.data) {
-      json.body = '<div id="block-editor-content"></div>'
-      // json.body = `<pre>${JSON.stringify(
-      //   JSON.parse(json.block_editor_attributes.blocks[0].data),
-      //   null,
-      //   2
-      // )}</pre>`
+    if (this.model.get('editor') === 'block_editor') {
+      json.body = '<div id="block-editor-content"/>' // this is where the BlockEditorView will be rendered
     }
     json.modules_path = this.modules_path
     json.wiki_pages_path = this.wiki_pages_path

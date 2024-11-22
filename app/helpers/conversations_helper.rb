@@ -31,7 +31,6 @@ module ConversationsHelper
     domain_root_account_id:,
     media_comment_id:,
     media_comment_type:,
-    user_note:,
     automated: false
   )
     if conversation.conversation.replies_locked_for?(current_user, recipients)
@@ -76,7 +75,6 @@ module ConversationsHelper
       domain_root_account_id:,
       media_comment_id:,
       media_comment_type:,
-      user_note:,
       current_user:,
       automated:
     )
@@ -88,7 +86,12 @@ module ConversationsHelper
       conversation.delay(strand: "add_message_#{conversation.global_conversation_id}").process_new_message(message_args, recipients, message_ids, tags)
       # The message is delayed and will be processed later so there is nothing to return
       # right now. If there is no error, success can be assumed.
-      { message: nil, recipients_count: recipients ? recipients.count : 0, status: :accepted }
+      # for displaying purposed, a preview of the processed message is created
+      message = Conversation.build_message(*message_args)
+      message.id = 0
+      message.conversation_id = conversation.conversation_id
+      message.created_at = Time.now.utc
+      { message:, recipients_count: recipients ? recipients.count : 0, status: :accepted }
     end
   rescue ConversationsHelper::InvalidMessageForConversationError
     raise ConversationsHelper::Error.new(message: I18n.t("not for this conversation"), status: :bad_request, attribute: "included_messages")
@@ -153,7 +156,8 @@ module ConversationsHelper
       users,
       context:,
       conversation_id:,
-      strict_checks: !Account.site_admin.grants_right?(current_user, session, :send_messages)
+      strict_checks: !Account.site_admin.grants_right?(current_user, session, :send_messages),
+      include_concluded: false
     )
 
     # include users that were already part of the given conversation
@@ -166,7 +170,7 @@ module ConversationsHelper
       known.concat(unknown_users.map { |id| MessageableUser.find(id) })
     end
 
-    contexts.each { |c| known.concat(current_user.address_book.known_in_context(c)) }
+    contexts.each { |c| known.concat(current_user.address_book.known_in_context(c, include_concluded: false)) }
     @recipients = known.uniq(&:id)
     @recipients.reject! { |u| u.id == current_user.id } unless @recipients == [current_user] && recipients.count == 1
     @recipients
@@ -226,7 +230,6 @@ module ConversationsHelper
     domain_root_account_id: nil,
     media_comment_id: nil,
     media_comment_type: nil,
-    user_note: nil,
     current_user: @current_user,
     automated: false
   )
@@ -237,7 +240,6 @@ module ConversationsHelper
       domain_root_account_id ||= @domain_root_account.id
       media_comment_id ||= params[:media_comment_id]
       media_comment_type ||= params[:media_comment_type]
-      user_note = value_to_boolean(params[:user_note]) if user_note.nil?
     end
     [
       current_user,
@@ -248,7 +250,6 @@ module ConversationsHelper
         automated:,
         root_account_id: domain_root_account_id,
         media_comment: infer_media_comment(media_comment_id, media_comment_type, domain_root_account_id, current_user),
-        generate_user_note: user_note
       }
     ]
   end
@@ -364,7 +365,7 @@ module ConversationsHelper
 
       # Find the most recent ooo message to the recipient since ooo start date
       last_sent_ooo_response = ConversationMessage
-                               .joins("JOIN #{ConversationParticipant.quoted_table_name} ON #{ConversationMessage.quoted_table_name}.conversation_id = #{ConversationMessage.quoted_table_name}.conversation_id")
+                               .joins("JOIN #{ConversationParticipant.quoted_table_name} ON #{ConversationParticipant.quoted_table_name}.conversation_id = #{ConversationMessage.quoted_table_name}.conversation_id")
                                .where("automated = TRUE AND author_id = :author_id AND user_id = :user_id AND conversation_messages.root_account_ids = :root_account_ids AND created_at >= :start",
                                       author_id: ooo_message_author.id,
                                       user_id: ooo_message_recipient.id,
@@ -400,7 +401,6 @@ module ConversationsHelper
         domain_root_account_id: root_account_id,
         media_comment_id: nil,
         media_comment_type: nil,
-        user_note: nil,
         automated: true
       )
     end

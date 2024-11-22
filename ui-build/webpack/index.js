@@ -33,7 +33,6 @@ const isDev = process.env.NODE_ENV === 'development'
 const {
   swc,
   css,
-  emberHandlebars,
   fonts,
   handlebars,
   images,
@@ -76,6 +75,12 @@ const shouldWriteCache =
  */
 module.exports = {
   mode: isProduction ? 'production' : 'development',
+
+  // enable native CSS support for Rspack using experimental feature
+  // https://rspack.dev/guide/tech/css
+  experiments: {
+    css: true,
+  },
 
   // infer platform and ES-features from @instructure/browserslist-config-canvas-lms
   target: ['browserslist'],
@@ -190,7 +195,6 @@ module.exports = {
       fonts,
       ...swc,
       handlebars,
-      emberHandlebars,
     ].filter(Boolean),
   },
 

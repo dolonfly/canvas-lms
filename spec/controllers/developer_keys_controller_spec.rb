@@ -87,16 +87,22 @@ describe DeveloperKeysController do
           expect(assigns[:js_env][:validLtiScopes]).to eq TokenScopes::LTI_SCOPES
         end
 
+        context "when the platform_notification_service feature flag is disabled" do
+          before do
+            Account.default.disable_feature!(:platform_notification_service)
+          end
+
+          it "excludes the platform_notification_service scope" do
+            get "index", params: { account_id: Account.site_admin.id }
+            expect(assigns[:js_env][:validLtiScopes]).to eq TokenScopes::LTI_SCOPES.except(TokenScopes::LTI_PNS_SCOPE)
+          end
+        end
+
         it "includes all valid LTI placements in js env" do
           # enable conference placement
           Account.site_admin.enable_feature! :conference_selection_lti_placement
           get "index", params: { account_id: Account.site_admin.id }
           expect(assigns.dig(:js_env, :validLtiPlacements)).to match_array Lti::ResourcePlacement.public_placements(Account.site_admin)
-        end
-
-        it 'includes the "includes parameter" release flag' do
-          get "index", params: { account_id: Account.site_admin.id }
-          expect(assigns.dig(:js_env, :includesFeatureFlagEnabled)).to be false
         end
 
         describe "js bundles" do

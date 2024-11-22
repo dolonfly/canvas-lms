@@ -31,7 +31,7 @@ import React, {useContext, useEffect, useState} from 'react'
 import {SearchResultsCount} from '../../components/SearchResultsCount/SearchResultsCount'
 import {ThreadPagination} from '../../components/ThreadPagination/ThreadPagination'
 import {UPDATE_DISCUSSION_ENTRIES_READ_STATE} from '../../../graphql/Mutations'
-import {useMutation} from 'react-apollo'
+import {useMutation} from '@apollo/react-hooks'
 import {View} from '@instructure/ui-view'
 
 const I18n = useI18nScope('discussion_topics_post')
@@ -122,7 +122,7 @@ export const DiscussionTopicRepliesContainer = props => {
   }
 
   return (
-    <View as="div" data-testid="discussion-root-entry-container">
+    <View as="div" padding="mediumSmall" data-testid="discussion-root-entry-container">
       {searchTerm && <SearchResultsCount resultsFound={props.discussionTopic.searchEntryCount} />}
       {props.discussionTopic.discussionEntriesConnection.nodes.map(thread => {
         return (
@@ -136,6 +136,7 @@ export const DiscussionTopicRepliesContainer = props => {
             highlightEntryId={props.highlightEntryId}
             setHighlightEntryId={props.setHighlightEntryId}
             userSplitScreenPreference={props.userSplitScreenPreference}
+            refetchDiscussionEntries={props.refetchDiscussionEntries}
           />
         )
       })}
@@ -161,6 +162,7 @@ DiscussionTopicRepliesContainer.propTypes = {
   isSearchResults: PropTypes.bool,
   setHighlightEntryId: PropTypes.func,
   userSplitScreenPreference: PropTypes.bool,
+  refetchDiscussionEntries: PropTypes.func,
 }
 
 export default DiscussionTopicRepliesContainer

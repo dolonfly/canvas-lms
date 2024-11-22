@@ -44,7 +44,7 @@ describe GradebooksController do
       before do
         user_session(@student)
         @assignment = @course.assignments.create!(title: "Example Assignment")
-        @media_object = factory_with_protected_attributes(MediaObject, media_id: "m-someid", media_type: "video", title: "Example Media Object", context: @course)
+        @media_object = MediaObject.create!(media_id: "m-someid", media_type: "video", title: "Example Media Object", context: @course)
         @mock_kaltura = double("CanvasKaltura::ClientV3")
         allow(CanvasKaltura::ClientV3).to receive(:new).and_return(@mock_kaltura)
         @media_sources = [{
@@ -93,7 +93,10 @@ describe GradebooksController do
         attachment = attachment_model(context: @assignment)
         attachment2 = attachment_model(context: @assignment)
         other_student = @course.enroll_user(User.create!(name: "some other user")).user
-        deleted_media_object = factory_with_protected_attributes(MediaObject, media_id: "m-someid2", media_type: "video", title: "Example Media Object 2", context: @course)
+        deleted_media_object = MediaObject.create!(media_id: "m-someid2",
+                                                   media_type: "video",
+                                                   title: "Example Media Object 2",
+                                                   context: @course)
         submission_to_comment = @assignment.grade_student(@student, grade: 10, grader: @teacher).first
         comment_1 = submission_to_comment.add_comment(comment: "a student comment", author: @teacher, attachments: [attachment])
         comment_2 = submission_to_comment.add_comment(comment: "another student comment", author: @teacher, attachments: [attachment, attachment2])
@@ -986,19 +989,6 @@ describe GradebooksController do
         expect(response).to render_template("gradebooks/gradebook")
       end
 
-      it "renders screenreader gradebook when preferred with 'individual'" do
-        @admin.set_preference(:gradebook_version, "individual")
-        get "show", params: { course_id: @course.id }
-        expect(response).to render_template("gradebooks/individual")
-      end
-
-      it "renders screenreader gradebook when preferred with 'srgb'" do
-        # most a11y users will have this set from before New Gradebook existed
-        @admin.set_preference(:gradebook_version, "srgb")
-        get "show", params: { course_id: @course.id }
-        expect(response).to render_template("gradebooks/individual")
-      end
-
       it "renders default gradebook when user has no preference" do
         get "show", params: { course_id: @course.id }
         expect(response).to render_template("gradebooks/gradebook")
@@ -1008,20 +998,6 @@ describe GradebooksController do
         allow(Rails.env).to receive(:development?).and_return(false)
         @admin.set_preference(:gradebook_version, "default")
         get "show", params: { course_id: @course.id, version: "individual" }
-        expect(response).to render_template("gradebooks/gradebook")
-      end
-
-      it "renders enhanced individual gradebook when individual_enhanced & individual_gradebook_enhancements is enabled" do
-        @course.root_account.enable_feature!(:individual_gradebook_enhancements)
-        @admin.set_preference(:gradebook_version, "individual_enhanced")
-        get "show", params: { course_id: @course.id }
-        expect(response).to render_template("layouts/application")
-      end
-
-      it "renders traditional gradebook when individual_gradebook_enhancements is disabled" do
-        @course.root_account.disable_feature!(:individual_gradebook_enhancements)
-        @admin.set_preference(:gradebook_version, "individual_enhanced")
-        get "show", params: { course_id: @course.id }
         expect(response).to render_template("gradebooks/gradebook")
       end
 
@@ -1099,20 +1075,6 @@ describe GradebooksController do
       it "renders default gradebook" do
         get "show", params: { course_id: @course.id, version: "default" }
         expect(response).to render_template("gradebooks/gradebook")
-      end
-    end
-
-    context "in development and requested version is 'individual'" do
-      before do
-        account_admin_user(account: @course.root_account)
-        user_session(@admin)
-        @admin.set_preference(:gradebook_version, "default")
-        allow(Rails.env).to receive(:development?).and_return(true)
-      end
-
-      it "renders screenreader gradebook" do
-        get "show", params: { course_id: @course.id, version: "individual" }
-        expect(response).to render_template("gradebooks/individual")
       end
     end
 
@@ -1249,31 +1211,6 @@ describe GradebooksController do
         it "sets allow_separate_first_last_names in the ENV to false if the feature is not enabled" do
           get :show, params: { course_id: @course.id }
           expect(gradebook_options.fetch(:allow_separate_first_last_names)).to be false
-        end
-      end
-
-      describe "show_message_students_with_observers_dialog" do
-        shared_examples_for "environment variable" do
-          it "is true when the feature is enabled" do
-            Account.site_admin.enable_feature!(:message_observers_of_students_who)
-            get :show, params: { course_id: @course.id }
-            expect(gradebook_options[:show_message_students_with_observers_dialog]).to be true
-          end
-
-          it "is false when the feature is not enabled" do
-            get :show, params: { course_id: @course.id }
-            expect(gradebook_options[:show_message_students_with_observers_dialog]).to be false
-          end
-        end
-
-        context "when individual gradebook is enabled" do
-          before { @teacher.set_preference(:gradebook_version, "srgb") }
-
-          include_examples "environment variable"
-        end
-
-        context "when default gradebook is enabled" do
-          include_examples "environment variable"
         end
       end
 
@@ -1672,12 +1609,6 @@ describe GradebooksController do
         get "show", params: { course_id: @course.id }
         expect(response).to render_template("gradebook")
       end
-
-      it "redirects to Individual View with a friendly URL" do
-        @teacher.set_preference(:gradebook_version, "srgb")
-        get "show", params: { course_id: @course.id }
-        expect(response).to render_template("gradebooks/individual")
-      end
     end
 
     it "renders the unauthorized page without gradebook authorization" do
@@ -1810,12 +1741,6 @@ describe GradebooksController do
           expect(response).to render_template("gradebooks/gradebook")
         end
 
-        it "renders 'individual' when the user uses individual view" do
-          update_preferred_gradebook_version!("individual")
-          get "show", params: { course_id: @course.id }
-          expect(response).to render_template("gradebooks/individual")
-        end
-
         it "updates the user's preference when the requested view is 'gradebook'" do
           get "show", params: { course_id: @course.id, view: "gradebook" }
           @teacher.reload
@@ -1868,12 +1793,6 @@ describe GradebooksController do
           expect(response).to render_template("gradebooks/gradebook")
         end
 
-        it "renders 'individual' when the user uses individual view" do
-          update_preferred_gradebook_version!("individual")
-          get "show", params: { course_id: @course.id }
-          expect(response).to render_template("gradebooks/individual")
-        end
-
         it "redirects to the gradebook when requesting the preferred view" do
           get "show", params: { course_id: @course.id, view: "gradebook" }
           expect(response).to redirect_to(action: "show")
@@ -1905,12 +1824,6 @@ describe GradebooksController do
           update_preferred_gradebook_version!("2")
           get "show", params: { course_id: @course.id }
           expect(response).to render_template("gradebooks/learning_mastery")
-        end
-
-        it "renders 'individual' when the user uses individual view" do
-          update_preferred_gradebook_version!("individual")
-          get "show", params: { course_id: @course.id }
-          expect(response).to render_template("gradebooks/individual")
         end
 
         it "redirects to the gradebook when requesting the preferred view" do
@@ -3108,23 +3021,53 @@ describe GradebooksController do
       expect(response).not_to be_redirect
     end
 
-    it "loads the platform speedgreader when the feature flag is on and the platform_sg flag is passed" do
+    it "loads the platform speedgrader when the feature flag is on and the platform_sg flag is passed" do
       @assignment.publish
       Account.site_admin.enable_feature!(:platform_service_speedgrader)
       get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id, platform_sg: true }
       expect(response).to render_template(:bare, locals: { anonymous_grading: false })
     end
 
+    it "loads the platform speedgrader when the account allows it and the course enables it" do
+      @assignment.publish
+      Account.site_admin.allow_feature!(:platform_service_speedgrader)
+      @course.enable_feature!(:platform_service_speedgrader)
+      get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id, platform_sg: true }
+      expect(response).to render_template(:bare, locals: { anonymous_grading: false })
+    end
+
+    it "does not load the platform speedgrader when the assignment is moderated" do
+      @assignment.publish
+      @assignment.moderated_grading = true
+      @assignment.final_grader_id = @teacher
+      @assignment.grader_count = 1
+      @assignment.save!
+      Account.site_admin.allow_feature!(:platform_service_speedgrader)
+      @course.enable_feature!(:platform_service_speedgrader)
+      get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id, platform_sg: true }
+      expect(response).to render_template(:speed_grader)
+    end
+
+    it "does not load the platform speedgrader when the assignment is anonymously graded" do
+      @assignment.publish
+      @assignment.anonymous_grading = true
+      @assignment.save!
+      Account.site_admin.allow_feature!(:platform_service_speedgrader)
+      @course.enable_feature!(:platform_service_speedgrader)
+      get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id, platform_sg: true }
+      expect(response).to render_template(:speed_grader)
+    end
+
+    it "does not load the platform speedgrader when the account allows it and the course disables it" do
+      @assignment.publish
+      Account.site_admin.allow_feature!(:platform_service_speedgrader)
+      @course.disable_feature!(:platform_service_speedgrader)
+      get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id, platform_sg: true }
+      expect(response).not_to render_template(:bare, locals: { anonymous_grading: false })
+    end
+
     describe "js_env" do
       let(:js_env) { assigns[:js_env] }
-
-      context "when platform_service_speedgrader is enabled" do
-        it "includes info indicating whether grade by question is supported" do
-          Account.site_admin.enable_feature!(:platform_service_speedgrader)
-          get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id, platform_sg: true }
-          expect(js_env).to have_key :GRADE_BY_QUESTION_SUPPORTED
-        end
-      end
 
       it "includes lti_retrieve_url" do
         get "speed_grader", params: { course_id: @course, assignment_id: @assignment.id }
@@ -3311,7 +3254,7 @@ describe GradebooksController do
 
       describe "rubric_outcome_data" do
         before do
-          @course.account.enable_feature!(:enhanced_rubrics)
+          @course.enable_feature!(:enhanced_rubrics)
         end
 
         it "does not include rubric_outcome_data when the assignment does not have a rubric" do
@@ -3334,12 +3277,27 @@ describe GradebooksController do
         end
 
         it "does not include rubric_outcome_data when the enhanced_rubric feature is disabled" do
-          @course.account.disable_feature!(:enhanced_rubrics)
+          @course.disable_feature!(:enhanced_rubrics)
           rubric = Rubric.create!(context: @course, title: "testing")
           RubricAssociation.create!(context: @course, rubric:, purpose: :grading, association_object: @assignment)
 
           get :speed_grader, params: { course_id: @course, assignment_id: @assignment }
           expect(js_env[:rubric_outcome_data]).to eq []
+        end
+      end
+
+      describe "rubric_assessment_imports_exports" do
+        it "sets rubric_assessment_imports_exports_enabled feature flag value" do
+          Account.site_admin.enable_feature!(:enhanced_rubrics)
+          Account.site_admin.enable_feature!(:rubric_assessment_imports_exports)
+          get :show, params: { course_id: @course.id }
+          expect(assigns[:js_env][:GRADEBOOK_OPTIONS][:rubric_assessment_imports_exports_enabled]).to be(true)
+        end
+
+        it "sets rubric_assessment_imports_exports_enabled to false when enhanced_rubrics not set" do
+          Account.site_admin.enable_feature!(:rubric_assessment_imports_exports)
+          get :show, params: { course_id: @course.id }
+          expect(assigns[:js_env][:GRADEBOOK_OPTIONS][:rubric_assessment_imports_exports_enabled]).to be(false)
         end
       end
     end

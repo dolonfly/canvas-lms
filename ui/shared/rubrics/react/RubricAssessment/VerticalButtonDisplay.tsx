@@ -26,21 +26,21 @@ import {View} from '@instructure/ui-view'
 import {possibleString, possibleStringRange} from '../Points'
 import {escapeNewLineText, rangingFrom} from './utils/rubricUtils'
 
-const {licorice} = colors
+const {shamrock} = colors
 
 type VerticalButtonDisplayProps = {
   isPreviewMode: boolean
   ratings: RubricRating[]
   ratingOrder: string
-  selectedRatingIndex?: number
-  onSelectRating: (index: number) => void
+  selectedRatingId?: string
+  onSelectRating: (rating: RubricRating) => void
   criterionUseRange: boolean
 }
 export const VerticalButtonDisplay = ({
   isPreviewMode,
   ratings,
   ratingOrder,
-  selectedRatingIndex,
+  selectedRatingId,
   onSelectRating,
   criterionUseRange,
 }: VerticalButtonDisplayProps) => {
@@ -52,7 +52,7 @@ export const VerticalButtonDisplay = ({
     >
       {ratings.map((rating, index) => {
         const buttonDisplay = (ratings.length - (index + 1)).toString()
-        const isSelected = selectedRatingIndex === index
+        const isSelected = rating.id != null && rating.id === selectedRatingId
 
         const min = criterionUseRange ? rangingFrom(ratings, index) : undefined
 
@@ -77,7 +77,7 @@ export const VerticalButtonDisplay = ({
                   isPreviewMode={isPreviewMode}
                   isSelected={isSelected}
                   selectedArrowDirection="right"
-                  onClick={() => onSelectRating(index)}
+                  onClick={() => onSelectRating(rating)}
                 />
               </Flex.Item>
               <Flex.Item
@@ -95,7 +95,7 @@ export const VerticalButtonDisplay = ({
                     padding="xx-small"
                     margin="0 0 x-small xx-small"
                     data-testid={`rating-details-${rating.id}`}
-                    themeOverride={{borderColorBrand: licorice, borderWidthMedium: '0.188rem'}}
+                    themeOverride={{borderColorBrand: shamrock, borderWidthMedium: '0.188rem'}}
                   >
                     <View as="div">
                       <Text size="x-small" weight="bold">

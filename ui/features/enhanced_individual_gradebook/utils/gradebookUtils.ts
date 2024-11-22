@@ -51,6 +51,7 @@ import CourseGradeCalculator from '@canvas/grading/CourseGradeCalculator'
 import {scopeToUser, updateWithSubmissions} from '@canvas/grading/EffectiveDueDates'
 import {scoreToGrade, type GradingStandard} from '@instructure/grading-utils'
 import {divide, toNumber} from '@canvas/grading/GradeCalculationHelper'
+import {REPLY_TO_ENTRY, REPLY_TO_TOPIC} from '../react/components/GradingResults'
 
 const I18n = useI18nScope('enhanced_individual_gradebook')
 
@@ -226,6 +227,8 @@ export function computeAssignmentDetailText(
 }
 
 export function mapUnderscoreSubmission(submission: Submission): GradebookUserSubmissionDetails {
+  const parentSubmission = submission
+
   return {
     assignmentId: submission.assignment_id,
     enteredScore: submission.entered_score,
@@ -244,6 +247,20 @@ export function mapUnderscoreSubmission(submission: Submission): GradebookUserSu
     deductedPoints: submission.points_deducted,
     enteredGrade: submission.entered_grade,
     gradeMatchesCurrentSubmission: submission.grade_matches_current_submission,
+    subAssignmentSubmissions: submission.sub_assignment_submissions
+      ? submission.sub_assignment_submissions.map(subAssignmentSubmission => ({
+          assignmentId: parentSubmission.assignment_id, // This is in purpose, we don't leak the sub assignment id.
+          grade: subAssignmentSubmission.grade,
+          gradeMatchesCurrentSubmission: subAssignmentSubmission.grade_matches_current_submission,
+          score: subAssignmentSubmission.score,
+          subAssignmentTag: subAssignmentSubmission.sub_assignment_tag,
+          publishedGrade: subAssignmentSubmission.published_grade,
+          publishedScore: subAssignmentSubmission.published_score,
+          enteredGrade: subAssignmentSubmission.entered_grade,
+          enteredScore: subAssignmentSubmission.entered_score,
+          excused: subAssignmentSubmission.excused,
+        }))
+      : undefined,
   }
 }
 
@@ -314,6 +331,7 @@ export function gradebookOptionsSetup(env: GlobalEnv) {
 
   const defaultGradebookOptions: GradebookOptions = {
     activeGradingPeriods: env.GRADEBOOK_OPTIONS?.active_grading_periods,
+    assignmentEnhancementsEnabled: env.GRADEBOOK_OPTIONS?.assignment_enhancements_enabled,
     changeGradeUrl: env.GRADEBOOK_OPTIONS?.change_grade_url,
     contextId: env.GRADEBOOK_OPTIONS?.context_id,
     contextUrl: env.GRADEBOOK_OPTIONS?.context_url,
@@ -362,6 +380,7 @@ export function gradebookOptionsSetup(env: GlobalEnv) {
     selectedGradingPeriodId: userSettings.contextGet<string>('gradebook_current_grading_period'),
     settingsUpdateUrl: env.GRADEBOOK_OPTIONS?.settings_update_url,
     settingUpdateUrl: env.GRADEBOOK_OPTIONS?.setting_update_url,
+    stickersEnabled: env.GRADEBOOK_OPTIONS?.stickers_enabled,
     sortOrder: defaultAssignmentSort,
     teacherNotes: env.GRADEBOOK_OPTIONS?.teacher_notes,
     userId: env.current_user_id,
@@ -529,4 +548,21 @@ export function disableGrading(
     isInPastGradingPeriodAndNotAdmin(assignment) ||
     (assignment.moderatedGrading && !assignment.gradesPublished)
   )
+}
+
+export function assignmentHasCheckpoints(assignment: AssignmentConnection): boolean {
+  return (assignment.checkpoints?.length ?? 0) > 0
+}
+
+export const getCorrectSubmission = (
+  submission?: GradebookUserSubmissionDetails,
+  subAssignmentTag?: string | null
+) => {
+  if (subAssignmentTag === REPLY_TO_TOPIC || subAssignmentTag === REPLY_TO_ENTRY) {
+    return submission?.subAssignmentSubmissions?.find(
+      subSubmission => subSubmission.subAssignmentTag === subAssignmentTag
+    )
+  }
+
+  return submission
 }

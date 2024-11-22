@@ -66,7 +66,7 @@ describe('CanvasCartridgeImporter', () => {
   it('disable inputs while uploading', async () => {
     renderComponent({isSubmitting: true})
     await waitFor(() => {
-      expect(screen.getByRole('button', {name: 'Choose File'})).toBeDisabled()
+      expect(screen.getByTestId('migrationFileUpload')).toBeDisabled()
       expect(screen.getByRole('button', {name: 'Cancel'})).toBeDisabled()
       expect(screen.getByRole('button', {name: /Adding.../})).toBeDisabled()
       expect(
@@ -94,6 +94,23 @@ describe('CanvasCartridgeImporter', () => {
       expect(getByPlaceholderText('New question bank')).toBeInTheDocument()
       expect(getByPlaceholderText('New question bank')).toBeDisabled()
       expect(getByRole('combobox', {name: 'Default Question bank'})).toBeDisabled()
+    })
+  })
+
+  it('disable question bank inputs if "Import existing quizzes as New Quizzes" is checked', async () => {
+    window.ENV.NEW_QUIZZES_MIGRATION = true
+    window.ENV.NEW_QUIZZES_IMPORT = true
+    window.ENV.QUIZZES_NEXT_ENABLED = true
+    const {getByRole, queryByLabelText} = renderComponent()
+
+    await userEvent.click(getByRole('combobox', {name: 'Default Question bank'}))
+    await userEvent.click(getByRole('option', {name: 'Create new question bank...'}))
+    await userEvent.click(getByRole('checkbox', {name: /Import existing quizzes as New Quizzes/}))
+
+    await waitFor(() => {
+      expect(getByRole('combobox', {name: 'Default Question bank'})).toBeInTheDocument()
+      expect(getByRole('combobox', {name: 'Default Question bank'})).toBeDisabled()
+      expect(queryByLabelText('New question bank')).not.toBeInTheDocument()
     })
   })
 })

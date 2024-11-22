@@ -85,7 +85,7 @@ class DiscussionTopic < ActiveRecord::Base
   belongs_to :root_topic, class_name: "DiscussionTopic"
   belongs_to :group_category
   has_many :sub_assignments, through: :assignment
-  has_many :child_topics, class_name: "DiscussionTopic", foreign_key: :root_topic_id, dependent: :destroy
+  has_many :child_topics, class_name: "DiscussionTopic", foreign_key: :root_topic_id, dependent: :destroy, inverse_of: :root_topic
   has_many :discussion_topic_participants, dependent: :destroy
   has_many :discussion_entry_participants, through: :discussion_entries
   has_many :discussion_topic_section_visibilities,
@@ -122,6 +122,7 @@ class DiscussionTopic < ActiveRecord::Base
   before_create :set_root_account_id
   before_save :default_values
   before_save :set_schedule_delayed_transitions
+  before_save :set_edited_at
   after_save :update_assignment
   after_save :update_subtopics
   after_save :touch_context
@@ -218,12 +219,21 @@ class DiscussionTopic < ActiveRecord::Base
   end
 
   def threaded?
-    discussion_type == DiscussionTypes::THREADED || (root_account&.feature_enabled?(:discussion_checkpoints) && checkpoints?) || (DiscussionTypes::SIDE_COMMENT && discussion_entries.where.not(parent_id: nil).where.not(workflow_state: "deleted").exists?)
+    discussion_type == DiscussionTypes::THREADED ||
+      (root_account&.feature_enabled?(:discussion_checkpoints) && checkpoints?) ||
+      (DiscussionTypes::SIDE_COMMENT && has_threaded_replies?)
   end
   alias_method :threaded, :threaded?
 
+  def has_threaded_replies?
+    DiscussionEntry.where.not(parent_id: nil)
+                   .where.not(workflow_state: "deleted")
+                   .where(discussion_topic: [id] + child_topics.select(:id))
+                   .exists?
+  end
+
   def discussion_type
-    read_attribute(:discussion_type) || DiscussionTypes::NOT_THREADED
+    super || DiscussionTypes::NOT_THREADED
   end
 
   def validate_draft_state_change
@@ -243,7 +253,7 @@ class DiscussionTopic < ActiveRecord::Base
       self.title = t("#discussion_topic.default_title", "No Title")
     end
 
-    d_type = read_attribute(:discussion_type)
+    d_type = self["discussion_type"]
     d_type ||= context.feature_enabled?("react_discussions_post") ? DiscussionTypes::THREADED : DiscussionTypes::NOT_THREADED
     self.discussion_type = d_type
 
@@ -281,7 +291,6 @@ class DiscussionTopic < ActiveRecord::Base
       self.workflow_state = "post_delayed" if [:migration, :after_migration].include?(saved_by) && delayed_post_at > Time.now
     end
     if lock_at && lock_at_changed?
-      @should_schedule_lock_at = true
       self.locked = false if [:migration, :after_migration].include?(saved_by) && lock_at > Time.now
     end
 
@@ -313,12 +322,10 @@ class DiscussionTopic < ActiveRecord::Base
 
     bp = true if @importing_migration&.migration_type == "master_course_import"
     delay(run_at: delayed_post_at).update_based_on_date(for_blueprint: bp) if @should_schedule_delayed_post
-    delay(run_at: lock_at).update_based_on_date(for_blueprint: bp) if @should_schedule_lock_at
     # need to clear these in case we do a save whilst saving (e.g.
     # Announcement#respect_context_lock_rules), so as to avoid the dreaded
     # double delayed job ಠ_ಠ
     @should_schedule_delayed_post = nil
-    @should_schedule_lock_at = nil
   end
 
   def sync_attachment_with_publish_state
@@ -734,6 +741,13 @@ class DiscussionTopic < ActiveRecord::Base
   end
   protected :change_child_topic_subscribed_state
 
+  def participant(opts = {})
+    current_user = opts[:current_user] || self.current_user
+    return nil unless current_user
+
+    discussion_topic_participants.find_by(user_id: current_user)
+  end
+
   def update_or_create_participant(opts = {})
     current_user = opts[:current_user] || self.current_user
     return nil unless current_user
@@ -751,6 +765,8 @@ class DiscussionTopic < ActiveRecord::Base
           topic_participant.unread_entry_count += opts[:offset] if opts[:offset] && opts[:offset] != 0
           topic_participant.unread_entry_count = opts[:new_count] if opts[:new_count]
           topic_participant.subscribed = opts[:subscribed] if opts.key?(:subscribed)
+          topic_participant.sort_order = opts[:sort_order] if opts.key?(:sort_order)
+          topic_participant.expanded = opts[:expanded] if opts.key?(:expanded)
           topic_participant.save
         end
       end
@@ -759,7 +775,7 @@ class DiscussionTopic < ActiveRecord::Base
   end
 
   scope :joins_ungraded_discussion_student_visibilities, lambda { |user_ids, course_ids|
-    visible_discussion_topics = UngradedDiscussionVisibility::UngradedDiscussionVisibilityService.discussion_topics_visible_to_students_in_courses(user_ids:, course_ids:).map(&:discussion_topic_id)
+    visible_discussion_topics = UngradedDiscussionVisibility::UngradedDiscussionVisibilityService.discussion_topics_visible(user_ids:, course_ids:).map(&:discussion_topic_id)
     if visible_discussion_topics.any?
       where(id: visible_discussion_topics)
         .where(assignment_id: nil)
@@ -875,7 +891,7 @@ class DiscussionTopic < ActiveRecord::Base
     end
 
     user_ids = Array(users) | observed_student_ids
-    visible_differentiated_topic_ids = UngradedDiscussionVisibility::UngradedDiscussionVisibilityService.discussion_topics_visible_to_students(user_ids:).map(&:discussion_topic_id)
+    visible_differentiated_topic_ids = UngradedDiscussionVisibility::UngradedDiscussionVisibilityService.discussion_topics_visible(user_ids:).map(&:discussion_topic_id)
     merge(DiscussionTopic.where.not(context_type: "Course")
     .or(DiscussionTopic.where(id: visible_topic_ids))
     .or(DiscussionTopic.where(id: visible_differentiated_topic_ids, is_section_specific: false))
@@ -919,6 +935,7 @@ class DiscussionTopic < ActiveRecord::Base
           OR discussion_topic_participants.unread_entry_count > 0")
   }
   scope :published, -> { where("discussion_topics.workflow_state = 'active'") }
+  scope :published_or_post_delayed, -> { where("discussion_topics.workflow_state = 'active' OR discussion_topics.workflow_state = 'post_delayed'") }
 
   # TODO: this scope is appearing in a few models now with identical code.
   # Can this be extracted somewhere?
@@ -926,8 +943,15 @@ class DiscussionTopic < ActiveRecord::Base
     where("title ILIKE ?", "#{title}%")
   }
 
-  alias_attribute :available_from, :delayed_post_at
   alias_attribute :available_until, :lock_at
+
+  def available_from
+    self[:delayed_post_at]
+  end
+
+  def available_from=(value)
+    self[:delayed_post_at] = value
+  end
 
   def unlock_at
     self[:unlock_at].nil? ? self[:delayed_post_at] : self[:unlock_at]
@@ -966,11 +990,7 @@ class DiscussionTopic < ActiveRecord::Base
   # Also: if this method is scheduled by a blueprint sync, ensure it isn't counted as a manual downstream change
   def update_based_on_date(for_blueprint: false)
     skip_downstream_changes! if for_blueprint
-    transaction do
-      reload lock: true # would call lock!, except, oops, workflow overwrote it :P
-      lock if should_lock_yet
-      delayed_post unless should_not_post_yet
-    end
+    delayed_post unless should_not_post_yet
   end
   alias_method :try_posting_delayed, :update_based_on_date
   alias_method :auto_update_workflow, :update_based_on_date
@@ -980,6 +1000,7 @@ class DiscussionTopic < ActiveRecord::Base
     state :unpublished
     state :post_delayed do
       event :delayed_post, transitions_to: :active do
+        self.notify_users = true
         self.last_reply_at = Time.now
         self.posted_at = Time.now
       end
@@ -1425,6 +1446,12 @@ class DiscussionTopic < ActiveRecord::Base
       return false
     end
 
+    # course can be an account in case the topic context is group
+    # and the group context is account
+    unless course.is_a?(Course)
+      return false
+    end
+
     course.feature_enabled?(:discussion_summary) && (
       course.user_is_instructor?(user) || course.grants_right?(user, :read_as_admin)
     )
@@ -1626,12 +1653,24 @@ class DiscussionTopic < ActiveRecord::Base
   end
 
   def active_participants_with_visibility
-    return active_participants_include_tas_and_teachers unless for_assignment?
+    return active_participants_include_tas_and_teachers unless for_assignment? || assignment_overrides.active.any?
 
-    users_with_visibility = assignment.students_with_visibility.pluck(:id)
+    users_with_visibility = for_assignment? ? assignment.students_with_visibility.pluck(:id) : []
+
+    assignment_overrides.select(&:active?).each do |override|
+      # specific user
+      if override.adhoc?
+        adhoc_users = users_with_visibility.concat(override.assignment_override_students.pluck(:user_id))
+        users_with_visibility.concat(adhoc_users)
+      elsif override.course_section?
+        users_in_section = User.joins(:enrollments).where(enrollments: { course_section_id: override.set_id }).pluck(:id)
+        users_with_visibility.concat(users_in_section)
+      end
+    end
 
     admin_ids = course.participating_admins.pluck(:id)
     users_with_visibility.concat(admin_ids)
+    users_with_visibility.uniq!
 
     # observers will not be returned, which is okay for the functions current use cases (but potentially not others)
     active_participants_include_tas_and_teachers.select { |p| users_with_visibility.include?(p.id) }
@@ -1715,20 +1754,22 @@ class DiscussionTopic < ActiveRecord::Base
         next false if section_visibilities == :none
 
         if section_visibilities != :all
-          course_specific_sections = course_sections.pluck(:id)
-          next false unless section_visibilities.intersect?(course_specific_sections)
+          course_section_ids = shard.activate { course_sections.ids }
+
+          next false unless section_visibilities.intersect?(course_section_ids)
         end
       end
       # Verify that section limited teachers/ta's are properly restricted when selective_release_backend is enabled
-      if context.is_a?(Course) && (Account.site_admin.feature_enabled?(:selective_release_backend) && !visible_to_everyone && context.user_is_instructor?(user))
+      if context.is_a?(Course) && (Account.site_admin.feature_enabled?(:selective_release_backend) &&
+         !visible_to_everyone && context.user_is_instructor?(user))
+
         section_overrides = assignment_overrides.active.where(set_type: "CourseSection").pluck(:set_id)
         visible_sections_for_user = context.course_section_visibility(user)
         next false if visible_sections_for_user == :none
 
         # If there are no section_overrides, then no check for section_specific instructor roles is needed
         if visible_sections_for_user != :all && section_overrides.any?
-          course_specific_sections = course_sections.pluck(:id)
-          next false unless visible_sections_for_user.intersect?(course_specific_sections)
+          next false unless visible_sections_for_user.intersect?(section_overrides)
         end
       end
       # user is an admin in the context (teacher/ta/designer) OR
@@ -1780,9 +1821,8 @@ class DiscussionTopic < ActiveRecord::Base
     if Account.site_admin.feature_enabled?(:selective_release_backend)
       RequestCache.cache(locked_request_cache_key(user)) do
         locked = false
-        # if graded, we only care to check the topic's base dates, then defer to checking if the assignment is locked
-        # if ungraded, there's no assignment, and thus we want the topic's overridden availability dates for the user
-        topic_for_user = assignment.present? ? self : overridden_for(user)
+        # get the topic's overridden availability dates for the user. If graded, the dates will be on the assignment.
+        topic_for_user = assignment.present? ? assignment.overridden_for(user) : overridden_for(user)
         # prefer unlock_at, but fall back to delayed_post_at for DiscussionTopics until the latter is removed
         overridden_unlock_at = topic_for_user.unlock_at
         overridden_unlock_at ||= topic_for_user.delayed_post_at if topic_for_user.respond_to?(:delayed_post_at)
@@ -1791,8 +1831,6 @@ class DiscussionTopic < ActiveRecord::Base
           locked = { object: self, unlock_at: overridden_unlock_at }
         elsif overridden_lock_at && overridden_lock_at < Time.now
           locked = { object: self, lock_at: overridden_lock_at, can_view: true }
-        elsif !opts[:skip_assignment] && (l = assignment&.low_level_locked_for?(user, opts))
-          locked = l
         elsif could_be_locked && (item = locked_by_module_item?(user, opts))
           locked = { object: self, module: item.context_module }
         elsif locked? # nothing more specific, it's just locked
@@ -1821,6 +1859,16 @@ class DiscussionTopic < ActiveRecord::Base
         locked
       end
     end
+  end
+
+  def show_in_search_for_user?(user)
+    return false unless user && !deleted?
+    return false if anonymous? && !context.feature_enabled?(:react_discussions_post)
+    return true if context.grants_right?(user, :read_as_admin)
+    return false if locked_by_module_item?(user)
+
+    locked = locked_for?(user, check_policies: true, deep_check_if_needed: true)
+    locked.is_a?(Hash) ? !!locked[:can_view] : visible_for?(user)
   end
 
   def self.reject_context_module_locked_topics(topics, user)
@@ -2032,7 +2080,7 @@ class DiscussionTopic < ActiveRecord::Base
   def self.visible_ids_by_user(opts)
     # Discussions with an assignment: pluck id, assignment_id, and user_id from items joined with the SQL view
     plucked_visibilities = if Account.site_admin.feature_enabled?(:selective_release_backend)
-                             visible_assignments = AssignmentVisibility::AssignmentVisibilityService.assignments_visible_to_students_in_courses(user_ids: opts[:user_id], course_ids: opts[:course_id])
+                             visible_assignments = AssignmentVisibility::AssignmentVisibilityService.assignments_visible_to_students(user_ids: opts[:user_id], course_ids: opts[:course_id])
                              # map the visibilities to a hash of assignment_id => [user_ids]
                              assignment_user_map = visible_assignments.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |visibility, hash|
                                hash[visibility.assignment_id] << visibility.user_id
@@ -2072,7 +2120,7 @@ class DiscussionTopic < ActiveRecord::Base
     ids_visible_to_sections = topic_ids_per_user
 
     if Account.site_admin.feature_enabled?(:selective_release_backend)
-      visible_topic_user_id_pairs = UngradedDiscussionVisibility::UngradedDiscussionVisibilityService.discussion_topics_visible_to_students_in_courses(user_ids: opts[:user_id], course_ids: opts[:course_id]).map { |visibility| [visibility.discussion_topic_id, visibility.user_id] }
+      visible_topic_user_id_pairs = UngradedDiscussionVisibility::UngradedDiscussionVisibilityService.discussion_topics_visible(user_ids: opts[:user_id], course_ids: opts[:course_id]).map { |visibility| [visibility.discussion_topic_id, visibility.user_id] }
       eligible_topic_ids = DiscussionTopic.where(id: visible_topic_user_id_pairs.map(&:first)).where(assignment_id: nil).where.not(is_section_specific: true).pluck(:id)
       eligible_visible_topic_user_id_pairs = visible_topic_user_id_pairs.select { |discussion_topic_id, _user_id| eligible_topic_ids.include?(discussion_topic_id) }
       ungraded_differentiated_topic_ids_per_user = eligible_visible_topic_user_id_pairs.group_by(&:last).transform_values { |pairs| pairs.map(&:first) }
@@ -2090,6 +2138,42 @@ class DiscussionTopic < ActiveRecord::Base
       ungraded_differentiated_specific_ids = ungraded_differentiated_topic_ids_per_user[student_id] || []
       assignment_item_ids.concat(ids_visible_to_all).concat(section_specific_ids).concat(ungraded_differentiated_specific_ids)
     end
+  end
+
+  def set_edited_at
+    if (will_save_change_to_message? || will_save_change_to_title?) && !new_record?
+      self.edited_at = Time.now.utc
+    end
+  end
+
+  def ungraded_discussion_overrides(current_user = nil)
+    current_user ||= self.current_user
+    return unless current_user
+    return nil if assignment.present? || context_type == "Group" || is_announcement || !Account.site_admin.feature_enabled?(:selective_release_ui_api)
+
+    overrides = AssignmentOverrideApplicator.overrides_for_assignment_and_user(self, current_user)
+
+    # this is a temporary check for any discussion_topic_section_visibilities until we eventually backfill that table
+    if is_section_specific
+      section_overrides = assignment_overrides.active.where(set_type: "CourseSection").select(:set_id)
+      section_visibilities = discussion_topic_section_visibilities.active.where.not(course_section_id: section_overrides)
+    end
+
+    if section_visibilities
+      section_overrides = section_visibilities.map do |section_visibility|
+        assignment_override = AssignmentOverride.new(
+          discussion_topic: section_visibility.discussion_topic,
+          course_section: section_visibility.course_section
+        )
+        assignment_override.unlock_at = unlock_at if unlock_at
+        assignment_override.lock_at = lock_at if lock_at
+        assignment_override
+      end
+    end
+
+    all_overrides = overrides.to_a
+    all_overrides += section_overrides if section_visibilities
+    all_overrides
   end
 
   private
