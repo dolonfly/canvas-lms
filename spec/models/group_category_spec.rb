@@ -201,6 +201,58 @@ describe GroupCategory do
     expect(category.unrestricted_self_signup?).to be_falsey
   end
 
+  it "default to no self signup end date" do
+    category = GroupCategory.new
+    expect(category.self_signup_end_at).to be_nil
+  end
+
+  it "clears student permissions cache after self signup update" do
+    expect_any_instance_of(GroupCategory).to receive(:clear_permissions_cache)
+    course_with_student(active_all: true)
+    group_category = GroupCategory.create!(name: "Test Self Signup", course: @course)
+    group_category.self_signup = "enabled"
+    group_category.save!
+  end
+
+  it "clears student permissions cache after self signup end date update" do
+    expect_any_instance_of(GroupCategory).to receive(:clear_permissions_cache)
+    course_with_student(active_all: true)
+    group_category = GroupCategory.create!(name: "Test Self Signup", course: @course, self_signup: "enabled")
+    group_category.self_signup_end_at = 1.day.from_now
+    group_category.save!
+  end
+
+  context "past_self_signup_end_at?" do
+    it "is true if self sign up is enabled and end date has passed" do
+      category = group_category(self_signup: "enabled", self_signup_end_at: 1.day.ago.utc)
+      category.context.account.enable_feature!(:self_signup_deadline)
+      expect(category.past_self_signup_end_at?).to be_truthy
+    end
+
+    it "is false if self sign up is enabled and end date has not yet passed" do
+      category = group_category(self_signup: "enabled", self_signup_end_at: 1.day.from_now.utc)
+      category.context.account.enable_feature!(:self_signup_deadline)
+      expect(category.past_self_signup_end_at?).to be_falsey
+    end
+
+    it "is false if self sign up is not enabled" do
+      category = group_category(self_signup: nil, self_signup_end_at: 1.day.ago.utc)
+      category.context.account.enable_feature!(:self_signup_deadline)
+      expect(category.past_self_signup_end_at?).to be_falsey
+    end
+
+    it "is false if self sign up is enabled but no end date is set" do
+      category = group_category(self_signup: "enabled", self_signup_end_at: nil)
+      category.context.account.enable_feature!(:self_signup_deadline)
+      expect(category.past_self_signup_end_at?).to be_falsey
+    end
+
+    it "is false if self sign up is enabled and self_signup_deadline FF is disabled" do
+      category = group_category(self_signup: "enabled", self_signup_end_at: 1.day.from_now.utc)
+      expect(category.past_self_signup_end_at?).to be_falsey
+    end
+  end
+
   context "has_heterogenous_group?" do
     it "is false for accounts" do
       category = group_category(context: account)
@@ -707,6 +759,18 @@ describe GroupCategory do
   end
 
   context "non_collaborative group_category" do
+    it "can have the same names as a collaborative group_category" do
+      category = GroupCategory.create(name: "Test Category", context: @course)
+      expect(category).to be_valid
+      non_collaborative = GroupCategory.create(name: "Test Category", context: @course, non_collaborative: true)
+      expect(non_collaborative).to be_valid
+    end
+
+    it "can have the same names as a collaborative group_category restricted name" do
+      non_collaborative = GroupCategory.create(name: "Imported Groups", context: @course, non_collaborative: true)
+      expect(non_collaborative).to be_valid
+    end
+
     it "attribute can be set on creation but cannot be changed afterwards" do
       # Set non_collaborative on creation
       category = GroupCategory.create(name: "Test Category", context: @course, non_collaborative: true)
@@ -796,6 +860,31 @@ describe GroupCategory do
 
         expect(@category.check_policy(@teacher2) & @relevant_permissions).to eq @relevant_permissions
       end
+    end
+  end
+
+  describe "single_tag?" do
+    before do
+      @category = GroupCategory.create!(name: "test tag", context: @course)
+    end
+
+    it "returns true when there is only one group and the group name is the same as the category" do
+      Group.create!(name: "test tag", group_category: @category, context: @course)
+
+      expect(@category.single_tag?).to be true
+    end
+
+    it "returns false if there is more than one group within the category" do
+      Group.create!(name: "test tag", group_category: @category, context: @course)
+      Group.create!(name: "test tag 2", group_category: @category, context: @course)
+
+      expect(@category.single_tag?).to be false
+    end
+
+    it "returns false if group name and category name are not equals" do
+      Group.create!(name: "test tag 1", group_category: @category, context: @course)
+
+      expect(@category.single_tag?).to be false
     end
   end
 end

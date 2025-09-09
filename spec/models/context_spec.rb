@@ -25,6 +25,11 @@ describe Context do
       expect(Context.find_by_asset_string(course.asset_string)).to eql(course)
     end
 
+    it "finds a valid course by course_syllabus_N" do
+      course = Course.create!
+      expect(Context.find_by_asset_string("course_syllabus_#{course.id}")).to eql(course)
+    end
+
     it "does not find an invalid course" do
       expect(Context.find_by_asset_string("course_0")).to be_nil
     end
@@ -319,6 +324,18 @@ describe Context do
                                { name: "MMM", rubrics: 1 },
                                { name: "ZZZ", rubrics: 1 }
                              ])
+    end
+
+    it "does not return rubrics that have been archived or deleted" do
+      course = Course.create!(name: "c1")
+      user = user_factory(active_all: true)
+      r = Rubric.create!(context: course, title: "testing")
+      RubricAssociation.create!(context: course, rubric: r, purpose: :bookmark, association_object: course)
+      course.enroll_user(user, "TeacherEnrollment", enrollment_state: "active")
+      r.update(workflow_state: "archived")
+      expect(course.rubric_contexts(user)).to be_empty
+      r.update(workflow_state: "deleted")
+      expect(course.rubric_contexts(user)).to be_empty
     end
 
     context "sharding" do

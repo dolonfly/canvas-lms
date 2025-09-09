@@ -17,10 +17,10 @@
  */
 
 import getCookie from '@instructure/get-cookie'
-import type {Product, ToolsByDisplayGroup} from '../models/Product'
+import type {OrganizationProduct, Product, ToolsByDisplayGroup} from '../models/Product'
 import {stringify} from 'qs'
 import type {DiscoverParams} from '../hooks/useDiscoverQueryParams'
-import type {LtiFilters, FilterItem} from '../models/Filter'
+import type {LtiFilters, FilterItem, OrganizationFiltes} from '../models/Filter'
 
 const accountId = window.location.pathname.split('/')[2]
 
@@ -35,22 +35,30 @@ export type ProductResponse = {
   tools: Array<Product>
   meta: Meta
 }
+export type OrganizationProductResponse = {
+  description: string
+  tools: Array<OrganizationProduct>
+  meta: Meta
+}
 
 export const fetchProducts = async (params: DiscoverParams): Promise<ProductResponse> => {
+  const {page, search} = params
+  const {tags, companies, audience, versions} = params.filters
+
   const apiParams = {
-    page: params.page,
+    page,
     per_page: 21,
     q: {
-      ...(params.search && {search_terms_cont: params.search}),
-      ...(params.filters.tags && {display_group_id_eq: params.filters.tags[0]?.id}),
-      ...(params.filters.companies && {
-        company_id_in: params.filters.companies.map((company: FilterItem) => company.id),
+      ...(search && {search_terms_cont: search}),
+      ...(tags && {display_group_id_eq: tags[0]?.id}),
+      ...(companies && {
+        company_id_in: companies.map((company: FilterItem) => company.id),
       }),
-      ...(params.filters.audience && {
-        audience_id_in: params.filters.audience.map((audience: FilterItem) => audience.id),
+      ...(audience && {
+        audience_id_in: audience.map((aud: FilterItem) => aud.id),
       }),
-      ...(params.filters.versions && {
-        version_id_in: params.filters.versions.map((version: FilterItem) => version.id),
+      ...(versions && {
+        version_id_in: versions.map((version: FilterItem) => version.id),
       }),
     },
   }
@@ -59,65 +67,28 @@ export const fetchProducts = async (params: DiscoverParams): Promise<ProductResp
     arrayFormat: 'brackets',
   })}`
 
-  const response = await fetch(url, {
-    method: 'get',
-    headers: {
-      'X-CSRF-Token': getCookie('_csrf_token'),
-      'content-Type': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch products`)
-  }
-  const products = await response.json()
+  const products = await fetchResponse('get', url, 'Failed to fetch products')
 
   return products || {}
 }
 
-export const fetchProductDetails = async (global_product_id: String): Promise<Product | null> => {
+export const fetchProductDetails = async (global_product_id: string): Promise<Product | null> => {
   if (!global_product_id) return null
   const url = `/api/v1/accounts/${accountId}/learn_platform/products/${global_product_id}`
 
-  const response = fetch(url, {
-    method: 'get',
-    headers: {
-      'X-CSRF-Token': getCookie('_csrf_token'),
-      'content-Type': 'application/json',
-    },
-  })
-    .then(resp => resp.json())
-    .then(product => {
-      return product
-    })
+  const product = await fetchResponse(
+    'get',
+    url,
+    `Failed to fetch product with id ${global_product_id}`,
+  )
 
-  const getProduct = async () => {
-    const product = await response
-    return product
-  }
-
-  if (!response) {
-    throw new Error(`Failed to fetch product with id ${global_product_id}`)
-  }
-
-  return getProduct()
+  return product || {}
 }
 
 export const fetchToolsByDisplayGroups = async (): Promise<ToolsByDisplayGroup> => {
   const url = `/api/v1/accounts/${accountId}/learn_platform/products_categories`
 
-  const response = await fetch(url, {
-    method: 'get',
-    headers: {
-      'X-CSRF-Token': getCookie('_csrf_token'),
-      'content-Type': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch products categories`)
-  }
-  const displayGroups = await response.json()
+  const displayGroups = await fetchResponse('get', url, 'Failed to fetch products categories')
 
   return displayGroups.tools_by_display_group || []
 }
@@ -125,18 +96,83 @@ export const fetchToolsByDisplayGroups = async (): Promise<ToolsByDisplayGroup> 
 export const fetchLtiFilters = async (): Promise<LtiFilters> => {
   const url = `/api/v1/accounts/${accountId}/learn_platform/filters`
 
+  const filters = await fetchResponse('get', url, 'Failed to fetch lti filters')
+
+  return filters || {}
+}
+
+export const fetchCustomFilters = async (): Promise<OrganizationFiltes> => {
+  const salesforceId = ENV.DOMAIN_ROOT_ACCOUNT_SFID
+  const url = `/api/v1/accounts/${accountId}/learn_platform/custom_filters?${stringify(
+    {salesforce_id: salesforceId},
+    {
+      arrayFormat: 'brackets',
+    },
+  )}`
+
+  const filters = await fetchResponse('get', url, 'Failed to fetch custom filters')
+
+  return filters || {}
+}
+
+export const fetchProductsByOrganization = async (
+  params: DiscoverParams,
+): Promise<OrganizationProductResponse> => {
+  const organizationSalesforceId = ENV.DOMAIN_ROOT_ACCOUNT_SFID
+  const {page, search} = params
+  const {tags, companies, audience, versions} = params.filters
+
+  const apiParams = {
+    page,
+    per_page: 21,
+    q: {
+      ...(search && {search_terms_cont: search}),
+      ...(tags && {display_group_id_eq: tags[0]?.id}),
+      ...(companies && {
+        company_id_in: companies.map(company => company.id),
+      }),
+      ...(audience && {
+        audience_id_in: audience.map(aud => aud.id),
+      }),
+      ...(versions && {
+        version_id_in: versions.map(version => version.id),
+      }),
+    },
+  }
+
+  const url = `/api/v1/accounts/${accountId}/learn_platform/organizations/${organizationSalesforceId}/products?${stringify(
+    apiParams,
+    {
+      arrayFormat: 'brackets',
+    },
+  )}`
+
+  const products: OrganizationProductResponse = await fetchResponse(
+    'get',
+    url,
+    'Failed to fetch products by organization',
+  )
+
+  return products
+}
+
+async function fetchResponse(method: string, url: string, errorText: string): Promise<any> {
   const response = await fetch(url, {
-    method: 'get',
+    method,
     headers: {
       'X-CSRF-Token': getCookie('_csrf_token'),
       'content-Type': 'application/json',
     },
   })
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch lti filters`)
-  }
-  const filters = await response.json()
+  const products = await response.json()
 
-  return filters || {}
+  if (!response.ok) {
+    if (products.lp_server_error) {
+      throw new Error(products.json.error)
+    }
+    throw new Error(errorText)
+  }
+
+  return products
 }

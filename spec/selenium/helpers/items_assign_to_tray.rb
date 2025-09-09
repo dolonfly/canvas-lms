@@ -129,6 +129,14 @@ module ItemsAssignToTray
     card.find_all(assignee_selected_option_selector).map(&:text)
   end
 
+  def convert_override_alert_selector
+    "[data-testid='differentiation-tag-converter-message']"
+  end
+
+  def convert_override_button_selector
+    "[data-testid='convert-differentiation-tags-button']"
+  end
+
   def tray_header_selector
     "[data-testid='module-item-edit-tray'] h2"
   end
@@ -174,7 +182,7 @@ module ItemsAssignToTray
     ff(assign_to_date_and_time_selector + " input")
       .map { |input| input.attribute("value") }
       .each_slice(2)
-      .map { |date, time| DateTime.parse("#{date} #{time}") }
+      .map { |date, time| Time.zone.parse("#{date} #{time}") }
   end
 
   def assign_to_reply_to_topic_date(card_number = 0)

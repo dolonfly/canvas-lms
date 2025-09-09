@@ -24,7 +24,6 @@ describe BlackoutDatesController do
 
     @course.enable_course_paces = true
     @course.save!
-    @course.account.enable_feature!(:course_paces)
 
     @blackout_date = @course.blackout_dates.create!(start_date: "2022-02-14", end_date: "2022-02-18", event_title: "Test Week Off")
   end
@@ -34,13 +33,6 @@ describe BlackoutDatesController do
   end
 
   describe "GET #index" do
-    it "loads all the blackout dates for the context" do
-      get :index, params: { course_id: @course.id }
-
-      expect(response).to be_successful
-      expect(assigns[:blackout_dates]).to include(@blackout_date)
-    end
-
     it "returns a json response if using the API" do
       get :index, format: :json, params: { course_id: @course.id }
 

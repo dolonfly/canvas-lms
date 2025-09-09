@@ -248,7 +248,7 @@ class ContentMigration < ActiveRecord::Base
   def root_account
     return super if root_account_id
 
-    context.root_account rescue nil
+    context.root_account
   end
 
   def migration_type
@@ -428,7 +428,7 @@ class ContentMigration < ActiveRecord::Base
         # it's ready to be imported
         self.workflow_state = :importing
         save
-        delay(**queue_opts.merge(on_permanent_failure: :fail_with_error!)).import_content
+        delay(**queue_opts, on_permanent_failure: :fail_with_error!).import_content
       else
         # find worker and queue for conversion
         begin
@@ -574,6 +574,14 @@ class ContentMigration < ActiveRecord::Base
     migration_settings[:migration_ids_to_import][:copy][asset_type][mig_id] = "1"
   end
 
+  def import_module?(mig_id)
+    import_object?("context_modules", mig_id) || import_object?("modules", mig_id)
+  end
+
+  def import_module_item?(mig_id)
+    import_object?("module_items", mig_id)
+  end
+
   def is_set?(option)
     Canvas::Plugin.value_to_boolean option
   end
@@ -595,7 +603,7 @@ class ContentMigration < ActiveRecord::Base
     capture_job_id
     save
 
-    Lti::Asset.opaque_identifier_for(context)
+    Lti::V1p1::Asset.opaque_identifier_for(context)
 
     all_files_path = nil
     begin
@@ -810,6 +818,12 @@ class ContentMigration < ActiveRecord::Base
           Rails.logger.debug { "skipping deletion sync for #{content.asset_string} due to there are active Alignments to Content" }
           add_skipped_item(child_tag)
         else
+          if content.is_a?(Attachment)
+            Attachment.not_deleted_content_tags_for_attachments([content.id]).find_each do |tag|
+              tag.skip_downstream_changes!
+              tag.destroy
+            end
+          end
           Rails.logger.debug("syncing deletion of #{content.asset_string} from master course")
           content.skip_downstream_changes! if content.respond_to?(:skip_downstream_changes!)
           content.destroy
@@ -1005,8 +1019,28 @@ class ContentMigration < ActiveRecord::Base
     html_converter.convert(*, **keyword_args)
   end
 
+  def convert_single_link(single_link, link_type: false)
+    return html_converter.convert_single_link(single_link, link_type:) unless single_link.include?("/block_editor/templates/") || single_link.blank?
+
+    single_link
+  end
+
   def convert_text(text)
     format_message(text || "")[0]
+  end
+
+  def convert_block(block, context, migration_id)
+    if block["type"]["resolvedName"] == "MediaBlock" && (url = block["props"]["src"])
+      block["props"]["src"] = convert_single_link(url, link_type: :media_object)
+    elsif block["type"]["resolvedName"] == "ImageBlock" && (url = block["props"]["src"])
+      block["props"]["src"] = convert_single_link(url)
+    elsif block["type"]["resolvedName"] == "RCETextBlock" && (html = block["props"]["text"])
+      block["props"]["text"] = convert_html(html, context, migration_id, :block_editor_text)
+    end
+  end
+
+  def convert_block_editor_blocks(blocks_json, migration_id, context)
+    blocks_json.each_value { |block| convert_block(block, context, migration_id) }
   end
 
   delegate :resolve_content_links!, to: :html_converter
@@ -1175,7 +1209,7 @@ class ContentMigration < ActiveRecord::Base
   def handle_import_in_progress_notice
     return unless context.is_a?(Course) && is_set?(migration_settings[:import_in_progress_notice])
 
-    if (just_created || (saved_change_to_workflow_state? && %w[created queued].include?(workflow_state_before_last_save))) &&
+    if (previously_new_record? || (saved_change_to_workflow_state? && %w[created queued].include?(workflow_state_before_last_save))) &&
        %w[pre_processing pre_processed exporting importing].include?(workflow_state)
       context.add_content_notice(:import_in_progress, 4.hours)
     elsif saved_change_to_workflow_state? && %w[pre_process_error exported imported failed].include?(workflow_state)
@@ -1190,7 +1224,7 @@ class ContentMigration < ActiveRecord::Base
        (next_cm = context.content_migrations.where(workflow_state: "queued").order(:id).first) &&
        (job_id = next_cm.job_progress.try(:delayed_job_id)) &&
        (job = Delayed::Job.where(id: job_id, locked_at: nil).first)
-      job.run_at = Time.now # it's okay to try it again now
+      job.run_at = Time.zone.now # it's okay to try it again now
       job.save
     end
   end
@@ -1350,15 +1384,15 @@ class ContentMigration < ActiveRecord::Base
 
   def asset_map_url(generate_if_needed: false)
     generate_asset_map if !asset_map_attachment && generate_if_needed
-    asset_map_attachment && file_download_url(
-      asset_map_attachment,
-      {
-        verifier: asset_map_attachment.uuid,
-        download: "1",
-        download_frd: "1",
-        host: context.root_account.domain(ApplicationController.test_cluster_name)
-      }
-    )
+    return nil unless asset_map_attachment
+
+    options = {
+      download: "1",
+      download_frd: "1",
+      host: context.root_account.domain(ApplicationController.test_cluster_name)
+    }
+    options[:verifier] = asset_map_attachment.uuid unless context.root_account.feature_enabled?(:disable_adding_uuid_verifier_in_api)
+    file_download_url(asset_map_attachment, options)
   end
 
   def asset_map_v2?

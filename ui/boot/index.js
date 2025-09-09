@@ -35,13 +35,13 @@ import {up as activateCourseMenuToggler} from '@canvas/common/activateCourseMenu
 // Import is required, workaround for ARC-8398
 // eslint-disable-next-line import/no-nodejs-modules
 import {Buffer} from 'buffer'
+import {loadCareerTheme} from '@canvas/instui-bindings/react/career-theme-loader'
 
 window.Buffer = Buffer
 
 try {
   initSentry()
 } catch (e) {
-  // eslint-disable-next-line no-console
   console.error('Failed to init Sentry, errors will not be captured', e)
 }
 
@@ -60,7 +60,6 @@ let runOnceAfterLocaleFiles = () => {
   import('@canvas/enhanced-user-content')
     .then(({enhanceTheEntireUniverse}) => enhanceTheEntireUniverse())
     .catch(e => {
-      // eslint-disable-next-line no-console
       console.error('Failed to init @canvas/enhanced-user-content', e)
     })
 }
@@ -80,7 +79,6 @@ if (process.env.NODE_ENV !== 'production') {
     try {
       filterUselessConsoleMessages(console)
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error(`ERROR: could not set up console log filtering: ${e.message}`)
     }
   }
@@ -95,7 +93,16 @@ const typography = {
   fontFamily: 'LatoWeb, "Lato Extended", Lato, "Helvetica Neue", Helvetica, Arial, sans-serif',
 }
 
-if (ENV.use_high_contrast) {
+if (ENV.use_dyslexic_font) {
+  typography.fontFamily = `OpenDyslexic, ${typography.fontFamily}`
+}
+
+// Check for high contrast mode from either ENV variable or URL query parameter
+const urlParams = new URLSearchParams(window.location.search)
+const hasHighContrastQueryParam = urlParams.get('instui_theme') === 'canvas_high_contrast'
+const hasCareerQueryParam = urlParams.get('instui_theme') === 'career'
+
+if (ENV.use_high_contrast || hasHighContrastQueryParam) {
   canvasHighContrastTheme.use({overrides: {typography}})
 } else {
   const brandvars = window.CANVAS_ACTIVE_BRAND_VARIABLES || {}
@@ -111,6 +118,18 @@ if (ENV.use_high_contrast) {
   }
 
   canvasBaseTheme.use({overrides: {...transitionOverride, ...brandvars, typography}})
+}
+
+if (hasCareerQueryParam) {
+  const baseTheme =
+    window.ENV.use_high_contrast || hasHighContrastQueryParam
+      ? canvasHighContrastTheme
+      : canvasBaseTheme
+  loadCareerTheme().then(careerTheme => {
+    if (careerTheme !== null) {
+      baseTheme.use({overrides: careerTheme})
+    }
+  })
 }
 
 /* #__PURE__ */ if (process.env.NODE_ENV === 'test' || window.INST.environment === 'test') {
@@ -131,7 +150,7 @@ if (ENV.use_high_contrast) {
   window.fetch = function () {
     window.__CANVAS_IN_FLIGHT_XHR_REQUESTS__++
     const promise = fetch.apply(this, arguments)
-    // eslint-disable-next-line promise/catch-or-return
+
     promise.finally(() => {
       window.__CANVAS_IN_FLIGHT_XHR_REQUESTS__--
     })

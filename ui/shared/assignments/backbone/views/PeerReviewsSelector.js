@@ -16,8 +16,6 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable no-void */
-
 import $ from 'jquery'
 import {extend} from '@canvas/backbone/utils'
 import {includes} from 'lodash'
@@ -77,7 +75,7 @@ PeerReviewsSelector.prototype.handlePeerReviewsChange = function () {
 
 PeerReviewsSelector.prototype.handleAutomaticPeerReviewsChange = function () {
   return this.$autoPeerReviewsOptions.toggleAccessibly(
-    this.$autoPeerReviews.filter(':checked').val() === '1'
+    this.$autoPeerReviews.filter(':checked').val() === '1',
   )
 }
 
@@ -101,6 +99,7 @@ PeerReviewsSelector.prototype.toJSON = function () {
     hideAnonymousPeerReview: this.hideAnonymousPeerReview,
     hasGroupCategory: this.parentModel.groupCategoryId(),
     intraGroupPeerReviews: this.parentModel.intraGroupPeerReviews(),
+    allocationAndGradingEnabled: ENV.PEER_REVIEW_ALLOCATION_AND_GRADING_ENABLED,
   }
 }
 

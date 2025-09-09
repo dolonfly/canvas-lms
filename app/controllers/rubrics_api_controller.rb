@@ -344,6 +344,7 @@ class RubricsApiController < ApplicationController
   end
 
   # @API Templated file for importing a rubric
+  # Returns a CSV template file that can be used to import rubrics into Canvas.
   # @returns a CSV file in the format that can be imported
   def upload_template
     send_data(
@@ -378,7 +379,7 @@ class RubricsApiController < ApplicationController
   def rubrics_by_import_id
     return unless authorized_action(@context, @current_user, :manage_rubrics)
 
-    rubrics = Rubric.where(rubric_imports_id: params[:id], context: @context)
+    rubrics = @context.rubrics.where(rubric_imports_id: params[:id])
     render json: rubrics_json(rubrics, @current_user, session)
   end
 
@@ -387,14 +388,14 @@ class RubricsApiController < ApplicationController
 
     rubric_ids = params[:rubric_ids]
     if rubric_ids.blank?
-      render json: { error: I18.t("No rubric IDs provided") }, status: :bad_request
+      render json: { error: t("No rubric IDs provided") }, status: :bad_request
       return
     end
 
-    rubrics = Rubric.where(id: rubric_ids, context: @context)
+    rubrics = @context.rubrics.where(id: rubric_ids)
 
     if rubrics.empty?
-      render json: { error: I18.t("No rubrics found") }, status: :not_found
+      render json: { error: t("No rubrics found") }, status: :not_found
       return
     end
 

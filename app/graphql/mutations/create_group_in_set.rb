@@ -30,15 +30,11 @@ class Mutations::CreateGroupInSet < Mutations::BaseMutation
   def resolve(input:)
     category_id = GraphQLHelpers.parse_relay_or_legacy_id(input[:group_set_id], "GroupSet")
     set = GroupCategory.find(category_id)
-
-    if set&.root_account&.feature_enabled?(:granular_permissions_manage_groups)
-      verify_authorized_action!(set.context, :manage_groups_add)
-    else
-      verify_authorized_action!(set.context, :manage_groups)
-    end
+    account = (set.context_type == "Account") ? set.context : set.context&.account
+    verify_authorized_action!(set.context, :manage_groups_add)
 
     if input[:non_collaborative]
-      if set.context&.feature_enabled?(:differentiation_tags)
+      if account&.allow_assign_to_differentiation_tags?
         raise GraphQL::ExecutionError, "insufficient permissions to create non-collaborative groups" unless set.context&.grants_right?(current_user, session, :manage_tags_add)
       else
         raise GraphQL::ExecutionError, "cannot create non-collaborative groups when the differentiation tags feature flag is disabled"

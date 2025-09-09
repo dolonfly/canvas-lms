@@ -27,6 +27,15 @@ class DiscussionEntry < ActiveRecord::Base
   include TextHelper
   include HtmlTextHelper
   include Api
+  include LinkedAttachmentHandler
+
+  def self.html_fields
+    %w[message]
+  end
+
+  def actual_saving_user
+    user
+  end
 
   attr_readonly :discussion_topic_id, :user_id, :parent_id, :is_anonymous_author
   has_many :discussion_entry_drafts, inverse_of: :discussion_entry
@@ -37,6 +46,7 @@ class DiscussionEntry < ActiveRecord::Base
   has_many :unordered_discussion_subentries, class_name: "DiscussionEntry", foreign_key: "parent_id", inverse_of: :parent_entry
   has_many :flattened_discussion_subentries, class_name: "DiscussionEntry", foreign_key: "root_entry_id", inverse_of: :root_entry
   has_many :discussion_entry_participants
+  has_many :discussion_topic_insight_entries, class_name: "DiscussionTopicInsight::Entry", inverse_of: :discussion_entry
   has_one :last_discussion_subentry, -> { order(created_at: :desc) }, class_name: "DiscussionEntry", foreign_key: "root_entry_id", inverse_of: :root_entry
   belongs_to :discussion_topic, inverse_of: :discussion_entries
   belongs_to :quoted_entry, class_name: "DiscussionEntry"
@@ -49,7 +59,9 @@ class DiscussionEntry < ActiveRecord::Base
   belongs_to :attachment
   belongs_to :editor, class_name: "User"
   belongs_to :root_account, class_name: "Account"
+  belongs_to :pinned_by, class_name: "User"
   has_one :external_feed_entry, as: :asset
+  has_many :attachment_associations, as: :context, inverse_of: :context
 
   before_save :set_edited_at
   before_create :infer_root_entry_id
@@ -61,14 +73,42 @@ class DiscussionEntry < ActiveRecord::Base
   after_create :log_discussion_entry_metrics
   after_create :clear_planner_cache_for_participants
   after_create :update_topic
+  after_destroy :remove_pin
   validates :message, length: { maximum: maximum_text_length, allow_blank: true }
   validates :discussion_topic_id, presence: true
   before_validation :set_depth, on: :create
   validate :validate_depth, on: :create
   validate :discussion_not_deleted, on: :create
   validate :must_be_reply_to_same_discussion, on: :create
+  validate :validate_pin_type
 
-  sanitize_field :message, CanvasSanitize::SANITIZE
+  scope :pinned, -> { where.not(pin_type: nil) }
+
+  module PinningTypes
+    THREAD = "thread"
+    REPLY = "reply"
+    TYPES = [THREAD, REPLY].freeze
+  end
+
+  def self.sanitize_config
+    CanvasSanitize::SANITIZE.dup.tap do |cfg|
+      cfg[:attributes] = cfg[:attributes].dup
+      cfg[:attributes][:all] -= ["id"]
+      cfg[:attributes]["a"] = (cfg[:attributes]["a"] || []) + ["id"]
+      cfg[:transformers] = Array(cfg[:transformers]) + [
+        lambda do |env|
+          node = env[:node]
+          return unless node.name == "a" && node["id"]
+
+          unless node["class"]&.split&.include?("instructure_inline_media_comment")
+            node.remove_attribute("id")
+          end
+        end
+      ]
+    end
+  end
+
+  sanitize_field :message, sanitize_config
 
   # parse_and_create_mentions has to run before has_a_broadcast_policy and the
   # after_save hook it adds.
@@ -90,7 +130,7 @@ class DiscussionEntry < ActiveRecord::Base
   end
 
   def log_discussion_entry_metrics
-    InstStatsd::Statsd.increment("discussion_entry.created")
+    InstStatsd::Statsd.distributed_increment("discussion_entry.created")
   end
 
   def parse_and_create_mentions
@@ -113,14 +153,14 @@ class DiscussionEntry < ActiveRecord::Base
     p.dispatch :new_discussion_entry
     p.to { discussion_topic.subscribers - [user] - mentioned_users }
     p.whenever do |record|
-      record.just_created && record.active?
+      record.previously_new_record? && record.active?
     end
     p.data { course_broadcast_data }
 
     p.dispatch :announcement_reply
     p.to { discussion_topic.user }
     p.whenever do |record|
-      record.discussion_topic.is_announcement && record.just_created && record.active?
+      record.discussion_topic.is_announcement && record.previously_new_record? && record.active?
     end
     p.data { course_broadcast_data }
   end
@@ -213,6 +253,10 @@ class DiscussionEntry < ActiveRecord::Base
     truncate_html(message, max_length: length)
   end
 
+  def message_word_count
+    HtmlTextHelper.strip_tags(message).split.size
+  end
+
   alias_method :destroy_permanently!, :destroy
   def destroy
     self.workflow_state = "deleted"
@@ -241,7 +285,7 @@ class DiscussionEntry < ActiveRecord::Base
 
       message_old, message_new = saved_changes["message"]
       updated_at_old = saved_changes.key?("updated_at") ? saved_changes["updated_at"][0] : 1.minute.ago
-      updated_at_new = saved_changes.key?("updated_at") ? saved_changes["updated_at"][1] : Time.now
+      updated_at_new = saved_changes.key?("updated_at") ? saved_changes["updated_at"][1] : Time.zone.now
 
       if discussion_entry_versions.count == 0 && !message_old.nil?
         discussion_entry_versions.create!(root_account:, user:, version: 1, message: message_old, created_at: updated_at_old, updated_at: updated_at_old)
@@ -253,7 +297,7 @@ class DiscussionEntry < ActiveRecord::Base
   end
 
   def update_topic_submission
-    if discussion_topic&.assignment&.checkpoints_parent?
+    if discussion_topic&.assignment&.checkpoints_parent? && discussion_topic&.assignment&.sub_assignments&.length == 2
       entry_checkpoint_type = parent_id ? CheckpointLabels::REPLY_TO_ENTRY : CheckpointLabels::REPLY_TO_TOPIC
       submission = if entry_checkpoint_type == CheckpointLabels::REPLY_TO_TOPIC
                      discussion_topic.reply_to_topic_checkpoint.submissions.find_by(user_id:)
@@ -315,6 +359,15 @@ class DiscussionEntry < ActiveRecord::Base
     end
   end
 
+  def increment_unread_counts_after_restore
+    transaction do
+      # get a list of users who have not read the entry yet
+      DiscussionTopicParticipant.where(discussion_topic_id:)
+                                .where.not(user_id: discussion_entry_participants.read.pluck(:user_id))
+                                .update_all("unread_entry_count = unread_entry_count + 1")
+    end
+  end
+
   def update_topic_subscription
     discussion_topic.user_ids_who_have_posted_and_admins
     unless discussion_topic.user_can_see_posts?(user)
@@ -323,7 +376,7 @@ class DiscussionEntry < ActiveRecord::Base
   end
 
   def user_name
-    user.name rescue t :default_user_name, "User Name"
+    user&.name || t(:default_user_name, "User Name")
   end
 
   def infer_root_entry_id
@@ -391,16 +444,19 @@ class DiscussionEntry < ActiveRecord::Base
     can :create
 
     given { |user, session| !discussion_topic.root_topic_id && context.grants_right?(user, session, :moderate_forum) }
-    can :update and can :delete and can :read
+    can :update and can :delete and can :read and can :pin
 
     given { |user, session| discussion_topic.root_topic&.context&.grants_right?(user, session, :moderate_forum) && !discussion_topic.locked_for?(user, check_policies: true) }
     can :update and can :delete and can :read and can :attach
 
+    given { |user, session| discussion_topic.root_topic&.context&.grants_right?(user, session, :moderate_forum) && !discussion_topic.locked_for?(user, check_policies: true) && !discussion_topic.comments_disabled? && discussion_topic.threaded? }
+    can :reply
+
     given { |user, session| discussion_topic.root_topic&.context&.grants_right?(user, session, :moderate_forum) && !discussion_topic.locked_for?(user, check_policies: true) && !discussion_topic.comments_disabled? }
-    can :reply and can :create
+    can :create
 
     given { |user, session| discussion_topic.root_topic&.context&.grants_right?(user, session, :moderate_forum) }
-    can :update and can :delete and can :read
+    can :update and can :delete and can :read and can :pin
 
     given { |user, session| discussion_topic.grants_right?(user, session, :rate) }
     can :rate
@@ -420,6 +476,7 @@ class DiscussionEntry < ActiveRecord::Base
   scope :all_for_user, ->(user) { active.where(user_id: user) }
   scope :top_level_for_user, ->(user) { all_for_user(user).where(root_entry_id: nil) }
   scope :non_top_level_for_user, ->(user) { all_for_user(user).where.not(root_entry_id: nil) }
+  scope :not_anonymous, -> { where(is_anonymous_author: false) }
 
   def self.participant_join_sql(current_user)
     sanitize_sql(["LEFT OUTER JOIN #{DiscussionEntryParticipant.quoted_table_name} ON discussion_entries.id = discussion_entry_participants.discussion_entry_id
@@ -618,7 +675,9 @@ class DiscussionEntry < ActiveRecord::Base
   def broadcast_report_notification(report_type)
     return unless root_account.feature_enabled?(:discussions_reporting)
 
-    to_list = context.instructors_in_charge_of(user_id)
+    course = context.is_a?(Group) ? context.course : context
+
+    to_list = course.instructors_in_charge_of(user_id)
 
     notification_type = "Reported Reply"
     notification = BroadcastPolicy.notification_finder.by_name(notification_type)
@@ -749,5 +808,24 @@ class DiscussionEntry < ActiveRecord::Base
     if will_save_change_to_message? && !new_record?
       self.edited_at = Time.now.utc
     end
+  end
+
+  def highest_level_parent_or_self
+    return self if parent_entry.nil?
+
+    parent_entry.highest_level_parent_or_self
+  end
+
+  def restore
+    update(workflow_state: "active", deleted_at: nil)
+    increment_unread_counts_after_restore
+  end
+
+  def validate_pin_type
+    return unless pin_type.present?
+
+    errors.add(:pin_type, I18n.t("Invalid pin type")) unless DiscussionEntry::PinningTypes::TYPES.include?(pin_type)
+    errors.add(:base, I18n.t("Discussion topic has too many pinned entries")) if discussion_topic.pinned_entries.count >= DiscussionTopic::MAX_ENTRIES_PINNED
+    errors.add(:pin_type, I18n.t("Pin type 'thread' can only be used for top-level entries")) if pin_type == DiscussionEntry::PinningTypes::THREAD && !parent_entry.nil?
   end
 end

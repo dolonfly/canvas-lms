@@ -19,16 +19,17 @@
 
 module DataFixup::Lti::BackfillLtiRegistrationAccountBindings
   def self.run
-    DeveloperKeyAccountBinding.joins(developer_key: :lti_registration)
+    DeveloperKeyAccountBinding.preload(:account, developer_key: :lti_registration)
                               .where.missing(:lti_registration_account_binding)
                               .find_each do |account_binding|
       next unless account_binding.account.root_account?
+      next unless account_binding.developer_key # avoid old records in production
+      next unless account_binding.developer_key.is_lti_key
 
       Lti::RegistrationAccountBinding.create!(
         account: account_binding.account,
         registration: account_binding.developer_key.lti_registration,
         developer_key_account_binding: account_binding,
-        skip_lime_sync: true,
         workflow_state: account_binding.workflow_state
       )
     rescue => e

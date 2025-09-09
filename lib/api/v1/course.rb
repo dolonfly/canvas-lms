@@ -161,11 +161,9 @@ module Api::V1::Course
       hash["banner_image_download_url"] = course.banner_image if includes.include?("banner_image")
       hash["concluded"] = course.concluded? if includes.include?("concluded")
       apply_master_course_settings(hash, course, user)
-      if course.root_account.feature_enabled?(:course_templates)
-        hash["template"] = course.template?
-        if course.template? && includes.include?("templated_accounts")
-          hash["templated_accounts"] = course.templated_accounts.map { |a| { id: a.id, name: a.name } }
-        end
+      hash["template"] = course.template?
+      if course.template? && includes.include?("templated_accounts")
+        hash["templated_accounts"] = course.templated_accounts.map { |a| { id: a.id, name: a.name } }
       end
 
       if includes.include?("grading_scheme")
@@ -201,7 +199,7 @@ module Api::V1::Course
   def add_helper_dependant_entries(hash, course, builder)
     request = respond_to?(:request) ? self.request : nil
     hash["calendar"] = { "ics" => "#{feeds_calendar_url(course.feed_code)}.ics" }
-    hash["syllabus_body"] = api_user_content(course.syllabus_body, course) if builder.include_syllabus
+    hash["syllabus_body"] = api_user_content(course.syllabus_body, course, location: "course_syllabus_#{course.id}") if builder.include_syllabus
     hash["html_url"] = course_url(course, host: HostUrl.context_host(course, request.try(:host_with_port))) if builder.include_url
     hash["time_zone"] = course.time_zone&.tzinfo&.name
     hash

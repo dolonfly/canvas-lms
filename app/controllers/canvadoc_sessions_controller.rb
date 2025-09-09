@@ -23,8 +23,8 @@ class CanvadocSessionsController < ApplicationController
   include CoursesHelper
   include HmacHelper
 
-  def services_jwt_auth_allowed
-    params[:action] == "show" && Account.site_admin.feature_enabled?(:rce_linked_file_urls)
+  def token_auth_allowed?
+    params[:action] == "show"
   end
 
   def create
@@ -67,8 +67,8 @@ class CanvadocSessionsController < ApplicationController
         @current_user,
         annotation_context,
         submission,
-        true,
-        enable_annotations
+        disable_annotation_notifications: true,
+        enable_annotations:
       )
     }
   end
@@ -159,6 +159,7 @@ class CanvadocSessionsController < ApplicationController
         opts[:annotation_context] = annotation_context_id
       end
       attachment.submit_to_canvadocs(1, **opts) unless attachment.canvadoc_available?
+      attachment.canvadoc.canvadocs_submissions.find_or_create_by(submission_id: submission) if submission
 
       url = attachment.canvadoc.session_url(opts.merge(user_session_params))
       # For the purposes of reporting student viewership, we only

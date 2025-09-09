@@ -46,6 +46,18 @@ describe Lti::Messages::DeepLinkingRequest do
       expect(subject["deep_link_return_url"]).to eq deep_linking_return_url
     end
 
+    context "when there is a secure_params with an assignment id" do
+      let(:expander_opts) { super().merge(secure_params: assignment.secure_params) }
+
+      it 'sets the assignment "deep_link_return_url"' do
+        expect(expander.controller).to receive(:polymorphic_url) do |_fragments, params|
+          expect(CanvasSecurity.decode_jwt(params[:data])["assignment_id"]).to eq(assignment.id)
+          deep_linking_return_url
+        end
+        expect(subject["deep_link_return_url"]).to eq deep_linking_return_url
+      end
+    end
+
     context "when assignment with nil lti_context_id exists" do
       before do
         a = Assignment.create!(name: "no lti_context_id", context: course)
@@ -195,6 +207,37 @@ describe Lti::Messages::DeepLinkingRequest do
 
       it_behaves_like "sets deep linking attributes" do
         let(:accept_types) { %w[ltiResourceLink] }
+        let(:accept_presentation_document_targets) { %w[iframe window] }
+        let(:accept_media_types) { "application/vnd.ims.lti.v1.ltilink" }
+        let(:auto_create) { true }
+        let(:accept_multiple) { true }
+      end
+    end
+
+    context 'when resource type is "ActivityAssetProcessor"' do
+      let(:opts) { { resource_type: "ActivityAssetProcessor" } }
+      let(:expander_opts) { super().merge(secure_params: assignment.secure_params) }
+
+      it_behaves_like "sets deep linking attributes" do
+        let(:accept_types) { %w[ltiAssetProcessor] }
+        let(:accept_presentation_document_targets) { %w[iframe window] }
+        let(:accept_media_types) { "application/vnd.ims.lti.v1.ltilink" }
+        let(:auto_create) { true }
+        let(:accept_multiple) { true }
+      end
+
+      it "sets the activity id" do
+        activity_claim = jws[:post_payload]["https://purl.imsglobal.org/spec/lti/claim/activity"]
+
+        expect(activity_claim["id"]).to eq(assignment.lti_context_id)
+      end
+    end
+
+    context 'when resource type is "ActivityAssetProcessorContribution"' do
+      let(:opts) { { resource_type: "ActivityAssetProcessorContribution" } }
+
+      it_behaves_like "sets deep linking attributes" do
+        let(:accept_types) { %w[ltiAssetProcessorContribution] }
         let(:accept_presentation_document_targets) { %w[iframe window] }
         let(:accept_media_types) { "application/vnd.ims.lti.v1.ltilink" }
         let(:auto_create) { true }

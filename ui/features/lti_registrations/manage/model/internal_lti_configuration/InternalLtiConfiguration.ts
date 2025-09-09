@@ -20,24 +20,28 @@ import * as z from 'zod'
 import {ZLtiPrivacyLevel} from '../LtiPrivacyLevel'
 import {ZLtiScope} from '@canvas/lti/model/LtiScope'
 import {ZInternalPlacementConfiguration} from './placement_configuration/InternalPlacementConfiguration'
-import {ZPublicJwk} from './PublicJwk'
 import {ZInternalBaseLaunchSettings} from './InternalBaseLaunchSettings'
+import {ZContentMigrationSettings} from '../lti_tool_configuration/ContentMigrationSettings'
 
 export const ZInternalLtiConfiguration = z.object({
   title: z.string(),
-  description: z.string().optional(),
-  custom_fields: z.record(z.string()).optional(),
+  description: z.string().nullable().optional(),
+  custom_fields: z.record(z.string()).nullable().optional(),
   target_link_uri: z.string(),
-  domain: z.string().optional(),
-  tool_id: z.string().optional(),
-  privacy_level: ZLtiPrivacyLevel.optional(),
+  domain: z.string().nullable().optional(),
+  tool_id: z.string().nullable().optional(),
+  privacy_level: ZLtiPrivacyLevel.nullable().optional(),
   oidc_initiation_url: z.string(),
-  oidc_initiation_urls: z.record(z.string(), z.string()).optional(),
-  public_jwk: ZPublicJwk.optional(),
-  public_jwk_url: z.string().optional(),
+  oidc_initiation_urls: z.record(z.string(), z.string()).nullable().optional(),
+  public_jwk: z.unknown().optional().nullable(),
+  public_jwk_url: z.string().nullable().optional(),
   scopes: z.array(ZLtiScope),
-  redirect_uris: z.array(z.string()).optional(),
-  launch_settings: ZInternalBaseLaunchSettings.optional(),
+  redirect_uris: z.array(z.string()).nullable().optional(),
+  launch_settings: ZInternalBaseLaunchSettings.extend({
+    content_migration: ZContentMigrationSettings.nullable().optional(),
+  })
+    .nullable()
+    .optional(),
   placements: z.array(ZInternalPlacementConfiguration),
 })
 

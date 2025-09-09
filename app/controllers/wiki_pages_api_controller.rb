@@ -177,7 +177,7 @@ class WikiPagesApiController < ApplicationController
   before_action :require_wiki_page, except: %i[create update update_front_page index check_title_availability]
   before_action :was_front_page, except: [:index, :check_title_availability]
   before_action only: %i[show update destroy revisions show_revision revert] do
-    check_differentiated_assignments(@page) if @context.conditional_release? || Account.site_admin.feature_enabled?(:selective_release_backend)
+    check_differentiated_assignments(@page)
   end
 
   include Api::V1::WikiPage
@@ -213,7 +213,9 @@ class WikiPagesApiController < ApplicationController
     end
 
     new_page = @page.duplicate
+    new_page.saving_user = @current_user
     new_page.save!
+
     render json: wiki_page_json(new_page, @current_user, session)
   end
 
@@ -286,6 +288,7 @@ class WikiPagesApiController < ApplicationController
       includes = Array(params[:include])
       scope_columns = WikiPage.column_names
       scope_columns -= ["body"] unless includes.include?("body")
+      scope_columns << "CASE WHEN body IS NULL THEN true ELSE false END AS is_body_null" if @context.account.feature_enabled?(:block_content_editor)
       scope = @context.wiki_pages.select(scope_columns).preload(:user)
       scope = if params.key?(:published)
                 value_to_boolean(params[:published]) ? scope.published : scope.unpublished
@@ -302,8 +305,10 @@ class WikiPagesApiController < ApplicationController
       order_clause = case params[:sort]
                      when "title"
                        WikiPage.title_order_by_clause
+                     when "updated_at"
+                       # Match the behavior of the wiki_page_json method where updated_at is set to revised_at
+                       :revised_at
                      when "created_at",
-                       "updated_at",
                        "todo_date"
                        params[:sort].to_sym
                      end
@@ -355,7 +360,7 @@ class WikiPagesApiController < ApplicationController
   # @argument wiki_page[publish_at] [Optional, DateTime]
   #   Schedule a future date/time to publish the page. This will have no effect unless the
   #   "Scheduled Page Publication" feature is enabled in the account. If a future date is
-  #   supplied, the page will be unpublished and wiki_page[published] will be ignored.
+  #   supplied, the page will be unpublished and +wiki_page[published]+ will be ignored.
   #
   # @example_request
   #     curl -X POST -H 'Authorization: Bearer <token>' \
@@ -372,12 +377,13 @@ class WikiPagesApiController < ApplicationController
     @page = @wiki.build_wiki_page(@current_user, initial_params)
     if authorized_action(@page, @current_user, :create)
       allowed_fields = Set[:title, :body]
-      allowed_fields << :block_editor_attributes if @context.account.feature_enabled?(:block_editor)
+      allowed_fields << :block_editor_attributes if @context.account.feature_enabled?(:block_editor) || @context.account.feature_enabled?(:block_content_editor)
+      allowed_fields << :estimated_duration_attributes if @context.is_a?(Course) && @context.horizon_course?
       update_params = get_update_params(allowed_fields)
       assign_todo_date
+      @page.saving_user = @current_user
       if !update_params.is_a?(Symbol) && @page.update(update_params) && process_front_page
         log_asset_access(@page, "wiki", @wiki, "participate")
-        apply_assignment_parameters(assignment_params, @page) if @context.conditional_release? && !Account.site_admin.feature_enabled?(:selective_release_ui_api)
         render json: wiki_page_json(@page, @current_user, session)
       else
         render json: @page.errors, status: update_params.is_a?(Symbol) ? update_params : :bad_request
@@ -453,7 +459,7 @@ class WikiPagesApiController < ApplicationController
     if @page.new_record?
       perform_update = true if authorized_action(@page, @current_user, [:create])
       allowed_fields = Set[:title, :body]
-      allowed_fields << :block_editor_attributes if @context.account.feature_enabled?(:block_editor)
+      allowed_fields << :block_editor_attributes if @context.account.feature_enabled?(:block_editor) || @context.account.feature_enabled?(:block_content_editor)
     elsif authorized_action(@page, @current_user, [:update, :update_content])
       perform_update = true
       allowed_fields = Set[]
@@ -462,10 +468,13 @@ class WikiPagesApiController < ApplicationController
     if perform_update
       assign_todo_date
       update_params = get_update_params(allowed_fields)
+      @page.saving_user = @current_user
       if !update_params.is_a?(Symbol) && @page.update(update_params) && process_front_page
+        # This ensures the context module's UI items are updated
+        @page.context_module_tags.each { |content_tag| content_tag.context_module&.touch }
+
         log_asset_access(@page, "wiki", @wiki, "participate")
         @page.context_module_action(@current_user, @context, :contributed)
-        apply_assignment_parameters(assignment_params, @page) if @context.conditional_release? && !Account.site_admin.feature_enabled?(:selective_release_ui_api)
         render json: wiki_page_json(@page, @current_user, session)
       else
         render json: @page.errors, status: update_params.is_a?(Symbol) ? update_params : :bad_request
@@ -606,10 +615,15 @@ class WikiPagesApiController < ApplicationController
   def check_title_availability
     return render status: :not_found, json: { errors: [message: "The specified resource does not exist."] } unless Account.site_admin.feature_enabled?(:permanent_page_links)
 
-    return render_json_unauthorized unless @context.wiki.grants_right?(@current_user, :read) && tab_enabled?(@context.class::TAB_PAGES)
+    if authorized_action(@context.wiki, @current_user, :read) && tab_enabled?(@context.class::TAB_PAGES)
+      title = params.require(:title)
+      query = @context.wiki.wiki_pages.not_deleted.where(title:)
 
-    title = params.require(:title)
-    render json: { conflict: @context.wiki.wiki_pages.not_deleted.where(title:).count > 0 }
+      current_id = params[:current_page_id].presence
+      query = query.where.not(id: current_id) if current_id
+
+      render json: { conflict: query.exists? }
+    end
   end
 
   protected
@@ -660,7 +674,8 @@ class WikiPagesApiController < ApplicationController
   def get_update_params(allowed_fields = Set[])
     # normalize parameters
     wiki_page_params = %w[title body notify_of_update published front_page editing_roles publish_at]
-    wiki_page_params += [block_editor_attributes: [:time, :version, { blocks: strong_anything }]] if @context.account.feature_enabled?(:block_editor)
+    wiki_page_params += [block_editor_attributes: [:time, :version, { blocks: strong_anything }]] if @context.account.feature_enabled?(:block_editor) || @context.account.feature_enabled?(:block_content_editor)
+    wiki_page_params += [estimated_duration_attributes: %i[id minutes _destroy]] if @context.is_a?(Course) && @context.horizon_course?
     page_params = params[:wiki_page] ? params[:wiki_page].permit(*wiki_page_params) : {}
 
     if page_params.key?(:published)
@@ -671,9 +686,10 @@ class WikiPagesApiController < ApplicationController
     end
 
     if page_params.key?(:editing_roles)
-      editing_roles = page_params[:editing_roles].split(",").map(&:strip)
+      editing_roles = (page_params[:editing_roles] || "").split(",").map(&:strip)
+      editing_roles = %w[teachers] if @context.is_a?(Course) && @context.horizon_course?
       invalid_roles = editing_roles.reject { |role| %w[teachers students members public].include?(role) }
-      unless invalid_roles.empty?
+      if invalid_roles.any? || editing_roles.empty?
         @page.errors.add(:editing_roles, t(:invalid_editing_roles, "The provided editing roles are invalid"))
         return :bad_request
       end
@@ -683,6 +699,7 @@ class WikiPagesApiController < ApplicationController
 
     if page_params.key?(:front_page)
       @set_as_front_page = value_to_boolean(page_params.delete(:front_page))
+      @set_as_front_page = false if @context.is_a?(Course) && @context.horizon_course?
       @set_front_page = true if @was_front_page != @set_as_front_page
     end
     change_front_page = !!@set_front_page
@@ -705,7 +722,8 @@ class WikiPagesApiController < ApplicationController
 
       unless @page.grants_right?(@current_user, session, :update)
         allowed_fields << :body
-        allowed_fields << :block_editor_attributes if @context.account.feature_enabled?(:block_editor)
+        allowed_fields << :block_editor_attributes if @context.account.feature_enabled?(:block_editor) || @context.account.feature_enabled?(:block_content_editor)
+        allowed_fields << :estimated_duration_attributes if @context.is_a?(Course) && @context.horizon_course?
         rejected_fields << :title if page_params.include?(:title) && page_params[:title] != @page.title
 
         rejected_fields << :front_page if change_front_page && !@wiki.grants_right?(@current_user, session, :update)
@@ -758,7 +776,7 @@ class WikiPagesApiController < ApplicationController
   def assign_todo_date
     return if params.dig(:wiki_page, :student_todo_at).nil? && params.dig(:wiki_page, :student_planner_checkbox).nil?
 
-    if @page.context.grants_any_right?(@current_user, session, :manage_content, :manage_course_content_edit)
+    if @page.context.grants_right?(@current_user, session, :manage_course_content_edit)
       @page.todo_date = params.dig(:wiki_page, :student_todo_at) if params.dig(:wiki_page, :student_todo_at)
       # Only clear out if the checkbox is explicitly specified in the request
       if params[:wiki_page].key?("student_planner_checkbox") &&

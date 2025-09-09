@@ -16,32 +16,34 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, {useCallback, useContext, useEffect, useState} from 'react'
+import React, {useCallback, useContext, useEffect, useMemo, useState} from 'react'
 
-import {useQuery, useMutation} from '@apollo/react-hooks'
-import {DISCUSSION_TOPIC_QUERY} from '../../../graphql/Queries'
-import {CREATE_DISCUSSION_TOPIC, UPDATE_DISCUSSION_TOPIC} from '../../../graphql/Mutations'
-import LoadingIndicator from '@canvas/loading-indicator'
+import {useMutation, useQuery} from '@apollo/client'
 import {AlertManagerContext} from '@canvas/alerts/react/AlertManager'
-import {useScope as useI18nScope} from '@canvas/i18n'
-import DiscussionTopicForm from '../../components/DiscussionTopicForm/DiscussionTopicForm'
-import {setUsageRights} from '../../util/setUsageRights'
-import {getContextQuery} from '../../util/utils'
+import {useScope as createI18nScope} from '@canvas/i18n'
+import LoadingIndicator from '@canvas/loading-indicator'
+import TopNavPortalWithDefaults from '@canvas/top-navigation/react/TopNavPortalWithDefaults'
+import {assignLocation} from '@canvas/util/globalUtils'
+import WithBreakpoints from '@canvas/with-breakpoints'
+import {usePathTransform, whenPendoReady} from '@canvas/pendo'
+import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {Flex} from '@instructure/ui-flex'
 import {Heading} from '@instructure/ui-heading'
-import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {IconCompleteSolid, IconUnpublishedLine} from '@instructure/ui-icons'
 import {Pill} from '@instructure/ui-pill'
-import {SavingDiscussionTopicOverlay} from '../../components/SavingDiscussionTopicOverlay/SavingDiscussionTopicOverlay'
-import WithBreakpoints from '@canvas/with-breakpoints'
 import {flushSync} from 'react-dom'
-import TopNavPortalWithDefaults from '@canvas/top-navigation/react/TopNavPortalWithDefaults'
+import {CREATE_DISCUSSION_TOPIC, UPDATE_DISCUSSION_TOPIC} from '../../../graphql/Mutations'
+import {DISCUSSION_TOPIC_QUERY} from '../../../graphql/Queries'
+import DiscussionTopicForm from '../../components/DiscussionTopicForm/DiscussionTopicForm'
+import {SavingDiscussionTopicOverlay} from '../../components/SavingDiscussionTopicOverlay/SavingDiscussionTopicOverlay'
+import {setUsageRights} from '../../util/setUsageRights'
+import {getContextQuery} from '../../util/utils'
 
-const I18n = useI18nScope('discussion_create')
+const I18n = createI18nScope('discussion_create')
 const instUINavEnabled = () => window.ENV?.FEATURES?.instui_nav
 
 function DiscussionTopicFormContainer({apolloClient, breakpoints}) {
-  const {setOnFailure} = useContext(AlertManagerContext)
+  const {setOnFailure, setOnSuccess} = useContext(AlertManagerContext)
   const [usageRightData, setUsageRightData] = useState()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const contextType = ENV.context_is_not_group ? 'Course' : 'Group'
@@ -66,6 +68,8 @@ function DiscussionTopicFormContainer({apolloClient, breakpoints}) {
 
   const isAnnouncement = ENV?.DISCUSSION_TOPIC?.ATTRIBUTES?.is_announcement ?? false
   const shouldSaveMasteryPaths = ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED && !isAnnouncement
+
+  usePathTransform(whenPendoReady, 'discussion_topics', 'announcements', isAnnouncement)
 
   const {data: contextData, loading: courseIsLoading} = useQuery(contextQueryToUse, {
     variables: contextQueryVariables,
@@ -103,9 +107,9 @@ function DiscussionTopicFormContainer({apolloClient, breakpoints}) {
 
   function navigateToDiscussionTopic(context_type, discussion_topic_id) {
     if (context_type === 'Course') {
-      window.location.assign(`/courses/${ENV.context_id}/discussion_topics/${discussion_topic_id}`)
+      assignLocation(`/courses/${ENV.context_id}/discussion_topics/${discussion_topic_id}`)
     } else if (context_type === 'Group') {
-      window.location.assign(`/groups/${ENV.context_id}/discussion_topics/${discussion_topic_id}`)
+      assignLocation(`/groups/${ENV.context_id}/discussion_topics/${discussion_topic_id}`)
     } else {
       setOnFailure(I18n.t('Invalid context type'))
     }
@@ -121,7 +125,7 @@ function DiscussionTopicFormContainer({apolloClient, breakpoints}) {
     }
   }
 
-  const handleDiscussionTopicMutationCompletion = async discussionTopic => {
+  const handleDiscussionTopicMutationCompletion = async (discussionTopic, delayRedirection = 0) => {
     const {_id: discussionTopicId, contextType: discussionContextType, attachment} = discussionTopic
 
     if (discussionTopicId && discussionContextType) {
@@ -150,7 +154,7 @@ function DiscussionTopicFormContainer({apolloClient, breakpoints}) {
           })
 
           window.dispatchEvent(
-            new CustomEvent('triggerMasteryPathsUpdateAssignment', {detail: {assignmentInfo}})
+            new CustomEvent('triggerMasteryPathsUpdateAssignment', {detail: {assignmentInfo}}),
           )
           window.dispatchEvent(new CustomEvent('triggerMasteryPathsSave'))
         }
@@ -161,7 +165,11 @@ function DiscussionTopicFormContainer({apolloClient, breakpoints}) {
         // Always navigate to the discussion topic on a successful mutation
         // In some scenarios, like when saving mastery paths, we don't want to navigate unless it happens via event
         if (shouldNavigateToDiscussionTopic) {
-          navigateToDiscussionTopic(discussionContextType, discussionTopicId)
+          // Use setTimeout to allow the user or the SR to read the success message before redirecting
+          setTimeout(
+            () => navigateToDiscussionTopic(discussionContextType, discussionTopicId),
+            delayRedirection,
+          )
         }
       }
     } else {
@@ -248,9 +256,12 @@ function DiscussionTopicFormContainer({apolloClient, breakpoints}) {
         return
       }
 
-      handleDiscussionTopicMutationCompletion(updatedDiscussionTopic).catch(() => {
-        setOnFailure(I18n.t('Error updating file usage rights'))
-      })
+      // 2 seconds delay for the success message to be read by screen readers
+      handleDiscussionTopicMutationCompletion(updatedDiscussionTopic, 1600)
+        .then(() => setOnSuccess(I18n.t('Changes saved successfully'), true))
+        .catch(() => {
+          setOnFailure(I18n.t('Error updating file usage rights'))
+        })
     },
     onError: () => {
       setIsSubmitting(false)

@@ -23,23 +23,26 @@ class ToDoListPresenter
 
   attr_reader :needs_grading, :needs_moderation, :needs_submitting, :needs_reviewing
 
-  def initialize(view, user, contexts, root_account)
+  def initialize(view, user, contexts)
     @view = view
     @user = user
     @contexts = contexts
-    @root_account = root_account
 
     if user
       @needs_grading = assignments_needing(:grading)
-      if @root_account.feature_enabled?(:discussion_checkpoints)
-        @needs_grading += assignments_needing(:grading, is_sub_assignment: true)
+      # at this point, we also have to check all sub_assignments that need submitting
+      sub_assignments_needing_grading = assignments_needing(:grading, is_sub_assignment: true)
+      if discussion_checkpoints_enabled_somewhere(sub_assignments_needing_grading)
+        @needs_grading += sub_assignments_needing_grading
         @needs_grading.sort_by! { |a| a.due_at || a.updated_at }
       end
       @needs_moderation = assignments_needing(:moderation)
       @needs_submitting = assignments_needing(:submitting, include_ungraded: true)
       @needs_submitting += ungraded_quizzes_needing_submitting
-      if @root_account.feature_enabled?(:discussion_checkpoints)
-        @needs_submitting += assignments_needing(:submitting, include_ungraded: true, is_sub_assignment: true)
+      # at this point, we also have to check all sub_assignments that need submitting
+      sub_assignments_needing_submitting = assignments_needing(:submitting, include_ungraded: true, is_sub_assignment: true)
+      if discussion_checkpoints_enabled_somewhere(sub_assignments_needing_submitting)
+        @needs_submitting += sub_assignments_needing_submitting
       end
       @needs_submitting.sort_by! { |a| a.due_at || a.updated_at }
 
@@ -69,9 +72,13 @@ class ToDoListPresenter
     end
   end
 
+  def discussion_checkpoints_enabled_somewhere(assignment_presenter_array)
+    assignment_presenter_array&.any? { |ap| ap.assignment.discussion_checkpoints_enabled? } || false
+  end
+
   def assignments_needing(type, opts = {})
     if @user
-      @user.send(:"assignments_needing_#{type}", contexts: @contexts, limit: ASSIGNMENT_LIMIT, discussion_checkpoints_enabled: @root_account.feature_enabled?(:discussion_checkpoints), **opts).map do |assignment|
+      @user.send(:"assignments_needing_#{type}", contexts: @contexts, limit: ASSIGNMENT_LIMIT, **opts).map do |assignment|
         AssignmentPresenter.new(@view, assignment, @user, type)
       end
     else
@@ -119,7 +126,7 @@ class ToDoListPresenter
 
   class AssignmentPresenter
     attr_reader :assignment
-    protected :assignment
+
     delegate :title, :submission_action_string, :points_possible, :due_at, :updated_at, :peer_reviews_due_at, :context, :sub_assignment_tag, to: :assignment
 
     def initialize(view, assignment, user, type)
@@ -246,6 +253,7 @@ class ToDoListPresenter
     attr_reader :assignment
 
     include ApplicationHelper
+    include AssignmentsHelper
     include Rails.application.routes.url_helpers
 
     def initialize(view, assessment_request, user)
@@ -264,11 +272,7 @@ class ToDoListPresenter
     end
 
     def submission_path
-      if @assignment.anonymous_peer_reviews?
-        context_url(context, :context_assignment_anonymous_submission_url, @assignment.id, @assessment_request.submission.anonymous_id)
-      else
-        @view.course_assignment_submission_path(@assignment.context_id, @assignment.id, @assessment_request.user_id)
-      end
+      student_peer_review_url(@assignment.context, @assignment, @assessment_request)
     end
 
     def ignore_url

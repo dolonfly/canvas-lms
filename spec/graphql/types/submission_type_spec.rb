@@ -629,6 +629,15 @@ describe Types::SubmissionType do
         )
       ).to eq [[@attachment1.id.to_s]]
     end
+
+    it "has a valid viewedAt" do
+      now = Time.zone.now.change(usec: 0)
+      @attachment1.update!(viewed_at: now)
+
+      expect(Time.zone.parse(submission_type.resolve(
+        "submissionHistoriesConnection(first: 1) { nodes { attachments { viewedAt }}}"
+      )[0][0])).to eq now
+    end
   end
 
   describe "submission histories connection" do
@@ -639,12 +648,75 @@ describe Types::SubmissionType do
       @submission3 = assignment.submit_homework(@student, body: "Attempt 3")
     end
 
-    let(:submission_history_type) { GraphQLTypeTester.new(@submission3, current_user: @teacher) }
+    let(:submission_history_type) { GraphQLTypeTester.new(@submission3, current_user: @teacher, request: ActionDispatch::TestRequest.create) }
+
+    describe "orderBy" do
+      it "allows ordering the histories by attempt, ascending" do
+        expect(
+          submission_history_type.resolve("submissionHistoriesConnection(orderBy: { field: attempt, direction: ascending }) { nodes { attempt }}")
+        ).to eq [1, 2, 3]
+      end
+
+      it "allows ordering the histories by attempt, descending" do
+        expect(
+          submission_history_type.resolve("submissionHistoriesConnection(orderBy: { field: attempt, direction: descending }) { nodes { attempt }}")
+        ).to eq [3, 2, 1]
+      end
+
+      it "falls back to comparing by version id if two histories have the same attempt" do
+        v3 = @submission3.versions.find_by(number: 3)
+        model = v3.model
+        model.attempt = 1
+        model.updated_at = @submission3.versions.find_by(number: 1).model.updated_at
+        v3.update!(yaml: model.attributes.to_yaml)
+
+        aggregate_failures do
+          expect(
+            submission_history_type.resolve("submissionHistoriesConnection(orderBy: { field: attempt, direction: ascending }) { nodes { body }}")
+          ).to eq ["Attempt 1", "Attempt 3", "Attempt 2"]
+
+          expect(
+            submission_history_type.resolve("submissionHistoriesConnection(orderBy: { field: attempt, direction: descending }) { nodes { body }}")
+          ).to eq ["Attempt 2", "Attempt 3", "Attempt 1"]
+        end
+      end
+
+      it "does not allow ordering by unupported fields" do
+        expect do
+          submission_history_type.resolve("submissionHistoriesConnection(orderBy: { field: body, direction: ascending }) { nodes { attempt }}")
+        end.to raise_error(GraphQLTypeTester::Error)
+      end
+
+      it "does not allow ordering by unsupported directions" do
+        expect do
+          submission_history_type.resolve("submissionHistoriesConnection(orderBy: { field: attempt, direction: asc }) { nodes { attempt }}")
+        end.to raise_error(GraphQLTypeTester::Error)
+      end
+
+      it "requires field to be specified" do
+        expect do
+          submission_history_type.resolve("submissionHistoriesConnection(orderBy: { direction: ascending }) { nodes { attempt }}")
+        end.to raise_error(GraphQLTypeTester::Error)
+      end
+
+      it "requires direction to be specified" do
+        expect do
+          submission_history_type.resolve("submissionHistoriesConnection(orderBy: { field: attempt }) { nodes { attempt }}")
+        end.to raise_error(GraphQLTypeTester::Error)
+      end
+    end
 
     it "returns the submission histories" do
       expect(
         submission_history_type.resolve("submissionHistoriesConnection { nodes { attempt }}")
       ).to eq [1, 2, 3]
+    end
+
+    it "allows fetching anonymousId on histories" do
+      anon_id = @submission3.anonymous_id
+      expect(
+        submission_history_type.resolve("submissionHistoriesConnection { nodes { anonymousId }}")
+      ).to eq [anon_id, anon_id, anon_id]
     end
 
     it "properly handles cursors for submission histories" do
@@ -825,6 +897,159 @@ describe Types::SubmissionType do
         )
       ).to eq [[], [@rubric_assessment.id.to_s], []]
     end
+
+    it "returns empty assessments if there is not a matching rubric assessment for the latest attempt" do
+      @assignment.submit_homework(@student, body: "bar", submitted_at: 1.hour.since)
+      @assignment.submit_homework(@student, body: "bar2", submitted_at: 1.hour.since)
+      expect(
+        submission_type.resolve("rubricAssessmentsConnection { nodes { _id } }")
+      ).to eq []
+    end
+
+    it "returns all assessment if for_all_attempts is true" do
+      @assignment.submit_homework(@student, body: "bar", submitted_at: 1.hour.since)
+      @assignment.submit_homework(@student, body: "bar2", submitted_at: 1.hour.since)
+      expect(
+        submission_type.resolve("rubricAssessmentsConnection(filter: {forAllAttempts: true}) { nodes { _id } }")
+      ).to eq [@rubric_assessment.id.to_s]
+    end
+
+    describe "with provisional assessments" do
+      before(:once) do
+        @final_grader = @teacher
+        @moderated_assignment = @course.assignments.create!(
+          due_at: 2.years.from_now,
+          final_grader: @final_grader,
+          grader_count: 2,
+          moderated_grading: true,
+          points_possible: 10,
+          submission_types: :online_text_entry,
+          title: "Moderated Assignment"
+        )
+        rubric_for_course
+        rubric_association_model(
+          context: @course,
+          rubric: @rubric,
+          association_object: @moderated_assignment,
+          purpose: "grading"
+        )
+        @submission = @moderated_assignment.submit_homework(@student, body: "foo", submitted_at: 2.hours.ago)
+
+        moderator_provisional_grade = @submission.find_or_create_provisional_grade!(@final_grader)
+        @moderator_provisional_assessment = @rubric_association.assess({
+                                                                         user: @student,
+                                                                         assessor: @final_grader,
+                                                                         artifact: moderator_provisional_grade,
+                                                                         assessment: { assessment_type: "grading", criterion_crit1: { points: 5 } }
+                                                                       })
+
+        @provisional_grader = user_factory(active_all: true)
+        @course.enroll_ta(@provisional_grader, enrollment_state: "active")
+
+        provisional_grade = @submission.find_or_create_provisional_grade!(@provisional_grader)
+        @provisional_assessment = @rubric_association.assess({
+                                                               user: @student,
+                                                               assessor: @provisional_grader,
+                                                               artifact: provisional_grade,
+                                                               assessment: { assessment_type: "grading", criterion_crit1: { points: 5 } }
+                                                             })
+      end
+
+      it "excludes provisional assessments by default" do
+        submission_type = GraphQLTypeTester.new(@submission, current_user: @provisional_grader)
+        expect(
+          submission_type.resolve("rubricAssessmentsConnection { nodes { _id } }")
+        ).to eq []
+      end
+
+      it "includes provisional assessments when include_provisional_assessments is true" do
+        submission_type = GraphQLTypeTester.new(@submission, current_user: @provisional_grader)
+        expect(
+          submission_type.resolve("rubricAssessmentsConnection(filter: {includeProvisionalAssessments: true}) { nodes { _id } }")
+        ).to contain_exactly(@provisional_assessment.id.to_s)
+      end
+
+      it "allows moderators to see all provisional assessments" do
+        submission_type = GraphQLTypeTester.new(@submission, current_user: @final_grader)
+        expect(
+          submission_type.resolve("rubricAssessmentsConnection(filter: {includeProvisionalAssessments: true}) { nodes { _id } }")
+        ).to contain_exactly(@moderator_provisional_assessment.id.to_s, @provisional_assessment.id.to_s)
+      end
+
+      it "allows provisional graders to see only their own provisional assessments" do
+        other_grader = user_factory(active_all: true)
+        @course.enroll_ta(other_grader, enrollment_state: "active")
+
+        other_provisional_grade = @submission.find_or_create_provisional_grade!(other_grader)
+        other_assessment = @rubric_association.assess({
+                                                        user: @student,
+                                                        assessor: other_grader,
+                                                        artifact: other_provisional_grade,
+                                                        assessment: { assessment_type: "grading", criterion_crit1: { points: 5 } }
+                                                      })
+
+        submission_type = GraphQLTypeTester.new(@submission, current_user: other_grader)
+        expect(
+          submission_type.resolve("rubricAssessmentsConnection(filter: {includeProvisionalAssessments: true}) { nodes { _id } }")
+        ).to contain_exactly(other_assessment.id.to_s)
+      end
+    end
+  end
+
+  describe "comments_connection" do
+    describe "with includeProvisionalComments filter" do
+      before(:once) do
+        @course = Course.create!
+        @teacher = course_with_teacher(course: @course, active_all: true).user
+        @first_ta = course_with_ta(course: @course, active_all: true).user
+        @student = course_with_student(course: @course, active_all: true).user
+
+        @assignment = @course.assignments.create!(
+          moderated_grading: true,
+          grader_count: 2,
+          final_grader: @teacher
+        )
+        @submission = @assignment.submit_homework(@student, body: "hello")
+
+        @submission.add_comment(author: @teacher, comment: "Regular comment")
+        ta_pg = @submission.find_or_create_provisional_grade!(@first_ta)
+
+        @provisional_comment = @submission.add_comment(author: @first_ta, comment: "Provisional comment", provisional: true)
+        @provisional_comment.update!(provisional_grade_id: ta_pg.id)
+      end
+
+      it "calls visible_provisional_comments when includeProvisionalComments is true" do
+        expect_any_instance_of(Submission).to receive(:visible_provisional_comments).with(@teacher, provisional_comments: [@provisional_comment]).and_call_original
+
+        submission_type = GraphQLTypeTester.new(@submission, current_user: @teacher)
+        query = "commentsConnection(filter: {}, includeProvisionalComments: true) { nodes { _id } }"
+        submission_type.resolve(query)
+      end
+
+      it "does not call visible_provisional_comments when includeProvisionalComments is false" do
+        expect_any_instance_of(Submission).not_to receive(:visible_provisional_comments)
+
+        submission_type = GraphQLTypeTester.new(@submission, current_user: @teacher)
+        query = "commentsConnection(filter: {}, includeProvisionalComments: false) { nodes { _id } }"
+        submission_type.resolve(query)
+      end
+
+      it "includes both regular and provisional comments when includeProvisionalComments is true for a moderator" do
+        submission_type = GraphQLTypeTester.new(@submission, current_user: @teacher)
+        query = "commentsConnection(filter: {}, includeProvisionalComments: true) { nodes { _id } }"
+        result = submission_type.resolve(query)
+
+        expect(result.length).to eq(2)
+      end
+
+      it "includes only regular comments when includeProvisionalComments is false" do
+        submission_type = GraphQLTypeTester.new(@submission, current_user: @teacher)
+        query = "commentsConnection(filter: {}, includeProvisionalComments: false) { nodes { _id } }"
+        result = submission_type.resolve(query)
+
+        expect(result.length).to eq(1)
+      end
+    end
   end
 
   describe "turnitin_data" do
@@ -844,22 +1069,38 @@ describe Types::SubmissionType do
       @submission.save!
     end
 
-    it "returns turnitin_data" do
+    it "returns submission _id" do
       expect(
         submission_type.resolve("turnitinData { target { ...on Submission { _id } } }")
       ).to eq [@submission.id.to_s]
+    end
+
+    it "returns status" do
       expect(
         submission_type.resolve("turnitinData { status }")
       ).to eq [@tii_data[:status]]
+    end
+
+    it "returns score" do
       expect(
         submission_type.resolve("turnitinData { score }")
       ).to eq [@tii_data[:similarity_score]]
+    end
+
+    it "returns state" do
       expect(
         submission_type.resolve("turnitinData { state }")
       ).to eq [@tii_data[:state]]
+    end
+
+    it "returns reportUrl" do
       expect(
         submission_type.resolve("turnitinData { reportUrl }")
       ).to eq [@tii_data[:report_url]]
+    end
+
+    it "returns assetString" do
+      expect(submission_type.resolve("turnitinData { assetString }")).to eq [@submission.asset_string]
     end
   end
 
@@ -930,6 +1171,11 @@ describe Types::SubmissionType do
 
   describe "previewUrl" do
     let(:preview_url) { submission_type.resolve("previewUrl") }
+
+    let(:quiz) do
+      quiz_with_submission
+      @quiz
+    end
 
     it "returns the preview URL when a student has submitted" do
       @assignment.submit_homework(@student, body: "test")
@@ -1002,7 +1248,18 @@ describe Types::SubmissionType do
       end
     end
 
-    context "whent the assignment is a discussion topic" do
+    it "includes a 'version' query param that corresponds to the submission version number when it's an old quiz" do
+      @quiz_assignment = quiz.assignment
+      @quiz_submission = @quiz_assignment.submission_for_student(@student)
+      quiz_submission_type_for_teacher = GraphQLTypeTester.new(@quiz_submission, current_user: @teacher, request: ActionDispatch::TestRequest.create)
+      expected_url = "http://test.host/courses/#{@course.id}/assignments/#{@quiz_assignment.id}/submissions/#{@student.id}?preview=1&version=1"
+      aggregate_failures do
+        expect(@quiz_submission.attempt).to eq 1
+        expect(quiz_submission_type_for_teacher.resolve("previewUrl")).to eq expected_url
+      end
+    end
+
+    context "when the assignment is a discussion topic" do
       before do
         @assignment.update!(submission_types: "discussion_topic")
         @discussion_topic = @assignment.discussion_topic
@@ -1010,7 +1267,19 @@ describe Types::SubmissionType do
 
       it "returns the preview URL for the discussion topic" do
         @discussion_topic.discussion_entries.create!(user: @student, message: "I have a lot to say about this topic")
-        expect(preview_url).to eq "http://test.host/courses/#{@course.id}/discussion_topics/#{@discussion_topic.id}?embed=true"
+        expect(preview_url).to eq "http://test.host/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}?preview=1&show_full_discussion_immediately=true&version=0"
+      end
+    end
+
+    context "when the assignment is anonymous" do
+      before do
+        @assignment.update!(anonymous_grading: true)
+      end
+
+      it "returns the preview URL for the submission" do
+        @assignment.submit_homework(@student, body: "test")
+        @submission.update!(posted_at: nil)
+        expect(preview_url).to eq "http://test.host/courses/#{@course.id}/assignments/#{@assignment.id}/anonymous_submissions/#{@submission.anonymous_id}?preview=1&version=0"
       end
     end
   end
@@ -1018,7 +1287,167 @@ describe Types::SubmissionType do
   describe "wordCount" do
     it "returns the word count" do
       @submission.update!(body: "word " * 100)
+      run_jobs
       expect(submission_type.resolve("wordCount")).to eq 100
+    end
+  end
+
+  describe "anonymous grading" do
+    before do
+      @assignment.update!(anonymous_grading: true)
+      @submission.update!(posted_at: nil)
+    end
+
+    it "returns the anonymous id" do
+      expect(submission_type.resolve("anonymousId")).to eq @submission.anonymous_id
+    end
+
+    it "does not show the user to a grader when an assignment is actively anonymous" do
+      expect(submission_type.resolve("userId")).to be_nil
+    end
+  end
+
+  describe "enrollments" do
+    let(:other_section) { @course.course_sections.create! name: "other section" }
+    let(:other_teacher) do
+      @course.enroll_teacher(user_factory, section: other_section, limit_privileges_to_course_section: true).user
+    end
+
+    it "works" do
+      expect(
+        submission_type.resolve(
+          "enrollmentsConnection { nodes { _id } }",
+          current_user: @teacher
+        )
+      ).to match_array @course.enrollments.where(user_id: @submission.user_id).map(&:to_param)
+    end
+
+    it "doesn't return users not visible to current_user" do
+      expect(
+        submission_type.resolve(
+          "enrollmentsConnection { nodes { _id } }",
+          current_user: other_teacher
+        )
+      ).to be_empty
+    end
+  end
+
+  describe "lti_asset_reports_connection" do
+    let(:root_account) { @course.root_account }
+    let(:assignment) { @assignment }
+    let(:submission) { @submission }
+    let(:submission_type) { GraphQLTypeTester.new(submission, current_user:) }
+
+    before do
+      root_account.enable_feature!(:lti_asset_processor)
+      @lti_asset = lti_asset_model(submission:)
+      asset_processor = lti_asset_processor_model(assignment:)
+      @lti_asset_report = lti_asset_report_model(
+        lti_asset_processor_id: asset_processor.id,
+        asset: @lti_asset,
+        visible_to_owner: true
+      )
+    end
+
+    context "when the current user is a teacher" do
+      let(:current_user) { submission.assignment.context.instructors.first }
+
+      it "returns LTI asset reports" do
+        result = submission_type.resolve("ltiAssetReportsConnection { nodes { _id } }")
+        expect(result).to eq [@lti_asset_report.id.to_s]
+      end
+
+      it "returns LTI asset reports when latest is false" do
+        result = submission_type.resolve("ltiAssetReportsConnection(latest: false) { nodes { _id } }")
+        expect(result).to eq [@lti_asset_report.id.to_s]
+      end
+
+      it "returns nil when latest is true (not implemented yet)" do
+        result = submission_type.resolve("ltiAssetReportsConnection(latest: true) { nodes { _id } }")
+        expect(result).to be_nil
+      end
+    end
+
+    context "when the current user is a student" do
+      let(:current_user) { @student }
+
+      it "returns LTI asset reports" do
+        allow_any_instance_of(Loaders::SubmissionLtiAssetReportsStudentLoader).to receive(:raw_asset_reports).and_return([@lti_asset_report])
+        result = submission_type.resolve("ltiAssetReportsConnection { nodes { _id } }")
+        expect(result).to eq [@lti_asset_report.id.to_s]
+      end
+
+      it "does not return LTI asset reports" do
+        result = submission_type.resolve("ltiAssetReportsConnection { nodes { _id } }")
+        expect(result).to be_nil
+      end
+
+      it "returns nil when student cannot read their own grade" do
+        allow_any_instance_of(Submission).to receive(:user_can_read_grade?).with(@student).and_return(false)
+        result = submission_type.resolve("ltiAssetReportsConnection { nodes { _id } }")
+        expect(result).to be_nil
+      end
+    end
+
+    context "when the current user is a different student" do
+      let(:current_user) { student_in_course(active_all: true).user }
+
+      it "returns nil when user cannot read the submission" do
+        result = submission_type.resolve("ltiAssetReportsConnection { nodes { _id } }")
+        expect(result).to be_nil
+      end
+    end
+  end
+
+  describe "provisionalGradesConnection" do
+    before(:once) do
+      @teacher1 = user_factory(active_all: true)
+      @teacher2 = user_factory(active_all: true)
+      @moderator = user_factory(active_all: true)
+      @student = user_factory(active_all: true)
+      @admin = account_admin_user(account: @account)
+
+      @course = course_factory(active_all: true)
+      @course.enroll_teacher(@teacher1, enrollment_state: "active")
+      @course.enroll_teacher(@teacher2, enrollment_state: "active")
+
+      @course.enroll_teacher(@moderator, enrollment_state: "active")
+      @course.enroll_student(@student, enrollment_state: "active")
+
+      @moderated_assignment = @course.assignments.create!(
+        name: "moderated assignment",
+        moderated_grading: true,
+        grader_count: 2,
+        final_grader: @moderator
+      )
+      @moderated_assignment.create_moderation_grader(@teacher1, occupy_slot: true)
+      @moderated_assignment.create_moderation_grader(@teacher2, occupy_slot: true)
+      @assignment = @course.assignments.create!(name: "regular assignment")
+
+      @moderated_assignment.grade_student(@student, grader: @teacher1, provisional: true, score: 10)
+      @moderated_assignment.grade_student(@student, grader: @teacher2, provisional: true, score: 20)
+      @moderated_submission = @moderated_assignment.submissions.find_by!(user: @student)
+      @submission = @assignment.submissions.find_by!(user: @student)
+    end
+
+    it "returns nil for non-moderated assignments" do
+      submission_type = GraphQLTypeTester.new(@submission, current_user: @moderator)
+      expect(submission_type.resolve("provisionalGradesConnection { nodes { _id } }")).to be_nil
+    end
+
+    ["admin", "moderator"].each do |user_type|
+      it "returns all provisional grades for #{user_type}s" do
+        user = instance_variable_get("@#{user_type}")
+        submission_type = GraphQLTypeTester.new(@moderated_submission, current_user: user)
+        expect(submission_type.resolve("provisionalGradesConnection { nodes { _id } }")).to eq(@moderated_assignment.provisional_grades.map { |x| x.id.to_s })
+      end
+    end
+
+    it "returns scored provisional grades for teachers" do
+      submission_type = GraphQLTypeTester.new(@moderated_submission, current_user: @teacher1)
+      expect(submission_type.resolve("provisionalGradesConnection { nodes { _id } }")).to eq(
+        @moderated_assignment.provisional_grades.where(scorer: @teacher1).map { |x| x.id.to_s }
+      )
     end
   end
 end

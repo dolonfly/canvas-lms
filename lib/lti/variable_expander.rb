@@ -82,6 +82,7 @@ module Lti
     end
 
     CONTROLLER_GUARD = -> { !!@controller }
+    CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD = -> { use_controller_free_expansions? || !!@controller }
     COURSE_GUARD = -> { lti_helper.course }
     TERM_START_DATE_GUARD = -> { lti_helper.course&.enrollment_term&.start_at }
     TERM_END_DATE_GUARD = -> { lti_helper.course&.enrollment_term&.end_at }
@@ -109,6 +110,9 @@ module Lti
     LTI_ASSIGN_DESCRIPTION = -> { @assignment.present? || @originality_report.present? || @secure_params.present? }
     EDITOR_GUARD = -> { @editor_contents.present? }
     STUDENT_ASSIGNMENT_GUARD = -> { lti_helper.course&.user_is_student?(@current_user) && @assignment }
+    INSTRUCTURE_IDENTITY_GUARD = -> { INSTRUCTURE_IDENTITY }
+
+    INSTRUCTURE_IDENTITY = false
 
     def initialize(root_account, context, controller, opts = {})
       @root_account = root_account
@@ -152,13 +156,32 @@ module Lti
                    v
                  end
 
-        if @tool.is_a?(ContextExternalTool) && @tool.use_1_3? && output.is_a?(Numeric)
+        if @tool.is_a?(ContextExternalTool) && @tool.use_1_3? && (output.is_a?(Numeric) || (@root_account.feature_enabled?(:custom_variables_booleans_as_strings) && [true, false].include?(output)))
           output&.to_s
         elsif Account.site_admin.feature_enabled?(:disallow_null_custom_variables)
           output.nil? ? v : output
         else
           output
         end
+      end
+    end
+
+    def use_controller_free_expansions?
+      unless defined?(@use_controller_free_expansions)
+        @use_controller_free_expansions = @root_account.feature_enabled?(:refactor_custom_variables)
+      end
+      @use_controller_free_expansions
+    end
+
+    def url_helper_extra_params
+      @url_helper_extra_params ||= @controller ? {} : { host: @root_account.environment_specific_domain }
+    end
+
+    def url_helpers
+      if use_controller_free_expansions?
+        @controller || Rails.application.routes.url_helpers
+      else
+        @controller
       end
     end
 
@@ -173,11 +196,7 @@ module Lti
 
     def resource_link_id
       @resource_link_id ||= if @assignment&.submission_types == "external_tool" && @assignment&.line_items.present?
-                              if @root_account&.feature_enabled?(:resource_link_uuid_in_custom_substitution)
-                                @assignment.line_items.first&.resource_link&.resource_link_uuid
-                              else
-                                @assignment.line_items.first&.resource_id
-                              end
+                              @assignment.line_items.first&.resource_link&.resource_link_uuid
                             elsif @resource_link
                               @resource_link.resource_link_uuid
                             elsif @content_tag&.associated_asset.present?
@@ -188,18 +207,9 @@ module Lti
                             end
     end
 
-    # This method should be removed when resource_link_uuid_in_custom_substitution is turned on for all
-    def resource_link_id_is_present
-      @resource_link_id_is_present ||=
-        if @assignment&.submission_types == "external_tool"
-          if @root_account&.feature_enabled?(:resource_link_uuid_in_custom_substitution)
-            resource_link_id.present?
-          else
-            @assignment&.line_items.present?
-          end
-        else
-          resource_link_id.present?
-        end
+    def lti_assignment_id_from_secure_params
+      @lti_assignment_id_from_secure_params ||=
+        Lti::Security.decoded_lti_assignment_id(@secure_params)
     end
 
     # LTI - Custom parameter substitution: ResourceLink.id
@@ -208,7 +218,6 @@ module Lti
     register_expansion "ResourceLink.id",
                        [],
                        -> { resource_link_id },
-                       -> { resource_link_id_is_present },
                        default_name: "resourcelink_id"
 
     # LTI - Custom parameter substitution: ResourceLink.description
@@ -281,7 +290,7 @@ module Lti
                          if @tool.use_1_3?
                            observed_users.map { |u| u.lookup_lti_id(lti_helper.course) }.join(",")
                          else
-                           observed_users.map { |u| Lti::Asset.opaque_identifier_for(u) }.join(",")
+                           observed_users.map { |u| Lti::V1p1::Asset.opaque_identifier_for(u) }.join(",")
                          end
                        },
                        COURSE_GUARD,
@@ -447,7 +456,7 @@ module Lti
                          elsif @originality_report
                            @originality_report.submission.assignment.lti_context_id
                          elsif @secure_params.present?
-                           Lti::Security.decoded_lti_assignment_id(@secure_params)
+                           lti_assignment_id_from_secure_params
                          end
                        },
                        LTI_ASSIGN_ID,
@@ -550,7 +559,7 @@ module Lti
     #   ```
     register_expansion "Context.id",
                        [],
-                       -> { Lti::Asset.opaque_identifier_for(@context) },
+                       -> { Lti::V1p1::Asset.opaque_identifier_for(@context) },
                        default_name: "context_id"
 
     # The Canvas global identifier for the launch context
@@ -651,8 +660,8 @@ module Lti
     #   ```
     register_expansion "Canvas.api.domain",
                        [],
-                       -> { HostUrl.context_host(@root_account, @request.host) },
-                       CONTROLLER_GUARD
+                       -> { HostUrl.context_host(@root_account, @request.nil? ? @root_account.environment_specific_domain : @request.host) },
+                       CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD
 
     # returns the api url for the members of the collaboration
     # @example
@@ -661,9 +670,10 @@ module Lti
     #  ```
     register_expansion "Canvas.api.collaborationMembers.url",
                        [],
-                       -> { @controller.api_v1_collaboration_members_url(@collaboration) },
-                       CONTROLLER_GUARD,
+                       -> { url_helpers.api_v1_collaboration_members_url(@collaboration, **url_helper_extra_params) },
+                       CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD,
                        COLLABORATION_GUARD
+
     # returns the base URL for the current context.
     # @example
     #   ```
@@ -671,8 +681,14 @@ module Lti
     #   ```
     register_expansion "Canvas.api.baseUrl",
                        [],
-                       -> { "#{@request.scheme}://#{HostUrl.context_host(@root_account, @request.host)}" },
-                       CONTROLLER_GUARD
+                       lambda {
+                         if use_controller_free_expansions?
+                           url_helpers.root_url(**url_helper_extra_params).chomp("/")
+                         else
+                           "#{@request.scheme}://#{HostUrl.context_host(@root_account, @request.host)}"
+                         end
+                       },
+                       CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD
 
     # returns the URL for the membership service associated with the current context.
     #
@@ -683,8 +699,8 @@ module Lti
     #   ```
     register_expansion "ToolProxyBinding.memberships.url",
                        [],
-                       -> { @controller.polymorphic_url([@context, :membership_service]) },
-                       CONTROLLER_GUARD,
+                       -> { url_helpers.polymorphic_url([@context, :membership_service], **url_helper_extra_params) },
+                       CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD,
                        -> { @context.is_a?(Course) || @context.is_a?(Group) }
 
     # returns the account id for the current context.
@@ -732,6 +748,18 @@ module Lti
                        [],
                        -> { @root_account.sis_source_id }
 
+    # returns the organization ID from Instructure Identity for the root account
+    #
+    # @internal Temporarily undocumented
+    # @example
+    #   ```
+    #   "bbf35116-54bd-4496-9882-05d76ac7eed6d"
+    #   ``
+    register_expansion "com.instructure.Account.instructureIdentityOrganizationId",
+                       [],
+                       -> { @root_account.instructure_identity_org_id },
+                       INSTRUCTURE_IDENTITY_GUARD
+
     # returns the global ID for the external tool that was launched. Only available for LTI 1.
     # @example
     #   ```
@@ -740,7 +768,6 @@ module Lti
     register_expansion "Canvas.externalTool.global_id",
                        [],
                        -> { @tool.global_id },
-                       CONTROLLER_GUARD,
                        LTI1_GUARD
 
     # returns the URL for the external tool that was launched. Only available for LTI 1.
@@ -751,12 +778,28 @@ module Lti
     register_expansion "Canvas.externalTool.url",
                        [],
                        lambda {
-                         @controller.named_context_url(@tool.context,
-                                                       :api_v1_context_external_tools_update_url,
-                                                       @tool.id,
-                                                       include_host: true)
+                         if use_controller_free_expansions?
+                           if @tool.context.is_a?(Account)
+                             url_helpers.api_v1_account_external_tools_update_url(
+                               account_id: @tool.context_id,
+                               external_tool_id: @tool.id,
+                               **url_helper_extra_params
+                             )
+                           elsif @tool.context.is_a?(Course)
+                             url_helpers.api_v1_course_external_tools_update_url(
+                               course_id: @tool.context_id,
+                               external_tool_id: @tool.id,
+                               **url_helper_extra_params
+                             )
+                           end
+                         else
+                           @controller.named_context_url(@tool.context,
+                                                         :api_v1_context_external_tools_update_url,
+                                                         @tool.id,
+                                                         include_host: true)
+                         end
                        },
-                       CONTROLLER_GUARD,
+                       CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD,
                        LTI1_GUARD
 
     # returns the URL to retrieve the brand config JSON for the launching context.
@@ -1295,6 +1338,33 @@ module Lti
                        -> { @current_user.uuid },
                        USER_GUARD
 
+    # Returns the user ID from Instructure Identity that can be correlated across Instructure
+    # Identity organizations
+    #
+    # @internal Temporarily undocumented
+    # @example
+    #   ```
+    #   "3055a889-a9cf-4607-a003-9fa829c83aad"
+    #   ``
+    register_expansion "com.instructure.User.instructureIdentityGlobalUserId",
+                       [],
+                       -> { @current_user.instructure_identity_id },
+                       USER_GUARD,
+                       INSTRUCTURE_IDENTITY_GUARD
+
+    # Returns the user ID from Instructure Identity within their Instructure Identity organization
+    #
+    # @internal Temporarily undocumented
+    # @example
+    #   ```
+    #   "f16dc1a6-566c-4759-ae03-2ac8a1407b31"
+    #   ````
+    register_expansion "com.instructure.User.instructureIdentityOrganizationUserId",
+                       [],
+                       -> { @current_user.instructure_pseudonym_for(@root_account)&.unique_id },
+                       USER_GUARD,
+                       INSTRUCTURE_IDENTITY_GUARD
+
     # Returns the users preference for high contrast colors (an accessibility feature).
     # @example
     #   ```
@@ -1303,6 +1373,16 @@ module Lti
     register_expansion "Canvas.user.prefersHighContrast",
                        [],
                        -> { @current_user.prefers_high_contrast? ? "true" : "false" },
+                       USER_GUARD
+
+    # Returns the users preference for using a dyslexia friendly font (an accessibility feature).
+    # @example
+    #   ```
+    #   false
+    #   ```
+    register_expansion "Canvas.user.prefersDyslexicFont",
+                       [],
+                       -> { @current_user.prefers_dyslexic_font? ? "true" : "false" },
                        USER_GUARD
 
     # returns the Canvas ids of all active groups in the current course.
@@ -1325,7 +1405,7 @@ module Lti
                        [],
                        lambda {
                          @current_user.groups.active.where(context_type: "Course", context_id: @context.id).map do |g|
-                           Lti::Asset.opaque_identifier_for(g)
+                           Lti::V1p1::Asset.opaque_identifier_for(g)
                          end.join(",")
                        },
                        -> { @current_user && @context.is_a?(Course) }
@@ -1542,7 +1622,13 @@ module Lti
     #   ```
     register_expansion "Canvas.xapi.url",
                        [],
-                       -> { @controller.lti_xapi_url(Lti::AnalyticsService.create_token(@tool, @current_user, @context)) },
+                       lambda {
+                         url_helpers.lti_xapi_url(
+                           Lti::AnalyticsService.create_token(@tool, @current_user, @context),
+                           **url_helper_extra_params
+                         )
+                       },
+                       CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD,
                        -> { @current_user && @context.is_a?(Course) && @tool }
 
     # Returns the caliper url for the user.
@@ -1552,8 +1638,13 @@ module Lti
     #   ```
     register_expansion "Caliper.url",
                        [],
-                       -> { @controller.lti_caliper_url(Lti::AnalyticsService.create_token(@tool, @current_user, @context)) },
-                       CONTROLLER_GUARD,
+                       lambda {
+                         url_helpers.lti_caliper_url(
+                           Lti::AnalyticsService.create_token(@tool, @current_user, @context),
+                           **url_helper_extra_params
+                         )
+                       },
+                       CONTROLLER_FREE_FF_OR_CONTROLLER_GUARD,
                        -> { @current_user && @context.is_a?(Course) && @tool }
 
     # Returns a comma separated list of section_id's that the user is enrolled in.
@@ -1677,6 +1768,42 @@ module Lti
                        ASSIGNMENT_GUARD,
                        default_name: "vnd_canvas_group_name"
 
+    # Returns the Canvas id of the differentiation tag the current user is assigned to
+    # for the current assignment context.
+    #
+    # @example
+    #   ```
+    #   123
+    #   ```
+    register_expansion "com.instructure.Tag.id",
+                       [],
+                       lambda {
+                         return nil unless @current_user && @assignment && @context.is_a?(Course)
+
+                         assignment_override&.set_id
+                       },
+                       USER_GUARD,
+                       ASSIGNMENT_GUARD,
+                       default_name: "com_instructure_tag_id"
+
+    # Returns the name of the differentiation tag the current user is assigned to
+    # for the current assignment context.
+    #
+    # @example
+    #   ```
+    #   "Advanced Students"
+    #   ```
+    register_expansion "com.instructure.Tag.name",
+                       [],
+                       lambda {
+                         return nil unless @current_user && @assignment && @context.is_a?(Course)
+
+                         assignment_override&.set&.name
+                       },
+                       USER_GUARD,
+                       ASSIGNMENT_GUARD,
+                       default_name: "com_instructure_tag_name"
+
     # Returns the title of the assignment that was launched.
     #
     # @example
@@ -1689,6 +1816,8 @@ module Lti
                        ASSIGNMENT_GUARD
 
     # Returns the points possible of the assignment that was launched.
+    #
+    # This is an alias of `LineItem.resultValue.max`.
     #
     # @example
     #   ```
@@ -1857,7 +1986,7 @@ module Lti
     #   ```
     register_expansion "Canvas.assignment.submission.studentAttempts",
                        [],
-                       -> { @assignment.submissions&.find_by(user: @current_user)&.attempt },
+                       -> { submission&.attempt },
                        STUDENT_ASSIGNMENT_GUARD
 
     # Returns the endpoint url for accessing link-level tool settings
@@ -2011,7 +2140,8 @@ module Lti
                        lambda {
                          val = @request.parameters["com_instructure_course_accept_canvas_resource_types"]
                          val.is_a?(Array) ? val.join(",") : val
-                       }
+                       },
+                       CONTROLLER_GUARD
 
     # Returns the target resource type for the current page, forwarded from the request.
     # Value is the largest logical unit of the page. Possible values are: ["assignment", "assignment_group",
@@ -2029,7 +2159,8 @@ module Lti
     #   ```
     register_expansion "com.instructure.Course.canvas_resource_type",
                        [],
-                       -> { @request.parameters["com_instructure_course_canvas_resource_type"] }
+                       -> { @request.parameters["com_instructure_course_canvas_resource_type"] },
+                       CONTROLLER_GUARD
 
     # Returns the target resource id for the current page, forwarded from the request. Only functional when
     # `com_instructure_course_canvas_resource_type` is included as a query param. Currently, this is not
@@ -2041,7 +2172,8 @@ module Lti
     #   ```
     register_expansion "com.instructure.Course.canvas_resource_id",
                        [],
-                       -> { @request.parameters["com_instructure_course_canvas_resource_id"] }
+                       -> { @request.parameters["com_instructure_course_canvas_resource_id"] },
+                       CONTROLLER_GUARD
 
     # Returns whether a content can be imported into a specific group on the page, forwarded from the request.
     # True for Modules page and Assignment Groups page. False for other content index pages.
@@ -2055,7 +2187,8 @@ module Lti
     #   ```
     register_expansion "com.instructure.Course.allow_canvas_resource_selection",
                        [],
-                       -> { @request.parameters["com_instructure_course_allow_canvas_resource_selection"] }
+                       -> { @request.parameters["com_instructure_course_allow_canvas_resource_selection"] },
+                       CONTROLLER_GUARD
 
     # Returns a JSON-encoded list of content groups which can be selected, providing ID and name of each group,
     # forwarded from the request.
@@ -2085,13 +2218,92 @@ module Lti
                            end
                          end
                          val&.to_json
-                       }
+                       },
+                       CONTROLLER_GUARD
 
     register_expansion "com.instructure.Account.usage_metrics_enabled",
                        [],
                        lambda {
                          @root_account.feature_enabled?(:send_usage_metrics)
                        }
+
+    # Returns a comma-separated list of historical `lti_context_id` of a user in chronological order including the current id.
+    # The `lti_context_id` of a user is the same that is sent as `user_id` in 1.1 launches.
+    # This variable helps tools handle the merged user's history.
+    #
+    # @example
+    #   ```
+    #   123,456,789
+    #   ```
+    register_expansion "com.instructure.user.lti_1_1_id.history",
+                       [],
+                       lambda {
+                         past_ids = @current_user.past_lti_ids.pluck(:user_lti_context_id).uniq.compact_blank
+                         (past_ids + [@current_user.lti_context_id]).join(",")
+                       },
+                       USER_GUARD
+
+    # Returns the points possible of the assignment that was launched.
+    # For other LineItem properties, use the LTI 1.3 <a href="file.assignment_tools.html">Assignments and Grade Services</a>
+    #
+    # This is an alias of `Canvas.assignment.pointsPossible`.
+    #
+    # @example
+    #   ```
+    #   100
+    #   ```
+    register_expansion "LineItem.resultValue.max",
+                       [],
+                       -> { TextHelper.round_if_whole(@assignment.points_possible) },
+                       ASSIGNMENT_GUARD
+
+    # Returns the decimal separator for the current context account.
+    # This is used to have custom formatting on numbers, independent from the account's locale.
+    # If the account does not have a decimal separator set, it will return "$Canvas.account.decimal_separator".
+    #
+    # @example
+    #   ```
+    #   "comma"
+    #   ```
+    register_expansion "Canvas.account.decimal_separator",
+                       [],
+                       lambda {
+                         if Account.site_admin.feature_enabled?(:new_quizzes_separators)
+                           lti_helper.account&.settings&.dig(:decimal_separator, :value) ||
+                             @root_account.settings&.dig(:decimal_separator, :value)
+                         end
+                       },
+                       COURSE_GUARD
+
+    # Returns the thousand separator for the current context account.
+    # This is used to have custom formatting on numbers, independent from the account's locale.
+    # If the account does not have a thousand separator set, it will return "$Canvas.account.thousand_separator".
+    #
+    # @example
+    #   ```
+    #   "period"
+    #   ```
+    register_expansion "Canvas.account.thousand_separator",
+                       [],
+                       lambda {
+                         if Account.site_admin.feature_enabled?(:new_quizzes_separators)
+                           lti_helper.account&.settings&.dig(:thousand_separator, :value) ||
+                             @root_account.settings&.dig(:thousand_separator, :value)
+                         end
+                       },
+                       COURSE_GUARD
+
+    # Returns true if the AI quiz generation feature is enabled for the course.
+    # This is used to determine whether to display the "Generate With AI" button in the UI.
+    #
+    # @example
+    #   ```
+    #   true
+    #   ```
+    register_expansion "Canvas.course.aiQuizGeneration",
+                       [],
+                       -> { @context.feature_enabled?(:new_quizzes_ai_quiz_generation) },
+                       COURSE_GUARD
 
     private
 
@@ -2106,7 +2318,7 @@ module Lti
       if course_admin?(context)
         @assignment.submissions.minimum(:cached_due_date)
       else
-        @assignment.due_at
+        submission&.cached_due_date || @assignment.due_at
       end
     end
 
@@ -2114,9 +2326,9 @@ module Lti
       context = @assignment.context
       # We return the latest of all due dates for the assignment if the user is a course admin.
       if course_admin?(context)
-        @assignment.submissions.maximum(:cached_due_date)
+        @assignment.submissions.maximum(:cached_due_date) || @assignment.due_at
       else
-        @assignment.due_at
+        submission&.cached_due_date || @assignment.due_at
       end
     end
 
@@ -2145,6 +2357,26 @@ module Lti
 
     def lti_1_3?
       @tool.respond_to?(:use_1_3?) && @tool.use_1_3?
+    end
+
+    def submission
+      @assignment&.submissions&.find_by(user: @current_user)
+    end
+
+    def user_differentiation_tags
+      # For LTI assignments, group_category_id is null, so we need to find
+      # differentiation tags (non-collaborative groups) that are assigned to this assignment
+      @context.differentiation_tags
+              .active
+              .joins(:group_memberships)
+              .where(group_memberships: { user_id: @current_user.id, workflow_state: "accepted" })
+    end
+
+    def assignment_override
+      # Find assignment overrides for this assignment that target the user's differentiation tags
+      AssignmentOverride.where(assignment_id: @assignment.id, set_type: "Group")
+                        .where(set_id: user_differentiation_tags.pluck(:id))
+                        .first
     end
   end
 end

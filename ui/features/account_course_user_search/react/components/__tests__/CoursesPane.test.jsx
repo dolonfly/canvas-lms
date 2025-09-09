@@ -17,42 +17,66 @@
  */
 
 import React from 'react'
-import {shallow} from 'enzyme'
+import {render, waitFor} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import CoursesPane from '../CoursesPane'
 import CoursesStore from '../../store/CoursesStore'
 import TermsStore from '../../store/TermsStore'
 import AccountsTreeStore from '../../store/AccountsTreeStore'
-import sinon from 'sinon'
 
 const stores = [CoursesStore, TermsStore, AccountsTreeStore]
 
-let wrapper
 describe('Account Course User Search CoursesPane View', () => {
   beforeEach(() => {
     stores.forEach(store => store.reset({accountId: '1'}))
-    wrapper = shallow(
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    stores.forEach(store => store.reset({}))
+    jest.useRealTimers()
+  })
+
+  const renderComponent = () => {
+    return render(
       <CoursesPane
         accountId="1"
         roles={[{id: '1'}]}
         queryParams={{}}
         onUpdateQueryParams={function () {}}
-      />
+      />,
     )
+  }
+
+  test('onUpdateFilters triggers debounced apply filters', async () => {
+    const {getByPlaceholderText} = renderComponent()
+    const user = userEvent.setup({delay: null})
+
+    // Mock the CoursesStore.load method to track calls
+    const loadSpy = jest.spyOn(CoursesStore, 'load')
+
+    // Find search input and type in it
+    const searchInput = getByPlaceholderText('Search courses...')
+    await user.type(searchInput, 'test course')
+
+    // Advance timers to trigger debounced function
+    jest.advanceTimersByTime(500)
+
+    await waitFor(() => {
+      expect(loadSpy).toHaveBeenCalled()
+    })
+
+    loadSpy.mockRestore()
   })
 
-  afterEach(() => {
-    stores.forEach(store => store.reset({}))
-  })
-
-  test('onUpdateFilters calls debouncedApplyFilters after updating state', () => {
-    const instance = wrapper.instance()
-    const spy = sinon.spy(instance, 'debouncedApplyFilters')
-    instance.onUpdateFilters()
-    expect(spy.called).toBeTruthy()
+  test('it loads more terms at once', () => {
+    renderComponent()
+    const termsStore = stores.find(s => s.jsonKey === 'enrollment_terms')
+    expect(termsStore.lastParams).toHaveProperty('per_page', 100)
   })
 
   test('have an h1 on the page', () => {
-    //  'There is one H1 on the page'
-    expect(wrapper.find('h1').length).toBe(1)
+    const {getByRole} = renderComponent()
+    expect(getByRole('heading', {level: 1, name: 'Courses'})).toBeInTheDocument()
   })
 })

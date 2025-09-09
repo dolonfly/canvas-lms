@@ -181,7 +181,7 @@ describe "Importing assignments" do
       expect(a.title).to eq data[:title]
       expect(a.description).to include(data[:instructions]) if data[:instructions]
       expect(a.description).to include(data[:description]) if data[:description]
-      a.due_at = Time.at(data[:due_date].to_i / 1000)
+      a.due_at = Time.zone.at(data[:due_date].to_i / 1000)
       expect(a.points_possible).to eq data[:grading][:points_possible].to_f
     end
   end
@@ -219,6 +219,24 @@ describe "Importing assignments" do
     expect(ra.use_for_grading).to be true
     expect(ra.hide_points).to be true
     expect(ra.hide_outcome_results).to be true
+  end
+
+  it "does not update the association count when importing an assignment" do
+    file_data = get_import_data("", "assignment")
+    context = get_import_context("")
+    migration = context.content_migrations.create!
+
+    assignment_hash = file_data.find { |h| h["migration_id"] == "4469882339231" }.with_indifferent_access
+    rubric_model({ context:, migration_id: assignment_hash[:grading][:rubric_id] })
+    assignment_hash[:rubric_use_for_grading] = true
+    assignment_hash[:rubric_hide_points] = true
+    assignment_hash[:rubric_hide_outcome_results] = true
+
+    expect(Rubric).not_to receive(:update_association_count)
+    Importers::AssignmentImporter.import_from_migration(assignment_hash, context, migration)
+    rubric = Rubric.find(@rubric.id)
+    expect(rubric.association_count).to eq 0
+    expect(rubric.read_only).to be false
   end
 
   describe "migrate_assignment_group_categories" do
@@ -381,7 +399,7 @@ describe "Importing assignments" do
       "unlock_at" => nil
     }
     migration = @course.content_migrations.create!
-    assignment = @course.assignments.create! title: "test", due_at: Time.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id: "ib4834d160d180e2e91572e8b9e3b1bc6"
+    assignment = @course.assignments.create! title: "test", due_at: Time.zone.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id: "ib4834d160d180e2e91572e8b9e3b1bc6"
     Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
     assignment.reload
     expect(assignment.title).to eq "date clobber or not"
@@ -558,17 +576,10 @@ describe "Importing assignments" do
     context "and the tool uses LTI 1.3" do
       let(:tool_id) { tool.id }
       let(:tool_url) { tool.url }
+      let(:registration) { lti_registration_with_tool(account: course.root_account, created_by: user_model) }
       let(:dev_key) { DeveloperKey.create! }
       let(:tool) do
-        course.context_external_tools.create!(
-          consumer_key: "key",
-          shared_secret: "secret",
-          name: "test tool",
-          url: "http://www.tool.com/launch",
-          lti_version: "1.3",
-          workflow_state: "public",
-          developer_key: dev_key
-        )
+        registration.deployments.first
       end
       let(:assignment) do
         course.assignments.create!(
@@ -1063,6 +1074,24 @@ describe "Importing assignments" do
           end
         end
       end
+
+      context "when vendor_code and product_code are empty" do
+        let(:vendor_code) { "" }
+        let(:product_code) { "" }
+        let(:resource_type_code) { "" }
+
+        before do
+          Account.site_admin.enable_feature!(:exclude_deleted_lti2_tools_on_assignment_export)
+        end
+
+        it "adds a meaningful warning to the migration without an active tool_proxy" do
+          course_model
+          migration = @course.content_migrations.create!
+          @course.assignments.create!(title: "test", due_at: Time.zone.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
+          expect(migration).to receive(:add_warning).with("The export had an improperly attached similarity detection tool, so the import won't include it")
+          Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
+        end
+      end
     end
 
     it "sets the vendor/product/resource_type codes" do
@@ -1070,7 +1099,7 @@ describe "Importing assignments" do
         .to receive(:find_active_proxies_for_context_by_vendor_code_and_product_code) { [tool_proxy] }
       course_model
       migration = @course.content_migrations.create!
-      assignment = @course.assignments.create!(title: "test", due_at: Time.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
+      assignment = @course.assignments.create!(title: "test", due_at: Time.zone.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
       Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
       assignment.reload
       expect(assignment.assignment_configuration_tool_lookups.count).to eq 1
@@ -1087,7 +1116,7 @@ describe "Importing assignments" do
         .to receive(:find_active_proxies_for_context_by_vendor_code_and_product_code) { [tool_proxy] }
       course_model
       migration = @course.content_migrations.create!
-      assignment = @course.assignments.create!(title: "test", due_at: Time.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
+      assignment = @course.assignments.create!(title: "test", due_at: Time.zone.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
       Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
       assignment.reload
       tool_lookup = assignment.assignment_configuration_tool_lookups.first
@@ -1099,7 +1128,7 @@ describe "Importing assignments" do
         .to receive(:find_active_proxies_for_context_by_vendor_code_and_product_code) { [tool_proxy] }
       course_model
       migration = @course.content_migrations.create!
-      assignment = @course.assignments.create!(title: "test", due_at: Time.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
+      assignment = @course.assignments.create!(title: "test", due_at: Time.zone.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
       Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
       assignment.reload
       expect(assignment.turnitin_settings.with_indifferent_access[:originality_report_visibility]).to eq visibility
@@ -1108,7 +1137,7 @@ describe "Importing assignments" do
     it "adds a warning to the migration without an active tool_proxy" do
       course_model
       migration = @course.content_migrations.create!
-      @course.assignments.create!(title: "test", due_at: Time.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
+      @course.assignments.create!(title: "test", due_at: Time.zone.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
       expect(migration).to receive(:add_warning).with("We were unable to find a tool profile match for vendor_code: \"abc\" product_code: \"qrx\".")
       Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
     end
@@ -1118,7 +1147,7 @@ describe "Importing assignments" do
         .to receive(:find_active_proxies_for_context_by_vendor_code_and_product_code) { [tool_proxy] }
       course_model
       migration = @course.content_migrations.create!
-      @course.assignments.create!(title: "test", due_at: Time.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
+      @course.assignments.create!(title: "test", due_at: Time.zone.now, unlock_at: 1.day.ago, lock_at: 1.day.from_now, peer_reviews_due_at: 2.days.from_now, migration_id:)
       expect(migration).to_not receive(:add_warning).with("We were unable to find a tool profile match for vendor_code: \"abc\" product_code: \"qrx\".")
       Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
     end
@@ -1278,7 +1307,7 @@ describe "Importing assignments" do
       end
 
       it "should early return" do
-        expect(Importers::CourseContentImporter).not_to receive(:shift_date_options)
+        expect(Importers::CourseContentImporter).not_to receive(:shift_date_options_from_migration)
         subject
       end
     end
@@ -1477,12 +1506,34 @@ describe "Importing assignments" do
 
     context "when setting needs_update_cached_due_dates field" do
       context "when field is given" do
+        let(:item) { Assignment.new }
+
         before do
-          item.update!(needs_update_cached_due_dates: true)
+          allow(item).to receive(:save_without_broadcasting!)
         end
 
         it "should shift the date" do
           expect(subject.needs_update_cached_due_dates).to be_truthy
+        end
+
+        context "when the update_cached_due_dates? is false" do
+          before do
+            allow(item).to receive_messages(update_cached_due_dates?: false)
+          end
+
+          it "sets needs_update_cached_due_dates false" do
+            expect(subject.needs_update_cached_due_dates).to be_falsey
+          end
+        end
+
+        context "when the update_cached_due_dates? is true" do
+          before do
+            allow(item).to receive_messages(update_cached_due_dates?: true)
+          end
+
+          it "sets needs_update_cached_due_dates to true" do
+            expect(subject.needs_update_cached_due_dates).to be true
+          end
         end
       end
 
@@ -1593,6 +1644,10 @@ describe "Importing assignments" do
     end
 
     context "when the discussion_checkpoints feature flag is off" do
+      before do
+        account.disable_feature!(:discussion_checkpoints)
+      end
+
       it "does not import sub assignments" do
         expect(subject.sub_assignments.length).to eq(0)
       end
@@ -1645,6 +1700,150 @@ describe "Importing assignments" do
           expect(subject.parent_assignment_id).to eq(parent_item.id)
         end
       end
+    end
+  end
+
+  describe "default assignment group" do
+    let(:course) { Course.create! }
+    let(:migration) { course.content_migrations.create! }
+    let(:assignment_hash) do
+      {
+        migration_id:,
+        title: "wiki page assignment",
+        submission_types: "wiki_page",
+        assignment_group_migration_id: nil,
+        wiki_page_migration_id: "mig"
+      }
+    end
+
+    it "hidden assignment for wiki page has default assignment group" do
+      Importers::AssignmentImporter.import_from_migration(assignment_hash, course, migration)
+
+      assignment = course.assignments.where(migration_id:).first
+      expect(assignment.assignment_group.name).to eq("Imported Assignments")
+    end
+  end
+
+  describe "assignment group association on wiki page assignment and conditional release course" do
+    let(:course) { Course.create! }
+    let(:migration) { course.content_migrations.create! }
+    let(:assignment_migration_id) { "assignment_migration_id" }
+    let(:assignment_group_migration_id) { "assignment_group_migration_id" }
+    let(:assignment_group) { course.assignment_groups.create!(migration_id: assignment_group_migration_id) }
+    let(:assignment) do
+      course.assignments.create!(
+        assignment_group:,
+        submission_types: "wiki_page",
+        migration_id: assignment_migration_id
+      )
+    end
+    let(:assignment_hash) do
+      {
+        migration_id: assignment_migration_id,
+        title: "wiki page assignment",
+        submission_types: "wiki_page",
+        assignment_group_migration_id:,
+        wiki_page_migration_id: "mig"
+      }
+    end
+
+    before do
+      allow_any_instance_of(Course).to receive(:conditional_release?).and_return(true)
+    end
+
+    context "when wiki_page_mastery_path_no_assignment_group FF is disabled" do
+      before do
+        Account.site_admin.disable_feature!(:wiki_page_mastery_path_no_assignment_group)
+      end
+
+      it "should not nil the assignment_group" do
+        imported_assignment = Importers::AssignmentImporter.import_from_migration(assignment_hash, course, migration, assignment)
+
+        expect(imported_assignment.assignment_group).to eq(assignment_group)
+      end
+    end
+
+    context "when wiki_page_mastery_path_no_assignment_group FF is enabled" do
+      before do
+        Account.site_admin.enable_feature!(:wiki_page_mastery_path_no_assignment_group)
+      end
+
+      context "when submission_types is not wiki_page" do
+        it "should not nil the assignment_group" do
+          assignment
+          assignment_hash[:submission_types] = "somethingelse"
+
+          imported_assignment = Importers::AssignmentImporter.import_from_migration(assignment_hash, course, migration)
+
+          expect(imported_assignment.assignment_group).to eq(assignment_group)
+        end
+      end
+
+      context "when not conditional_release?" do
+        it "should not nil the assignment_group" do
+          allow_any_instance_of(Course).to receive(:conditional_release?).and_return(false)
+          assignment
+
+          imported_assignment = Importers::AssignmentImporter.import_from_migration(assignment_hash, course, migration)
+
+          expect(imported_assignment.assignment_group).to eq(assignment_group)
+        end
+      end
+
+      context "when conditional_release? and submission_types" do
+        it "should set nil the assignment_group" do
+          assignment
+
+          imported_assignment = Importers::AssignmentImporter.import_from_migration(assignment_hash, course, migration)
+
+          expect(imported_assignment.assignment_group).to be_nil
+        end
+      end
+    end
+  end
+
+  describe "#associate_assignment_group" do
+    let(:course) { Course.create! }
+    let(:assignment_group_migration_id) { "assignment_group_migration_id" }
+    let(:assignment_group) { course.assignment_groups.create!(migration_id: assignment_group_migration_id) }
+    let(:assignment) { course.assignments.create! }
+    let(:assignment_hash) { { migration_id:, assignment_group_migration_id: } }
+
+    it "associate assignment group that we find for assignment_group_migration_id from import hash" do
+      assignment_group
+
+      Importers::AssignmentImporter.associate_assignment_group(assignment_hash, course, assignment)
+
+      expect(assignment.assignment_group).to eq(assignment_group)
+    end
+
+    it "keep the original assignment group on the assignment if there's no assignment_group_migration_id from import hash" do
+      assignment_hash.delete(:assignment_group_migration_id)
+      assignment.assignment_group = assignment_group
+
+      Importers::AssignmentImporter.associate_assignment_group(assignment_hash, course, assignment)
+
+      expect(assignment.assignment_group).to eq(assignment_group)
+    end
+
+    it "default to 'Imported Assignments' if there is no assignment group found for the given assignment_group_migration_id" do
+      assignment_hash[:assignment_group_migration_id] = "a random migration id"
+      assignment.assignment_group = assignment_group
+
+      Importers::AssignmentImporter.associate_assignment_group(assignment_hash, course, assignment)
+
+      expect(assignment.assignment_group.id).to_not eq(assignment_group.id)
+      expect(assignment.assignment_group.name).to eq("Imported Assignments")
+    end
+
+    it "default to 'Imported Assignments' if there is no assignment_group_migration_id and assignment has no assignment_group associated" do
+      assignment_hash.delete(:assignment_group_migration_id)
+      assignment.assignment_group = nil
+
+      Importers::AssignmentImporter.associate_assignment_group(assignment_hash, course, assignment)
+
+      expect(assignment.assignment_group.id).to_not eq(assignment_group.id)
+      expect(assignment.assignment_group.name).to eq("Imported Assignments")
     end
   end
 end

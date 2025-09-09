@@ -16,16 +16,16 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import gql from 'graphql-tag'
+import {gql} from '@apollo/client'
 import qs from 'qs'
-import {executeQuery} from '@canvas/query/graphql'
+import {executeQuery} from '@canvas/graphql'
 import type {RubricFormProps} from '../types/RubricForm'
 import type {Rubric, RubricAssociation} from '@canvas/rubrics/react/types/rubric'
 import {mapRubricUnderscoredKeysToCamelCase} from '@canvas/rubrics/react/utils'
 import getCookie from '@instructure/get-cookie'
 
 const RUBRIC_QUERY = gql`
-  query RubricQuery($id: ID!) {
+  query FeaturesRubricQuery($id: ID!) {
     rubric(id: $id) {
       id: _id
       title
@@ -91,12 +91,12 @@ export const fetchRubric = async (id?: string): Promise<RubricQueryResponse | nu
 }
 
 export type SaveRubricResponse = {
-  rubric: Rubric
-  rubricAssociation: RubricAssociation
+  rubric: Rubric & {association_count?: number}
+  rubricAssociation?: RubricAssociation
 }
 export const saveRubric = async (
   rubric: RubricFormProps,
-  assignmentId?: string
+  assignmentId?: string,
 ): Promise<SaveRubricResponse> => {
   const {
     id,
@@ -171,7 +171,7 @@ export const saveRubric = async (
   }
 
   return {
-    rubric: mapRubricUnderscoredKeysToCamelCase(savedRubric),
+    rubric: {...mapRubricUnderscoredKeysToCamelCase(savedRubric), association_count: 1},
     rubricAssociation: rubric_association,
   }
 }

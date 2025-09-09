@@ -16,7 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import gql from 'graphql-tag'
+import {gql} from '@apollo/client'
 
 const userFields = gql`
   fragment UserFields on User {
@@ -75,8 +75,11 @@ export const TEACHER_QUERY = gql`
       lockAt(applyOverrides: false)
       pointsPossible
       state
+      totalSubmissions
+      totalGradedSubmissions
       needsGradingCount
       onlyVisibleToOverrides
+      suppressAssignment
       peerReviews {
         enabled
       }
@@ -152,7 +155,7 @@ export const TEACHER_QUERY = gql`
 `
 
 export const TEACHER_EDIT_QUERY = gql`
-  query GetAssignment($assignmentLid: ID!) {
+  query GetAssignmentForEdit($assignmentLid: ID!) {
     assignment(id: $assignmentLid) {
       lid: _id
       state

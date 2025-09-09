@@ -38,28 +38,30 @@ export default function commonEventFactory(data, contexts) {
   let actualContextCode = data.context_code
   let contextCode = data.effective_context_code || actualContextCode
 
-  const type = data.assignment_overrides
+  const assignmentOverrides = data.assignment_overrides?.length ? data.assignment_overrides : null
+
+  const type = assignmentOverrides
     ? 'assignment_override'
     : data.sub_assignment_overrides
-    ? 'sub_assignment_override'
-    : data.type === 'sub_assignment'
-    ? 'sub_assignment'
-    : data.assignment || data.assignment_group_id
-    ? 'assignment'
-    : data.type === 'planner_note'
-    ? 'planner_note'
-    : data.plannable
-    ? 'todo_item'
-    : 'calendar_event'
+      ? 'sub_assignment_override'
+      : data.type === 'sub_assignment'
+        ? 'sub_assignment'
+        : data.assignment || data.assignment_group_id
+          ? 'assignment'
+          : data.type === 'planner_note'
+            ? 'planner_note'
+            : data.plannable
+              ? 'todo_item'
+              : 'calendar_event'
 
-  data = data.assignment_overrides
-    ? {assignment: data.assignment, assignment_override: data.assignment_overrides[0]}
+  data = assignmentOverrides
+    ? {assignment: data.assignment, assignment_override: assignmentOverrides[0]}
     : data.sub_assignment_overrides
-    ? {
-        sub_assignment: data.sub_assignment,
-        sub_assignment_override: data.sub_assignment_overrides[0],
-      }
-    : data.sub_assignment || data.assignment || data.calendar_event || data
+      ? {
+          sub_assignment: data.sub_assignment,
+          sub_assignment_override: data.sub_assignment_overrides[0],
+        }
+      : data.sub_assignment || data.assignment || data.calendar_event || data
 
   if (data.hidden) {
     return null

@@ -33,10 +33,10 @@ import {
 } from '@instructure/ui-icons'
 import {Menu} from '@instructure/ui-menu'
 import {Tooltip} from '@instructure/ui-tooltip'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {View} from '@instructure/ui-view'
 
-const I18n = useI18nScope('conversations_2')
+const I18n = createI18nScope('conversations_2')
 
 const Settings = props => (
   <Menu
@@ -150,15 +150,17 @@ export const MessageActionButtons = props => {
           testid="reply"
           ariaLabel={I18n.t('Reply')}
         />
-        <ActionButton
-          id="reply-to-all"
-          tip={I18n.t('Reply all')}
-          icon={IconReplyAll2Line}
-          onClick={props.replyAll}
-          disabled={props.replyDisabled}
-          testid="reply-all"
-          ariaLabel={I18n.t('Reply all')}
-        />
+        {!ENV?.FEATURES?.restrict_student_access && (
+          <ActionButton
+            id="reply-to-all"
+            tip={I18n.t('Reply all')}
+            icon={IconReplyAll2Line}
+            onClick={props.replyAll}
+            disabled={props.replyDisabled}
+            testid="reply-all"
+            ariaLabel={I18n.t('Reply all')}
+          />
+        )}
         <ActionButton
           id="archive-conversation"
           tip={props.unarchive ? I18n.t('Unarchive') : I18n.t('Archive')}
@@ -168,15 +170,17 @@ export const MessageActionButtons = props => {
           testid={props.unarchive ? 'unarchive' : 'archive'}
           ariaLabel={props.unarchive ? I18n.t('Unarchive') : I18n.t('Archive')}
         />
-        <ActionButton
-          id="delete-conversation"
-          tip={I18n.t('Delete')}
-          icon={IconTrashLine}
-          onClick={props.delete}
-          disabled={props.deleteDisabled}
-          testid="delete"
-          ariaLabel={I18n.t('Delete')}
-        />
+        {!ENV?.FEATURES?.restrict_student_access && (
+          <ActionButton
+            id="delete-conversation"
+            tip={I18n.t('Delete')}
+            icon={IconTrashLine}
+            onClick={props.delete}
+            disabled={props.deleteDisabled}
+            testid="delete"
+            ariaLabel={I18n.t('Delete')}
+          />
+        )}
         <Settings {...props} />
       </Flex.Item>
     </Flex>

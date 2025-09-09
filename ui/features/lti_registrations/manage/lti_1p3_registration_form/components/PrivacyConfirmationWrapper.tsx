@@ -16,30 +16,32 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
-import {useOverlayStore} from '../hooks/useOverlayStore'
-import type {Lti1p3RegistrationOverlayStore} from '../Lti1p3RegistrationOverlayState'
+import type {Lti1p3RegistrationOverlayStore} from '../../registration_overlay/Lti1p3RegistrationOverlayStore'
 import {LtiPrivacyLevels} from '../../model/LtiPrivacyLevel'
 import {PrivacyConfirmation} from '../../registration_wizard_forms/PrivacyConfirmation'
 import {RegistrationModalBody} from '../../registration_wizard/RegistrationModalBody'
+import type {InternalLtiConfiguration} from '../../model/internal_lti_configuration/InternalLtiConfiguration'
 
 export type PrivacyConfirmationWrapperProps = {
   overlayStore: Lti1p3RegistrationOverlayStore
-  appName: string
+  internalConfig: InternalLtiConfiguration
 }
 
 export const PrivacyConfirmationWrapper = ({
   overlayStore,
-  appName,
+  internalConfig,
 }: PrivacyConfirmationWrapperProps) => {
-  const [state, actions] = useOverlayStore(overlayStore)
+  const {state, ...actions} = overlayStore()
+
+  const value =
+    state.data_sharing.privacy_level ?? internalConfig.privacy_level ?? LtiPrivacyLevels.Anonymous
 
   return (
     <RegistrationModalBody>
       <PrivacyConfirmation
-        appName={appName}
+        appName={internalConfig.title}
         privacyLevelOnChange={actions.setPrivacyLevel}
-        selectedPrivacyLevel={state.data_sharing.privacy_level ?? LtiPrivacyLevels.Anonymous}
+        selectedPrivacyLevel={value}
       />
     </RegistrationModalBody>
   )

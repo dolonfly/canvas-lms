@@ -69,6 +69,7 @@ describe "SpeedGrader" do
 
   context "alerts" do
     it "alerts the teacher before leaving the page if comments are not saved", priority: "1" do
+      skip "QE Team will revisit due to chrome update TESTOPS-232"
       student_in_course(active_user: true).user
       get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@assignment.id}"
       comment_textarea = f("#speed_grader_comment_textarea")
@@ -338,6 +339,78 @@ describe "SpeedGrader" do
       hover(f("#section-menu-link"))
       expect(f("#section-menu .ui-menu")).to include_text(@section0.name)
       expect(f("#section-menu .ui-menu")).to include_text(@section1.name)
+    end
+
+    describe "discussion_checkpoints" do
+      it "displays not_graded if SubAssignment needs_grading" do
+        course_with_teacher_logged_in
+        @course.account.enable_feature!(:discussion_checkpoints)
+        @student = student_in_course(course: @course, active_all: true).user
+        @topic = DiscussionTopic.create_graded_topic!(course: @course, title: "graded topic")
+        @topic.create_checkpoints(reply_to_topic_points: 3, reply_to_entry_points: 7)
+
+        @topic.reply_to_topic_checkpoint.submit_homework(@student, submission_type: "discussion_topic")
+        @topic.assignment.grade_student(@student, grader: @teacher, score: 7, sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY)
+
+        get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@topic.assignment.id}"
+        expect(f("#students_selectmenu-button")).to have_class("not_graded")
+        expect(ff("#students_selectmenu option")).to have_size 1
+      end
+
+      it "updates graded status w/o reload for grade input", :ignore_js_errors do
+        course_with_teacher_logged_in
+        @course.account.enable_feature!(:discussion_checkpoints)
+        @student = student_in_course(course: @course, active_all: true).user
+        @topic = DiscussionTopic.create_graded_topic!(course: @course, title: "graded topic")
+        @topic.create_checkpoints(reply_to_topic_points: 3, reply_to_entry_points: 7)
+
+        @topic.reply_to_topic_checkpoint.submit_homework(@student, submission_type: "discussion_topic")
+        @topic.assignment.grade_student(@student, grader: @teacher, score: 7, sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY)
+
+        get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@topic.assignment.id}"
+        expect(f("#students_selectmenu-button")).to have_class("not_graded")
+        expect(ff("#students_selectmenu option")).to have_size 1
+
+        reply_to_topic_grade_input = ff("[data-testid='grade-input']")[0]
+        reply_to_topic_grade_input.click
+        set_value(reply_to_topic_grade_input, 1)
+        reply_to_entry_grade_input = ff("[data-testid='grade-input']")[1]
+        reply_to_entry_grade_input.click
+        set_value(reply_to_entry_grade_input, 2)
+
+        f(".ui-selectmenu-icon").click
+        expect(f("#students_selectmenu-button")).to have_class("graded")
+
+        reply_to_topic_select = f("[data-testid='reply_to_topic-checkpoint-status-select']")
+        reply_to_topic_select.click
+        fj("span[role='option']:contains('Excused')").click
+      end
+
+      it "updates graded status w/o reload for status input", :ignore_js_errors do
+        course_with_teacher_logged_in
+        @course.account.enable_feature!(:discussion_checkpoints)
+        @student = student_in_course(course: @course, active_all: true).user
+        @topic = DiscussionTopic.create_graded_topic!(course: @course, title: "graded topic")
+        @topic.create_checkpoints(reply_to_topic_points: 3, reply_to_entry_points: 7)
+
+        @topic.reply_to_topic_checkpoint.submit_homework(@student, submission_type: "discussion_topic")
+        @topic.assignment.grade_student(@student, grader: @teacher, score: 7, sub_assignment_tag: CheckpointLabels::REPLY_TO_ENTRY)
+
+        get "/courses/#{@course.id}/gradebook/speed_grader?assignment_id=#{@topic.assignment.id}"
+        expect(f("#students_selectmenu-button")).to have_class("not_graded")
+        expect(ff("#students_selectmenu option")).to have_size 1
+
+        reply_to_entry_grade_input = ff("[data-testid='grade-input']")[1]
+        reply_to_entry_grade_input.click
+        set_value(reply_to_entry_grade_input, 2)
+
+        reply_to_topic_select = f("[data-testid='reply_to_topic-checkpoint-status-select']")
+        reply_to_topic_select.click
+        fj("span[role='option']:contains('Excused')").click
+
+        f(".ui-selectmenu-icon").click
+        expect(f("#students_selectmenu-button")).to have_class("graded")
+      end
     end
   end
 

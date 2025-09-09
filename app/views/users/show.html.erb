@@ -23,6 +23,7 @@
       <i class="icon-email"></i>
       <%= t 'links.message_user', "Message %{user}", :user => context_user_name(@context, @user) %>
     </a>
+    <div id="dsr-modal-mount-point"></div>
     <div id="manage-temp-enrollments-mount-point"></div>
     <% if @context_account.is_a?(Account) &&
           @user.grants_right?(@current_user, :generate_observer_pairing_code) &&
@@ -76,6 +77,7 @@
 <div id="user-info-fieldsets">
   <%= render :partial => 'users/name', locals: { login_history: true } %>
   <%= render :partial => 'users/logins' %>
+  <%= render :partial => 'users/observers' %>
   <% if @domain_root_account.feature_enabled?(:temporary_enrollments) &&
         @enrollments.detect(&:temporary_enrollment_source_user_id).present? &&
         @context_account.grants_any_right?(@current_user, *RoleOverride::MANAGE_TEMPORARY_ENROLLMENT_PERMISSIONS)%>
@@ -173,7 +175,7 @@
       <%= t('page_views', 'Page Views') %>
     </h3>
 
-    <%= render :partial => 'page_views/table' %>
+    <div id="page_views_table"></div>
   <% end %>
 </div>
 

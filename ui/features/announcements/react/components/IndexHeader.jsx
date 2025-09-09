@@ -19,21 +19,13 @@
 import {bindActionCreators} from 'redux'
 import {bool, func, number, string} from 'prop-types'
 import {connect} from 'react-redux'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import React, {Component} from 'react'
 import {Button} from '@instructure/ui-buttons'
-import {FormField} from '@instructure/ui-form-field'
 import {View} from '@instructure/ui-view'
 import {Flex} from '@instructure/ui-flex'
-import {
-  IconLockLine,
-  IconPlusLine,
-  IconTrashLine,
-  IconUnlockLine,
-  IconInvitationLine,
-} from '@instructure/ui-icons'
+import {IconLockLine, IconPlusLine, IconTrashLine, IconUnlockLine} from '@instructure/ui-icons'
 import {PresentationContent, ScreenReaderContent} from '@instructure/ui-a11y-content'
-
 import actions from '../actions'
 import ExternalFeedsTray from './ExternalFeedsTray'
 import propTypes from '../propTypes'
@@ -44,8 +36,9 @@ import WithBreakpoints, {breakpointsShape} from '@canvas/with-breakpoints'
 import {HeadingMenu} from '@canvas/discussions/react/components/HeadingMenu'
 import {SearchField} from '@canvas/discussions/react/components/SearchField'
 import {ActionDropDown} from '@canvas/announcements/react/components/ActionDropDown'
+import ReadIcon from '@canvas/read-icon'
 
-const I18n = useI18nScope('announcements_v2')
+const I18n = createI18nScope('announcements_v2')
 
 const instUINavEnabled = () => window.ENV?.FEATURES?.instui_nav
 
@@ -112,7 +105,7 @@ export default class IndexHeader extends Component {
     this.props.searchAnnouncements({term: data.searchTerm})
   }
 
-  renderLockToggleButton(icon, label, screenReaderLabel, responsiveStyles) {
+  renderLockToggleButton(icon, label, screenReaderLabel, responsiveStyles, dataActionState) {
     return (
       <Button
         disabled={this.props.isBusy || this.props.selectedCount === 0}
@@ -120,6 +113,7 @@ export default class IndexHeader extends Component {
         display={responsiveStyles.buttonDisplay}
         id="lock_announcements"
         data-testid="lock_announcements"
+        data-action-state={dataActionState}
         onClick={this.props.toggleSelectedAnnouncementsLock}
         renderIcon={icon}
         key="lockButton"
@@ -134,8 +128,9 @@ export default class IndexHeader extends Component {
     return (
       <ActionDropDown
         label={I18n.t('More')}
-        disabled={this.props.isBusy || this.props.selectedCount === 0}
+        disabled={this.props.isBusy}
         key="actionDropDown"
+        withArrow={false}
         actions={[
           {
             icon: IconTrashLine,
@@ -187,7 +182,7 @@ export default class IndexHeader extends Component {
       <Button
         id="mark_all_announcement_read"
         data-testid="mark-all-announcement-read"
-        renderIcon={IconInvitationLine}
+        renderIcon={ReadIcon}
         display={responsiveStyles.buttonDisplay}
         onClick={this.props.markAllAnnouncementRead}
         disabled={this.props.isBusy}
@@ -231,13 +226,15 @@ export default class IndexHeader extends Component {
             <IconLockLine />,
             I18n.t('Lock'),
             I18n.t('Lock Selected Announcements'),
-            responsiveStyles
+            responsiveStyles,
+            'lockSelectedButton',
           )
         : this.renderLockToggleButton(
             <IconUnlockLine />,
             I18n.t('Unlock'),
             I18n.t('Unlock Selected Announcements'),
-            responsiveStyles
+            responsiveStyles,
+            'unlockSelectedButton',
           ))
     )
   }
@@ -301,25 +298,20 @@ export default class IndexHeader extends Component {
         <View margin="0 0 medium" display="block">
           <Flex wrap="wrap" justifyItems="end" gap="small">
             <Flex.Item size={ddSize} shouldGrow={true} shouldShrink={true}>
-              <FormField
+              <SimpleSelect
+                renderLabel={
+                  <ScreenReaderContent>{I18n.t('Announcement Filter')}</ScreenReaderContent>
+                }
                 id="announcement-filter"
-                label={<ScreenReaderContent>{I18n.t('Announcement Filter')}</ScreenReaderContent>}
+                name="filter-dropdown"
+                onChange={(_e, data) => this.props.searchAnnouncements({filter: data.value})}
               >
-                <SimpleSelect
-                  renderLabel=""
-                  id="announcement-filter"
-                  name="filter-dropdown"
-                  onChange={(_e, data) => {
-                    return this.props.searchAnnouncements({filter: data.value})
-                  }}
-                >
-                  {Object.keys(getFilters()).map(filter => (
-                    <SimpleSelect.Option key={filter} id={filter} value={filter}>
-                      {getFilters()[filter]}
-                    </SimpleSelect.Option>
-                  ))}
-                </SimpleSelect>
-              </FormField>
+                {Object.entries(getFilters()).map(([filter, label]) => (
+                  <SimpleSelect.Option key={filter} id={filter} value={filter}>
+                    {label}
+                  </SimpleSelect.Option>
+                ))}
+              </SimpleSelect>
             </Flex.Item>
             <Flex.Item size={containerSize} shouldGrow={true} shouldShrink={true}>
               {this.renderSearchField()}
@@ -412,5 +404,5 @@ const selectedActions = [
 
 const connectActions = dispatch => bindActionCreators(select(actions, selectedActions), dispatch)
 export const ConnectedIndexHeader = WithBreakpoints(
-  connect(connectState, connectActions)(IndexHeader)
+  connect(connectState, connectActions)(IndexHeader),
 )

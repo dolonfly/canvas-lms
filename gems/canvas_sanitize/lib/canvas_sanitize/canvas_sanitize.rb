@@ -222,6 +222,7 @@ module CanvasSanitize # :nodoc:
                "aria-relevant",
                "aria-autocomplete",
                "aria-checked",
+               "aria-description",
                "aria-disabled",
                "aria-expanded",
                "aria-haspopup",
@@ -256,6 +257,7 @@ module CanvasSanitize # :nodoc:
                    "scrolling",
                    "allow", # TODO: remove explicit allow with domain whitelist account setting
                    "sandbox",
+                   "loading",
                    "allowfullscreen",
                    "webkitallowfullscreen",
                    "mozallowfullscreen"].freeze,
@@ -800,7 +802,7 @@ module CanvasSanitize # :nodoc:
         next unless f.is_a?(String) || f.is_a?(IO)
 
         val = Sanitize.clean(f, config)
-        send((field.to_s + "="), val)
+        send(field.to_s + "=", val)
       end
     end
   end # InstanceMethods

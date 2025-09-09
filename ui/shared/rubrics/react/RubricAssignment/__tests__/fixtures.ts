@@ -24,6 +24,9 @@ export const RUBRIC: AssignmentRubric = {
   criteriaCount: 1,
   pointsPossible: 10,
   title: 'Rubric 1',
+  buttonDisplay: 'numeric',
+  ratingOrder: 'ascending',
+  freeFormCriterionComments: false,
   criteria: [
     {
       id: '1',
@@ -55,6 +58,8 @@ export const RUBRIC_ASSOCIATION: RubricAssociation = {
   id: '1',
   useForGrading: true,
   hideOutcomeResults: false,
+  associationType: 'Assignment',
+  associationId: '1',
 }
 
 export const RUBRIC_CONTEXTS = [

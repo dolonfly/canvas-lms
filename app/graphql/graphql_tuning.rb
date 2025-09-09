@@ -23,43 +23,58 @@
 class GraphQLTuning
   # graphiql can't load the explorer if we go below 15, so we'll use that as long as our specs continue to pass
   def self.max_depth
-    config["max_depth"] || 15
+    config["max_depth"].to_i
   end
 
   def self.max_complexity
-    config["max_complexity"] || 375_000
+    config["max_complexity"].to_i
   end
 
   def self.default_page_size
-    config["default_page_size"] || 20
+    config["default_page_size"].to_i
   end
 
   def self.default_max_page_size
-    config["default_max_page_size"] || 100
+    config["default_max_page_size"].to_i
   end
 
   def self.validate_max_errors
-    config["validate_max_errors"] || 100
+    config["validate_max_errors"].to_i
   end
 
   def self.max_query_string_tokens
-    config["max_query_string_tokens"] || 5_000
+    config["max_query_string_tokens"].to_i
   end
 
   def self.max_query_aliases
-    config["max_query_aliases"] || 20
+    config["max_query_aliases"].to_i
   end
 
   def self.max_query_directives
-    config["max_query_directives"] || 5
+    config["max_query_directives"].to_i
   end
 
+  def self.create_conversation_rate_limit_defaults
+    {
+      teachers_score: 5,
+      group_score: 50,
+      observers_score: 100,
+      section_score: 50,
+      students_score: 100,
+      course_score: 250,
+      threshold: 1500,
+    }
+  end
+
+  def self.create_conversation_rate_limit(value)
+    config.dig("create_conversation_rate_limit", value.to_s)&.to_i ||
+      create_conversation_rate_limit_defaults[value]
+  end
   class << self
     private
 
     def config
-      @config ||=
-        YAML.safe_load(DynamicSettings.find(tree: :private)["canvas_graphql_tuning.yml", failsafe: nil] || "{}")
+      PluginSetting.settings_for_plugin(:graphql_tuning)
     end
   end
 end

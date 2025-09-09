@@ -195,8 +195,6 @@ describe RubricAssessment do
     end
   end
 
-  it { is_expected.to have_many(:learning_outcome_results).dependent(:destroy) }
-
   it "htmlifies the rating comments" do
     comment = "Hi, please see www.example.com.\n\nThanks."
     submission = @assignment.find_or_create_submission(@student)
@@ -461,7 +459,7 @@ describe RubricAssessment do
       end
 
       it "assessing a rubric with outcome criterion should increment datadog counter" do
-        allow(InstStatsd::Statsd).to receive(:increment)
+        allow(InstStatsd::Statsd).to receive(:distributed_increment)
         @outcome.update!(data: nil)
         criterion_id = :"criterion_#{@rubric.data[0][:id]}"
         @association.assess({
@@ -475,8 +473,8 @@ describe RubricAssessment do
                                 }
                               }
                             })
-        expect(InstStatsd::Statsd).to have_received(:increment).with("feature_flag_check", any_args).at_least(:once)
-        expect(InstStatsd::Statsd).to have_received(:increment).with("learning_outcome_result.create")
+        expect(InstStatsd::Statsd).to have_received(:distributed_increment).with("feature_flag_check", any_args).at_least(:once)
+        expect(InstStatsd::Statsd).to have_received(:distributed_increment).with("learning_outcome_result.create")
       end
 
       it "uses default ratings for scoring" do
@@ -950,7 +948,7 @@ describe RubricAssessment do
 
       context "discussion_checkpoints" do
         before do
-          Account.site_admin.enable_feature!(:discussion_checkpoints)
+          @course.account.enable_feature!(:discussion_checkpoints)
         end
 
         it "does not grade students for checkpointed discussions" do
@@ -1020,35 +1018,14 @@ describe RubricAssessment do
       expect(@assessment.grants_right?(@teacher, :read)).to be true
     end
 
-    it "does not grant :read to an account user without :manage_courses or :view_all_grades" do
+    it "does not grant :read to an account user without :view_all_grades" do
       user_factory
       role = custom_account_role("custom", account: @account)
       @account.account_users.create!(user: @user, role:)
       expect(@assessment.grants_right?(@user, :read)).to be false
     end
 
-    it "grants :read to an account user with :view_all_grades but not :manage_courses" do
-      @account.disable_feature!(:granular_permissions_manage_courses)
-      user_factory
-      role = custom_account_role("custom", account: @account)
-      RoleOverride.create!(
-        context: @account,
-        permission: "view_all_grades",
-        role:,
-        enabled: true
-      )
-      RoleOverride.create!(
-        context: @account,
-        permission: "manage_courses",
-        role:,
-        enabled: false
-      )
-      @account.account_users.create!(user: @user, role:)
-      expect(@assessment.grants_right?(@user, :read)).to be true
-    end
-
-    it "grants :read to an account user with :view_all_grades but not :manage_courses_admin (granular permissions)" do
-      @account.enable_feature!(:granular_permissions_manage_courses)
+    it "grants :read to an account user with :view_all_grades but not :manage_courses_admin" do
       user_factory
       role = custom_account_role("custom", account: @account)
       RoleOverride.create!(
@@ -1070,9 +1047,9 @@ describe RubricAssessment do
 
   describe "create" do
     it "sets the root_account_id using rubric" do
-      allow(InstStatsd::Statsd).to receive(:increment).and_call_original
-      expect(InstStatsd::Statsd).to receive(:increment).with("grading.rubric.teacher_assessed_old").at_least(:once)
-      expect(InstStatsd::Statsd).to receive(:increment).with("grading.rubric.teacher_leaves_feedback_old").at_least(:once)
+      allow(InstStatsd::Statsd).to receive(:distributed_increment).and_call_original
+      expect(InstStatsd::Statsd).to receive(:distributed_increment).with("grading.rubric.teacher_assessed_old").at_least(:once)
+      expect(InstStatsd::Statsd).to receive(:distributed_increment).with("grading.rubric.teacher_leaves_feedback_old").at_least(:once)
       assessment = @association.assess({
                                          user: @student,
                                          assessor: @teacher,
@@ -1088,6 +1065,85 @@ describe RubricAssessment do
 
       expect(assessment.root_account_id).to_not be_nil
       expect(assessment.root_account_id).to eq @rubric.root_account_id
+    end
+  end
+
+  describe "can_read_assessor_name?" do
+    before(:once) do
+      @submission = @assignment.find_or_create_submission(@student)
+      @assessment = @association.assess({
+                                          user: @student,
+                                          assessor: @teacher,
+                                          artifact: @submission,
+                                          assessment: {
+                                            assessment_type: "grading",
+                                            criterion_crit1: {
+                                              points: 5,
+                                              comments: "comments",
+                                            }
+                                          }
+                                        })
+    end
+
+    context "when user is the assessor" do
+      it "returns true" do
+        expect(@assessment.can_read_assessor_name?(@teacher, nil)).to be true
+      end
+    end
+
+    context "when provisional grader names are hidden" do
+      before do
+        allow(@assessment).to receive(:provisional_grader_names_hidden?).and_return(true)
+      end
+
+      it "returns false" do
+        expect(@assessment.can_read_assessor_name?(@student, nil)).to be false
+      end
+    end
+
+    context "when assessment type is grading" do
+      it "returns true" do
+        expect(@assessment.can_read_assessor_name?(@student, nil)).to be true
+      end
+    end
+
+    context "when assessment is not considered anonymous" do
+      before do
+        allow(@assessment).to receive(:considered_anonymous?).and_return(false)
+      end
+
+      it "returns true" do
+        @assessment.assessment_type = "peer_review"
+        expect(@assessment.can_read_assessor_name?(@student, nil)).to be true
+      end
+    end
+
+    context "when assessment is considered anonymous" do
+      before do
+        @assessment.assessment_type = "peer_review"
+        @assignment.update!(anonymous_peer_reviews: true)
+        allow(@assessment).to receive(:considered_anonymous?).and_return(true)
+      end
+
+      context "when user has view_all_grades permission" do
+        before do
+          allow(@assignment).to receive(:grants_right?).with(@teacher, nil, :view_all_grades).and_return(true)
+        end
+
+        it "returns true" do
+          expect(@assessment.can_read_assessor_name?(@teacher, nil)).to be true
+        end
+      end
+
+      context "when user does not have view_all_grades permission" do
+        before do
+          allow(@assignment).to receive(:grants_right?).with(@student, nil, :view_all_grades).and_return(false)
+        end
+
+        it "returns false" do
+          expect(@assessment.can_read_assessor_name?(@student, nil)).to be false
+        end
+      end
     end
   end
 

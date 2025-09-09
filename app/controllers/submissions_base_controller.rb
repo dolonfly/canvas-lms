@@ -23,6 +23,7 @@ class SubmissionsBaseController < ApplicationController
   include AssignmentsHelper
   include AssessmentRequestHelper
   include SubmissionsHelper
+  include AssetProcessorStudentHelper
 
   include Api::V1::Rubric
   include Api::V1::SubmissionComment
@@ -35,6 +36,11 @@ class SubmissionsBaseController < ApplicationController
 
     if @submission&.user_id == @current_user.id
       @submission&.mark_read(@current_user)
+      if @submission.assignment.checkpoints_parent?
+        @submission.assignment.sub_assignment_submissions.where(user: @current_user).find_each do |s|
+          s&.mark_read(@current_user)
+        end
+      end
     end
 
     respond_to do |format|
@@ -56,7 +62,8 @@ class SubmissionsBaseController < ApplicationController
                  EMOJIS_ENABLED: @context.feature_enabled?(:submission_comment_emojis),
                  EMOJI_DENY_LIST: @context.root_account.settings[:emoji_deny_list]
                })
-
+        @asset_reports = asset_reports(submission: @submission)
+        @asset_processors = asset_processors(assignment: @assignment)
         js_bundle :submissions
         css_bundle :submission
 
@@ -303,6 +310,18 @@ class SubmissionsBaseController < ApplicationController
             end
 
       if url
+        # Filter out internal URLs here, which are redirects to the LTI/message controller
+        unless url.start_with?("/")
+          Lti::LogService.new(
+            context: @context,
+            launch_type: "direct_link",
+            launch_url: url,
+            session_id: session[:session_id],
+            tool: nil,
+            user: @current_user,
+            lti2: true
+          ).call
+        end
         redirect_to url
       else
         flash[:error] = t("errors.no_report", "Couldn't find a report for that submission item")

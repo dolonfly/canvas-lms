@@ -104,15 +104,15 @@ module Canvas
 
     # (Re)load manifests on every request
     class Registry::RequestCache
-      def gulp(*args, **kwargs)
+      def gulp(*, **)
         ::RequestCache.cache(["registry", "gulp"]) do
-          Registry::Gulp.new(*args, **kwargs)
+          Registry::Gulp.new(*, **)
         end
       end
 
-      def webpack(*args, **kwargs)
+      def webpack(*, **)
         ::RequestCache.cache(["registry", "webpack"]) do
-          Registry::Webpack.new(*args, **kwargs)
+          Registry::Webpack.new(*, **)
         end
       end
     end
@@ -124,17 +124,19 @@ module Canvas
         @webpack_manifest = webpack
       end
 
-      def gulp(*, **kwargs)
+      def gulp(*, **)
         @gulp ||= Registry::Gulp.new(
           *,
-          **kwargs.merge(manifest: @gulp_manifest)
+          **,
+          manifest: @gulp_manifest
         )
       end
 
-      def webpack(*, **kwargs)
+      def webpack(*, **)
         @webpack ||= Registry::Webpack.new(
           *,
-          **kwargs.merge(manifest: @webpack_manifest)
+          **,
+          manifest: @webpack_manifest
         )
       end
     end

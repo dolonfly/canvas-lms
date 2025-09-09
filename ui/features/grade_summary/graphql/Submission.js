@@ -16,8 +16,8 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import gql from 'graphql-tag'
-import {arrayOf, float, string, bool} from 'prop-types'
+import {gql} from '@apollo/client'
+import {arrayOf, float, string, bool, number} from 'prop-types'
 
 import {RubricAssessment} from '@canvas/assignments/graphql/student/RubricAssessment'
 import {SubmissionComment} from './SubmissionComment'
@@ -39,6 +39,7 @@ export const Submission = {
       excused
       studentEnteredScore
       state
+      submissionType
       commentsConnection {
         nodes {
           ...SubmissionComment
@@ -47,6 +48,30 @@ export const Submission = {
       rubricAssessmentsConnection {
         nodes {
           ...RubricAssessment
+        }
+      }
+      ltiAssetReportsConnection(first: 10, latest: true) {
+        nodes {
+          _id
+          asset {
+            _id
+            attachmentId
+            attachmentName
+            submissionAttempt
+            submissionId
+          }
+          comment
+          errorCode
+          indicationAlt
+          indicationColor
+          launchUrlPath
+          priority
+          processingProgress
+          processorId
+          reportType
+          result
+          resultTruncated
+          title
         }
       }
     }
@@ -68,6 +93,7 @@ export const Submission = {
     excused: bool,
     studentEnteredScore: string,
     state: string,
+    submissionType: string,
     commentsConnection: arrayOf({
       nodes: arrayOf({
         comment: string,
@@ -79,6 +105,30 @@ export const Submission = {
       }),
     }),
     rubricAssessmentsConnection: {nods: arrayOf(RubricAssessment.shape)},
+    ltiAssetReportsConnection: {
+      nodes: arrayOf({
+        _id: string,
+        asset: {
+          _id: string,
+          attachmentId: string,
+          attachmentName: string,
+          submissionAttempt: string,
+          submissionId: string,
+        },
+        comment: string,
+        errorCode: string,
+        indicationAlt: string,
+        indicationColor: string,
+        launchUrlPath: string,
+        priority: number,
+        processingProgress: string,
+        processorId: string,
+        reportType: string,
+        result: string,
+        resultTruncated: string,
+        title: string,
+      }),
+    },
   },
   mock: ({
     _id = '1',
@@ -96,6 +146,7 @@ export const Submission = {
     studentEnteredScore = '8',
     state = 'graded',
     submittedAt = null,
+    submissionType = 'online_text_entry',
     commentsConnection = {
       nodes: [
         {
@@ -110,6 +161,9 @@ export const Submission = {
     },
     rubricAssessmentsConnection = {
       nodes: [RubricAssessment.mock()],
+    },
+    ltiAssetReportsConnection = {
+      nodes: [],
     },
   } = {}) => ({
     _id,
@@ -127,7 +181,9 @@ export const Submission = {
     studentEnteredScore,
     state,
     submittedAt,
+    submissionType,
     commentsConnection,
     rubricAssessmentsConnection,
+    ltiAssetReportsConnection,
   }),
 }

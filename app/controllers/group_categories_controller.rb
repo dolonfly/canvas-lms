@@ -88,12 +88,16 @@
 #         "progress": {
 #           "description": "If the group category has not yet finished a randomly student assignment request, a progress object will be attached, which will contain information related to the progress of the assignment request. Refer to the Progress API for more information",
 #           "$ref": "Progress"
+#         },
+#         "non_collaborative": {
+#           "description": "Indicates whether this group category is non-collaborative. A value of true means these group categories rely on the manage_tags permissions and do not have collaborative features",
+#           "type": "boolean"
 #         }
 #       }
 #     }
 #
 class GroupCategoriesController < ApplicationController
-  before_action :require_context, only: [:create, :index]
+  before_action :require_context, only: %i[create index import_tags]
   before_action :get_category_context, only: %i[show update destroy groups users assign_unassigned_members import export]
 
   include Api::V1::Attachment
@@ -103,32 +107,40 @@ class GroupCategoriesController < ApplicationController
   include GroupPermissionHelper
 
   SETTABLE_GROUP_ATTRIBUTES = %w[name description join_level is_public group_category avatar_attachment].freeze
+  MAX_BULK_ACTIONS = 50
 
   include TextHelper
 
   # @API List group categories for a context
   #
   # Returns a paginated list of group categories in a context. The list returned
-  # depends on the permissions of the current user. If the user has group
-  # management permissions (`GRANULAR_MANAGE_GROUPS_PERMISSIONS`), the response will
-  # include only collaborative group categories. If the user has tag management
-  # permissions (`GRANULAR_MANAGE_TAGS_PERMISSIONS`), the response will include only
-  # non-collaborative group categories.
+  # depends on the permissions of the current user and the specified collaboration state.
+  #
+  # @argument collaboration_state [String]
+  #   Filter group categories by their collaboration state:
+  #   - "all": Return both collaborative and non-collaborative group categories
+  #   - "collaborative": Return only collaborative group categories (default)
+  #   - "non_collaborative": Return only non-collaborative group categories
   #
   # @example_request
   #     curl https://<canvas>/api/v1/accounts/<account_id>/group_categories \
-  #          -H 'Authorization: Bearer <token>'
+  #          -H 'Authorization: Bearer <token>' \
+  #          -d 'collaboration_state=all'
   #
   # @returns [GroupCategory]
   def index
-    scoped_categories = @context.group_categories.preload(:root_account, :progresses)
     respond_to do |format|
       format.json do
-        if authorized_action(@context, @current_user, [:manage_groups, *RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS, *RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS])
+        if authorized_action(@context, @current_user, RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS + RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS)
+          collaboration_state = params[:collaboration_state].presence || "collaborative"
+          collaboration_state = collaboration_state.downcase
+          unless %w[all collaborative non_collaborative].include?(collaboration_state)
+            render json: { error: "Invalid collaboration_state parameter" }, status: :bad_request and return
+          end
+
           can_view_groups = @context.grants_any_right?(
             @current_user,
             session,
-            :manage_groups,
             *RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS
           )
 
@@ -137,21 +149,39 @@ class GroupCategoriesController < ApplicationController
             session,
             *RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS
           )
-          if !can_view_groups
-            # If can_view_groups permission is not granted, allow only non-collaborative categories
-            scoped_categories = scoped_categories.non_collaborative
-          elsif !can_view_tags
-            # If can_view_tags permission is not granted, allow only collaborative categories
-            scoped_categories = scoped_categories.collaborative
-          end
 
+          scoped_categories = GroupCategory.where(context: @context).active.preload(:root_account, :progresses)
+          case collaboration_state
+          when "collaborative"
+            unless can_view_groups
+              render json: { error: "user not authorized to perform that action" }, status: :forbidden and return
+            end
+
+            scoped_categories = scoped_categories.where(non_collaborative: false)
+          when "non_collaborative"
+            unless can_view_tags
+              render json: { error: "Unauthorized to view non-collaborative group categories" }, status: :forbidden and return
+            end
+
+            scoped_categories = scoped_categories.where(non_collaborative: true)
+          when "all"
+            scoped_categories = if can_view_groups && can_view_tags
+                                  scoped_categories
+                                elsif can_view_groups
+                                  scoped_categories.where(non_collaborative: false)
+                                elsif can_view_tags
+                                  scoped_categories.where(non_collaborative: true)
+                                else
+                                  GroupCategory.none
+                                end
+          end
           path = send(:"api_v1_#{@context.class.to_s.downcase}_group_categories_url")
           paginated_categories = Api.paginate(scoped_categories, self, path)
 
           includes = ["progress_url"]
           includes.concat(params[:includes]) if params[:includes]
 
-          render json: paginated_categories.map { |c| group_category_json(c, @current_user, session, include: includes) } if paginated_categories.present?
+          render json: paginated_categories.map { |c| group_category_json(c, @current_user, session, include: includes) }
         end
       end
     end
@@ -191,10 +221,10 @@ class GroupCategoriesController < ApplicationController
   #   Name of the group category
   #
   # @argument non_collaborative [Boolean]
-  #  Can only be set by users with the Differentiated Tag Add permission
+  #  Can only be set by users with the Differentiation Tag - Add permission
   #
   #  If set to true, groups in this category will be only be visible to users with the
-  #  Differentiated Tag Manage permission.
+  #  Differentiation Tag - Manage permission.
   #
   # @argument self_signup [String, "enabled"|"restricted"]
   #   Allow students to sign up for a group themselves (Course Only).
@@ -260,6 +290,201 @@ class GroupCategoriesController < ApplicationController
         end
       end
     end
+  end
+
+  # @API Bulk manage differentiation tags
+  #
+  # This API is only meant for Groups and GroupCategories where non_collaborative is true.
+  #
+  # Perform bulk operations on groups within a group category, or create a new group category
+  # along with the groups in one transaction. If creation of the GroupCategory or any Group fails, the entire operation will be rolled back.
+  #
+  # @argument operations [Required, Hash]
+  #   A hash containing arrays of create/update/delete operations:
+  #   {
+  #     "create": [
+  #       { "name": "New Group A" },
+  #       { "name": "New Group B" }
+  #     ],
+  #     "update": [
+  #       { "id": 123, "name": "Updated Group Name A" },
+  #       { "id": 456, "name": "Updated Group Name B" }
+  #     ],
+  #     "delete": [
+  #       { "id": 789 },
+  #       { "id": 101 }
+  #     ]
+  #   }
+  #
+  # @argument group_category [Required, Hash]
+  #   Attributes for the GroupCategory. May include:
+  #     - id [Optional, Integer]: The ID of an existing GroupCategory.
+  #     - name [Optional, String]: A new name for the GroupCategory. If provided with an ID, the category name will be updated.
+  #
+  # @example_request
+  #     curl https://<canvas>/api/v1/courses/:course_id/group_categories/bulk_manage_differentiation_tag \
+  #          -X POST \
+  #          -H 'Authorization: Bearer <token>' \
+  #          -H 'Content-Type: application/json' \
+  #          -d '{
+  #                "operations": {
+  #                  "create": [{"name": "New Group"}],
+  #                  "update": [{"id": 123, "name": "Updated Group"}],
+  #                  "delete": [{"id": 456}]
+  #                },
+  #                "group_category": {"id": 1, "name": "New Category Name"}
+  #              }'
+  #
+  # @returns GroupCategory and groups operation results
+  def bulk_manage_differentiation_tag
+    operations = params.require(:operations)
+    create_ops = operations[:create] || []
+    update_ops = operations[:update] || []
+    delete_ops = operations[:delete] || []
+
+    if (create_ops.count + update_ops.count + delete_ops.count) > MAX_BULK_ACTIONS
+      return render json: { errors: "You can only perform a maximum of #{MAX_BULK_ACTIONS} operations at a time." }, status: :bad_request
+    end
+
+    # Consolidate group_category parameters: may include an id and/or a name.
+    gc_params = params.require(:group_category).permit(:id, :name)
+    if gc_params[:id].present?
+      load_category_context_from_params
+      unless @group_category.non_collaborative?
+        return render json: { errors: t("This endpoint only works for Differentiation Tags") }, status: :bad_request
+      end
+
+      if @group_category.context.id != params[:course_id].to_i
+        return render json: { errors: t("GroupCategory not part of the course") }, status: :bad_request
+      end
+    else
+      # Set the context from the provided course_id
+      @context = Course.find(params[:course_id])
+    end
+
+    if create_ops.any?
+      return unless check_group_authorization(
+        context: @context,
+        current_user: @current_user,
+        action_category: :add,
+        non_collaborative: true
+      )
+    end
+    if update_ops.any?
+      return unless check_group_authorization(
+        context: @context,
+        current_user: @current_user,
+        action_category: :manage,
+        non_collaborative: true
+      )
+    end
+    if delete_ops.any?
+      return unless check_group_authorization(
+        context: @context,
+        current_user: @current_user,
+        action_category: :delete,
+        non_collaborative: true
+      )
+    end
+
+    results = { created: [], updated: [], deleted: [] }
+
+    ActiveRecord::Base.transaction do
+      if @group_category.nil?
+        @group_category = GroupCategory.create!(gc_params.merge(non_collaborative: true, context: @context))
+      elsif gc_params[:name].present? && gc_params[:name] != @group_category.name
+        # If a new name is provided along with the id, update the group_category name.
+        @group_category.update!(name: gc_params[:name])
+      end
+
+      delete_ops.each do |group_params|
+        permitted_attrs = group_params.permit(:id)
+        group = @group_category.groups.find(permitted_attrs[:id])
+        group.destroy!
+        results[:deleted] << group
+      end
+
+      create_ops.each do |group_params|
+        permitted_attrs = group_params.permit(:name)
+        group = @group_category.groups.create!(permitted_attrs.merge(context: @group_category.context))
+        results[:created] << group
+      end
+
+      update_ops.each do |group_params|
+        permitted_attrs = group_params.permit(:id, :name)
+        group = @group_category.groups.find(permitted_attrs[:id])
+        group.update!(name: permitted_attrs[:name])
+        results[:updated] << group
+      end
+    end
+
+    render json: results.merge(group_category: @group_category)
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { errors: e.message }, status: :bad_request
+  rescue ActiveRecord::RecordNotFound => e
+    render json: { error: e.message }, status: :not_found
+  end
+
+  # @API Import differentiation tags
+  #
+  # Create Differentiation Tags through a CSV import
+  #
+  # For more information on the format that's expected here, please see the
+  # "Differentiation Tag CSV" section in the API docs.
+  #
+  # @argument attachment
+  #   There are two ways to post differentiation tag import data - either via a
+  #   multipart/form-data form-field-style attachment, or via a non-multipart
+  #   raw post request.
+  #
+  #   'attachment' is required for multipart/form-data style posts. Assumed to
+  #   be tag data from a file upload form field named 'attachment'.
+  #
+  #   Examples:
+  #     curl -F attachment=@<filename> -H "Authorization: Bearer <token>" \
+  #         'https://<canvas>/api/v1/group_categories/import_tags'
+  #
+  #   If you decide to do a raw post, you can skip the 'attachment' argument,
+  #   but you will then be required to provide a suitable Content-Type header.
+  #   You are encouraged to also provide the 'extension' argument.
+  #
+  #   Examples:
+  #     curl -H 'Content-Type: text/csv' --data-binary @<filename>.csv \
+  #         -H "Authorization: Bearer <token>" \
+  #         'https://<canvas>/api/v1/group_categories_tags'
+  #
+  # @example_response
+  #    # Progress (default)
+  #    {
+  #        "completion": 0,
+  #        "context_id": 20,
+  #        "context_type": "Course",
+  #        "created_at": "2013-07-05T10:57:48-06:00",
+  #        "id": 2,
+  #        "message": null,
+  #        "tag": "course_tag_import",
+  #        "updated_at": "2013-07-05T10:57:48-06:00",
+  #        "user_id": null,
+  #        "workflow_state": "running",
+  #        "url": "http://localhost:3000/api/v1/progress/2"
+  #    }
+  #
+  # @returns Progress
+  def import_tags
+    return unless check_group_authorization(context: @context, current_user: @current_user, action_category: :add, non_collaborative: true)
+
+    unless @context.account.feature_enabled?(:assign_to_differentiation_tags) && @context.account.allow_assign_to_differentiation_tags?
+      return render(json: { "status" => "unauthorized" }, status: :unauthorized)
+    end
+
+    file_obj = if params.key?(:attachment)
+                 params[:attachment]
+               else
+                 body_file
+               end
+
+    progress = GroupAndMembershipImporter.create_import_with_attachment(@context, file_obj)
+    render(json: progress_json(progress, @current_user, session))
   end
 
   # @API Import category groups
@@ -786,12 +1011,23 @@ class GroupCategoriesController < ApplicationController
     @context = @group_category.context
   end
 
+  def load_category_context_from_params
+    group_category_params = params[:group_category]
+    id = (group_category_params && group_category_params[:id]) || (api_request? ? params[:group_category_id] : params[:id])
+    begin
+      @group_category = api_find(GroupCategory.active, id)
+    rescue ActiveRecord::RecordNotFound
+      render(json: { "status" => "not found" }, status: :not_found) and return
+    end
+    @context = @group_category.context
+  end
+
   private
 
   def body_file
     file_obj = request.body
 
-    # rubocop:disable Style/TrivialAccessors not a Class
+    # rubocop:disable Style/TrivialAccessors -- not a Class
     file_obj.instance_exec do
       def set_file_attributes(filename, content_type)
         @original_filename = filename

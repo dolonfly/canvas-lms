@@ -26,6 +26,7 @@ class Quizzes::QuizzesController < ApplicationController
   include ::Filters::Quizzes
   include SubmittablesGradingPeriodProtection
   include QuizMathDataFixup
+  include Api::V1::Rubric
 
   # If Quiz#one_time_results is on, this flag must be set whenever we've
   # rendered the submission results to the student so that the results can be
@@ -33,25 +34,31 @@ class Quizzes::QuizzesController < ApplicationController
   attr_reader :lock_results_if_needed
 
   before_action :require_context
+
+  include HorizonMode
+  before_action :load_canvas_career, only: [:index, :show]
+
   before_action :rce_js_env, only: %i[show new edit]
 
   include K5Mode
 
   add_crumb(proc { t("#crumbs.quizzes", "Quizzes") }) { |c| c.send :named_context_url, c.instance_variable_get(:@context), :context_quizzes_url }
   before_action { |c| c.active_tab = "quizzes" }
-  before_action :require_quiz, only: %i[
-    statistics
-    edit
-    show
-    history
-    update
-    destroy
-    moderate
-    read_only
-    managed_quiz_data
-    submission_versions
-    submission_html
-  ]
+  before_action :require_quiz,
+                only: %i[
+                  statistics
+                  edit
+                  show
+                  history
+                  update
+                  destroy
+                  moderate
+                  read_only
+                  managed_quiz_data
+                  submission_versions
+                  submission_html
+                ],
+                unless: -> { @context.root_account.feature_enabled?(:ams_service) }
   before_action :set_download_submission_dialog_title, only: [:show, :statistics]
   after_action :lock_results, only: [:show, :submission_html]
   # The number of questions that can display "details". After this number, the "Show details" option is disabled
@@ -64,11 +71,16 @@ class Quizzes::QuizzesController < ApplicationController
   QUIZ_TYPE_SURVEYS = ["survey", "graded_survey"].freeze
 
   def index
+    if @context.root_account.feature_enabled?(:ams_service)
+      render_ams_service
+      return
+    end
+
     GuardRail.activate(:secondary) do
       return unless authorized_action(@context, @current_user, :read)
       return unless tab_enabled?(@context.class::TAB_QUIZZES)
 
-      can_manage = @context.grants_any_right?(@current_user, session, :manage_assignments, :manage_assignments_edit)
+      can_manage = @context.grants_right?(@current_user, session, :manage_assignments_edit)
 
       quiz_index = scoped_quizzes_index
       quiz_index += scoped_new_quizzes_index if quiz_lti_enabled?
@@ -112,6 +124,7 @@ class Quizzes::QuizzesController < ApplicationController
       due_date_required_for_account = AssignmentUtil.due_date_required_for_account?(@context)
       max_name_length_required_for_account = AssignmentUtil.name_length_required_for_account?(@context)
       sis_integration_settings_enabled = AssignmentUtil.sis_integration_settings_enabled?(@context)
+      assign_to_tags = @context.account.feature_enabled?(:assign_to_differentiation_tags) && @context.account.allow_assign_to_differentiation_tags?
 
       hash = {
         QUIZZES: {
@@ -147,6 +160,8 @@ class Quizzes::QuizzesController < ApplicationController
         },
         quiz_menu_tools: external_tools_display_hashes(:quiz_menu),
         quiz_index_menu_tools: external_tools_display_hashes(:quiz_index_menu),
+        ALLOW_ASSIGN_TO_DIFFERENTIATION_TAGS: assign_to_tags,
+        CAN_MANAGE_DIFFERENTIATION_TAGS: @context.grants_any_right?(@current_user, session, *RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS),
         SIS_NAME: sis_name,
         MAX_NAME_LENGTH: max_name_length,
         DUE_DATE_REQUIRED_FOR_ACCOUNT: due_date_required_for_account,
@@ -177,6 +192,11 @@ class Quizzes::QuizzesController < ApplicationController
   end
 
   def show
+    if @context.root_account.feature_enabled?(:ams_service)
+      render_ams_service
+      return
+    end
+
     if @quiz.deleted?
       flash[:error] = t("errors.quiz_deleted", "That quiz has been deleted")
       redirect_to named_context_url(@context, :context_quizzes_url)
@@ -253,6 +273,9 @@ class Quizzes::QuizzesController < ApplicationController
 
       setup_attachments
       submission_counts if @quiz.grants_right?(@current_user, session, :grade) || @quiz.grants_right?(@current_user, session, :read_statistics)
+
+      assign_to_tags = @context.account.feature_enabled?(:assign_to_differentiation_tags) && @context.account.allow_assign_to_differentiation_tags?
+
       @stored_params = @submission.temporary_data if params[:take] && @submission && (@submission.untaken? || @submission.preview?)
       @stored_params ||= {}
       hash = {
@@ -260,6 +283,8 @@ class Quizzes::QuizzesController < ApplicationController
         CONTEXT_ACTION_SOURCE: :quizzes,
         COURSE_ID: @context.id,
         LOCKDOWN_BROWSER: @quiz.require_lockdown_browser?,
+        ALLOW_ASSIGN_TO_DIFFERENTIATION_TAGS: assign_to_tags,
+        CAN_MANAGE_DIFFERENTIATION_TAGS: @context.grants_any_right?(@current_user, session, *RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS),
         QUIZ: quiz_json(@quiz, @context, @current_user, session),
         QUIZ_DETAILS_URL: course_quiz_managed_quiz_data_url(@context.id, @quiz.id),
         QUIZZES_URL: course_quizzes_url(@context),
@@ -267,11 +292,13 @@ class Quizzes::QuizzesController < ApplicationController
         VALID_DATE_RANGE: CourseDateRange.new(@context),
         HAS_GRADING_PERIODS: @context.grading_periods?,
         DUE_DATE_REQUIRED_FOR_ACCOUNT: AssignmentUtil.due_date_required_for_account?(@context),
+        PERMISSIONS: { manage_rubrics: @context.grants_right?(@current_user, session, :manage_rubrics) },
       }
       set_section_list_js_env
       append_sis_data(hash)
       js_env(hash)
       conditional_release_js_env(@quiz.assignment, includes: [:rule])
+      enhanced_rubrics_assignments_js_env(@assignment) if Rubric.enhanced_rubrics_assignments_enabled?(@context)
 
       set_master_course_js_env_data(@quiz, @context)
       @quiz_menu_tools = external_tools_display_hashes(:quiz_menu)
@@ -323,7 +350,7 @@ class Quizzes::QuizzesController < ApplicationController
     if authorized_action(@quiz, @current_user, :update)
 
       if params[:fixup_quiz_math_questions] == "1"
-        InstStatsd::Statsd.increment("fixingup_quiz_math_question")
+        InstStatsd::Statsd.distributed_increment("fixingup_quiz_math_question")
         @quiz = fixup_quiz_questions_with_bad_math(@quiz)
       end
 
@@ -346,12 +373,16 @@ class Quizzes::QuizzesController < ApplicationController
       max_name_length_required_for_account = AssignmentUtil.name_length_required_for_account?(@context)
       max_name_length = AssignmentUtil.assignment_max_name_length(@context)
 
+      assign_to_tags = @context.account.feature_enabled?(:assign_to_differentiation_tags) && @context.account.allow_assign_to_differentiation_tags?
+
       hash = {
         ASSIGNMENT_ID: @assignment.present? ? @assignment.id : nil,
         ASSIGNMENT_OVERRIDES: assignment_overrides_json(@quiz.overrides_for(@current_user,
                                                                             ensure_set_not_empty: true),
                                                         @current_user,
                                                         include_names: true),
+        ALLOW_ASSIGN_TO_DIFFERENTIATION_TAGS: assign_to_tags,
+        CAN_MANAGE_DIFFERENTIATION_TAGS: @context.grants_any_right?(@current_user, session, *RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS),
         DUE_DATE_REQUIRED_FOR_ACCOUNT: AssignmentUtil.due_date_required_for_account?(@context),
         QUIZ: quiz_json(@quiz, @context, @current_user, session),
         QUIZZES_URL: course_quizzes_url(@context),
@@ -493,6 +524,7 @@ class Quizzes::QuizzesController < ApplicationController
           @quiz.did_edit if @quiz.created?
         end
       end
+      quiz_params[:saving_user] = @current_user
 
       cached_due_dates_changed = @quiz.update_cached_due_dates?(quiz_params[:quiz_type])
 
@@ -505,9 +537,11 @@ class Quizzes::QuizzesController < ApplicationController
             old_assignment = nil
             if @quiz.assignment.present?
               old_assignment = @quiz.assignment.clone
+              old_assignment.instance_variable_set(:@new_record, false)
               old_assignment.id = @quiz.assignment.id
 
               @quiz.assignment.post_to_sis = params[:post_to_sis] == "1"
+              @quiz.assignment.suppress_assignment = params[:suppress_assignment] == "1" if @context.root_account.suppress_assignments?
               @quiz.assignment.validate_overrides_for_sis(prepared_batch) if overrides
 
               @quiz.assignment.important_dates = value_to_boolean(params[:important_dates])
@@ -524,7 +558,7 @@ class Quizzes::QuizzesController < ApplicationController
               if auto_publish
                 @quiz.generate_quiz_data
                 @quiz.workflow_state = "available"
-                @quiz.published_at = Time.now
+                @quiz.published_at = Time.zone.now
               end
               @quiz.save!
             end
@@ -590,7 +624,7 @@ class Quizzes::QuizzesController < ApplicationController
   end
 
   def publish
-    if authorized_action(@context, @current_user, [:manage_assignments, :manage_assignments_edit])
+    if authorized_action(@context, @current_user, :manage_assignments_edit)
       @quizzes = @context.quizzes.active.where(id: params[:quizzes])
       @quizzes.each(&:publish!)
 
@@ -607,7 +641,7 @@ class Quizzes::QuizzesController < ApplicationController
   end
 
   def unpublish
-    if authorized_action(@context, @current_user, [:manage_assignments, :manage_assignments_edit])
+    if authorized_action(@context, @current_user, :manage_assignments_edit)
       @quizzes = @context.quizzes.active.where(id: params[:quizzes]).select(&:available?)
       @quizzes.each(&:unpublish!)
 
@@ -779,7 +813,7 @@ class Quizzes::QuizzesController < ApplicationController
       @students = @students.distinct.order_by_sortable_name
       @students = @students.order(:uuid) if @quiz.survey? && @quiz.anonymous_submissions
       begin
-        last_updated_at = Time.parse(params[:last_updated_at]) if params[:last_updated_at]
+        last_updated_at = Time.zone.parse(params[:last_updated_at]) if params[:last_updated_at]
       rescue ArgumentError
         # ignore
       end
@@ -973,7 +1007,7 @@ class Quizzes::QuizzesController < ApplicationController
     end
 
     if params[:fixup_quiz_math_questions] == "1"
-      InstStatsd::Statsd.increment("fixingup_quiz_math_submission")
+      InstStatsd::Statsd.distributed_increment("fixingup_quiz_math_submission")
       fixup_submission_questions_with_bad_math(@submission)
     end
 
@@ -1104,6 +1138,12 @@ class Quizzes::QuizzesController < ApplicationController
     return quiz.assignment ? quiz.assignment.due_at : quiz.lock_at if quiz.is_a?(Quizzes::Quiz)
 
     quiz.due_at || quiz.lock_at
+  end
+
+  def render_ams_service
+    js_env(context_url: context_url(@context, :context_quizzes_url))
+    remote_env(ams: { launch_url: Services::Ams.launch_url })
+    render html: '<div id="ams_container"></div>'.html_safe, layout: true
   end
 
   protected

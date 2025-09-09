@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 - present Instructure, Inc.
+ * Copyright (C) 2025 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -40,10 +40,17 @@ type StatusBarFeature =
   | 'html_view'
   | 'fullscreen'
   | 'resize_handle'
+  | 'a11y_resize_handlers'
 
-export const RCEVariantValues = ['full', 'lite', 'text-only'] as const
+export const RCEVariantValues = ['full', 'lite', 'text-only', 'text-block'] as const
 
 export type RCEVariant = (typeof RCEVariantValues)[number]
+
+export type StatusBarOptions = {
+  aiTextTools?: boolean
+  isDesktop?: boolean
+  a11yResizers?: boolean
+}
 
 export function getMenubarForVariant(variant: RCEVariant): MenuBarSpec {
   if (variant === 'full') {
@@ -84,7 +91,7 @@ export function getMenuForVariant(variant: RCEVariant): MenusSpec {
 
 export function getToolbarForVariant(
   variant: RCEVariant,
-  ltiToolFavorites: string[] = []
+  ltiToolFavorites: string[] = [],
 ): ToolbarGroupSetting[] {
   if (variant === 'lite') {
     return [
@@ -120,6 +127,38 @@ export function getToolbarForVariant(
       {
         name: formatMessage('Content'),
         items: ['instructure_links'],
+      },
+    ]
+  }
+
+  if (variant === 'text-block') {
+    return [
+      {
+        name: formatMessage('Styles'),
+        items: ['fontsizeselect', 'formatselect'],
+      },
+      {
+        name: formatMessage('Formatting'),
+        items: [
+          'bold',
+          'italic',
+          'underline',
+          'instructure_color',
+          'inst_subscript',
+          'inst_superscript',
+        ],
+      },
+      {
+        name: formatMessage('Content'),
+        items: ['instructure_links', 'instructure_documents'],
+      },
+      {
+        name: formatMessage('Alignment and Lists'),
+        items: ['align', 'bullist', 'inst_indent', 'inst_outdent'],
+      },
+      {
+        name: formatMessage('Miscellaneous'),
+        items: ['removeformat', 'instructure_equation'],
       },
     ]
   }
@@ -166,23 +205,33 @@ export function getToolbarForVariant(
   ]
 }
 
+const DESKTOP_FEATURES: StatusBarFeature[] = ['keyboard_shortcuts', 'a11y_checker', 'word_count']
+const MOBILE_FEATURES: StatusBarFeature[] = ['a11y_checker', 'word_count']
+const EXTENDED_FEATURES: StatusBarFeature[] = ['html_view', 'fullscreen', 'resize_handle']
+const A11Y_RESIZERS: StatusBarFeature[] = ['a11y_resize_handlers']
+
 export function getStatusBarFeaturesForVariant(
   variant: RCEVariant,
-  ai_text_tools: boolean = false
+  options: StatusBarOptions = {
+    aiTextTools: false,
+    isDesktop: true,
+    a11yResizers: false,
+  },
 ): StatusBarFeature[] {
+  if (variant === 'text-block') {
+    return []
+  }
+
+  const platformFeatures = options.isDesktop ? DESKTOP_FEATURES : MOBILE_FEATURES
+
   if (variant === 'lite' || variant === 'text-only') {
-    return ['keyboard_shortcuts', 'a11y_checker', 'word_count']
+    return platformFeatures
   }
-  const full_features: StatusBarFeature[] = [
-    'keyboard_shortcuts',
-    'a11y_checker',
-    'word_count',
-    'html_view',
-    'fullscreen',
-    'resize_handle',
-  ]
-  if (ai_text_tools) {
-    full_features.push('ai_tools')
-  }
-  return full_features
+
+  return [
+    ...platformFeatures,
+    ...EXTENDED_FEATURES,
+    ...(options.a11yResizers ? A11Y_RESIZERS : []),
+    ...(options.aiTextTools ? ['ai_tools'] : []),
+  ] as StatusBarFeature[]
 }

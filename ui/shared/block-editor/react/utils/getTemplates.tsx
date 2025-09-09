@@ -17,13 +17,14 @@
  */
 
 import doFetchApi, {type DoFetchApiResults} from '@canvas/do-fetch-api-effect'
-import type {BlockTemplate} from '@canvas/block-editor/react/types'
 import {showFlashError} from '@canvas/alerts/react/FlashAlert'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {getGlobalTemplates} from '@canvas/block-editor/react/assets/globalTemplates'
+import type {BlockTemplate} from '../types'
 import {mergeTemplates} from './mergeTemplates'
+import {transformTemplate} from './transformations'
 
-const I18n = useI18nScope('block-editor')
+const I18n = createI18nScope('block-editor')
 
 export const getTemplates = (configs: {
   course_id: string
@@ -42,6 +43,9 @@ export const getTemplates = (configs: {
     .then((response: DoFetchApiResults<BlockTemplate[]>) => {
       return response.json || []
     })
+    .then((templates: BlockTemplate[]) => {
+      return templates.map(transformTemplate)
+    })
     .catch((err: Error) => {
       showFlashError(I18n.t('Cannot get block custom templates'))(err)
     })
@@ -51,9 +55,9 @@ export const getTemplates = (configs: {
       return mergeTemplates(
         (apiTemplatesResult as PromiseFulfilledResult<BlockTemplate[]>).value,
         (globalTemplatesResult as PromiseFulfilledResult<BlockTemplate[]>).value.filter(
-          template => !configs.type || configs.type.includes(template.template_type)
-        )
+          template => !configs.type || configs.type.includes(template.template_type),
+        ),
       )
-    }
+    },
   )
 }

@@ -22,10 +22,12 @@ module LtiAdvantage::Serializers
     IMS_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
     DL_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti-dl/claim/"
 
+    # Remove deployment_id when removing the lti_deployment_id_in_login_request FF
     STANDARD_IMS_CLAIMS = %w[
       context
       custom
       deployment_id
+      lti_deployment_id
       launch_presentation
       lis
       message_type
@@ -37,6 +39,13 @@ module LtiAdvantage::Serializers
       target_link_uri
       lti11_legacy_user_id
       lti1p1
+      notice
+      activity
+      for_user
+      submission
+      asset
+      assetreport_type
+      eulaservice
     ].freeze
 
     DEEP_LINKING_CLAIMS = %w[
@@ -45,8 +54,8 @@ module LtiAdvantage::Serializers
     ].freeze
 
     CLAIM_MAPPING = [
-      *STANDARD_IMS_CLAIMS.map { [_1, IMS_CLAIM_PREFIX + _1] },
-      *DEEP_LINKING_CLAIMS.map { [_1, DL_CLAIM_PREFIX + _1] },
+      *STANDARD_IMS_CLAIMS.map { [it, IMS_CLAIM_PREFIX + it] },
+      *DEEP_LINKING_CLAIMS.map { [it, DL_CLAIM_PREFIX + it] },
     ].to_h.merge(
       "names_and_roles_service" =>
         "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
@@ -60,9 +69,10 @@ module LtiAdvantage::Serializers
       @object = object
     end
 
-    def serializable_hash
-      hash = apply_claim_prefixes(@object.as_json.compact)
-      promote_extensions(hash)
+    # TODO: remove without_validation_fields when we remove the remove_unwanted_lti_validation_claims flag
+    def serializable_hash(without_validation_fields: true)
+      hash = without_validation_fields ? @object.as_json(except: %w[validation_context errors]) : @object.as_json
+      promote_extensions(apply_claim_prefixes(hash.compact))
     end
 
     private

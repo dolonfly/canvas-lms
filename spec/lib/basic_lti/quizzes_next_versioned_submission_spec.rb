@@ -342,7 +342,7 @@ describe BasicLTI::QuizzesNextVersionedSubmission do
               next if x[:grade].blank? && x[:workflow_state] != "graded"
 
               score = x[:grade] ? assignment.points_possible * x[:grade] : nil
-              grade = score ? score.to_s : nil
+              grade = score&.to_s
 
               [x[:url], score, grade]
             end
@@ -357,6 +357,7 @@ describe BasicLTI::QuizzesNextVersionedSubmission do
 
     before do
       allow(Submission).to receive(:find_or_initialize_by).and_return(submission)
+      allow(submission).to receive_messages(grader_can_grade?: true, autograded?: false)
     end
 
     let(:submission) do

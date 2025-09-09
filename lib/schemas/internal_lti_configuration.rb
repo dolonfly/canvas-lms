@@ -22,7 +22,7 @@ module Schemas
   # Represents the "internal" JSON schema used to configure an LTI 1.3 tool,
   # as stored in Lti::ToolConfiguration and used in Lti::Registration.
   class InternalLtiConfiguration < Base
-    VALID_DISPLAY_TYPES = %w[default full_width full_width_in_context in_nav_context borderless].freeze
+    VALID_DISPLAY_TYPES = %w[default full_width full_width_in_context full_width_with_nav in_nav_context borderless].freeze
 
     # Transforms a hash conforming to the LtiConfiguration schema into
     # a hash conforming to the InternalLtiConfiguration schema.
@@ -47,12 +47,35 @@ module Schemas
       }.deep_symbolize_keys)
     end
 
-    def schema
+    # Transforms a hash conforming to the InternalLtiConfiguration schema into
+    # a hash that's suitable for importing using the ContextExternalToolImporter.
+    # @param [Hash] internal_config The internal configuration hash.
+    # @return [Hash] The importable configuration hash.
+    def self.to_deployment_configuration(internal_config, unified_tool_id: nil)
+      config = internal_config.deep_dup.with_indifferent_access
+      placements = config&.dig(:placements)
+
+      settings = {
+        **(config&.dig(:launch_settings) || {}),
+        placements:,
+      }
+
+      # legacy: add placements in both array and hash form
+      placements&.each do |p|
+        settings[p["placement"]] = p
+      end
+
+      config
+        .except(:redirect_uris, :launch_settings, :placements)
+        .merge({ settings:, unified_tool_id:, lti_version: "1.3", url: config[:target_link_uri] })
+        .with_indifferent_access.compact
+    end
+
+    def self.schema
       {
         type: "object",
         required: %w[
           title
-          description
           target_link_uri
           oidc_initiation_url
           redirect_uris
@@ -61,25 +84,29 @@ module Schemas
           launch_settings
         ],
         properties: {
-          **self.class.base_properties,
+          **base_properties,
           redirect_uris: { type: "array", items: { type: "string" }, minItems: 1 },
           domain: { type: "string" },
           tool_id: { type: "string" },
           privacy_level: { type: "string", enum: ::Lti::PrivacyLevelExpander::SUPPORTED_LEVELS },
           launch_settings: {
             type: "object",
-            properties: self.class.base_settings_properties
+            properties: base_settings_properties
           },
-          placements: self.class.placements_schema,
+          placements: placements_schema,
           # vendor_extensions: extensions with platform != "canvas.instructure.com", only currently copied during content migration. not present on 1.3 tools.
         }
-      }.freeze
+      }
+    end
+
+    def self.allowed_base_properties
+      schema[:properties].keys
     end
 
     def self.base_properties
       {
         title: { type: "string", description: "Overridable by 'text' in settings and placements" },
-        description: { type: "string", description: "Displayed only in assignment_selection and link_selection" },
+        description: { type: "string", description: "Displayed only in assignment_selection, link_selection, and ActivityAssetProcessor" },
         custom_fields: { oneOf: [{ type: "object" }, { type: "string" }], description: "Overridable in settings and placements. String for legacy purposes." },
         target_link_uri: { type: "string", description: "Overridable in settings and placements" },
         oidc_initiation_url: { type: "string" },
@@ -92,7 +119,7 @@ module Schemas
 
     def self.base_settings_properties
       {
-        message_type: { type: "string", enum: ::Lti::ResourcePlacement::LTI_ADVANTAGE_MESSAGE_TYPES },
+        message_type: { type: "string", enum: ::Lti::ResourcePlacement::PLACEMENT_BASED_MESSAGE_TYPES },
         text: { type: "string" },
         labels: { type: "object" },
         custom_fields: { type: "object" },
@@ -114,6 +141,15 @@ module Schemas
       }.freeze
     end
 
+    def self.make_placement_specific_properties(**placement_properties_hash)
+      placement_properties_hash.map do |placement, properties|
+        {
+          if: { properties: { placement: { const: placement.to_s } } },
+          then: { properties: }
+        }
+      end
+    end
+
     def self.placements_schema
       {
         type: "array",
@@ -125,57 +161,36 @@ module Schemas
             enabled: { type: ["boolean", "string"] },
             **base_settings_properties
           },
-          allOf: [
-            {
-              if: {
-                properties: { placement: { const: "submission_type_selection" } }
-              },
-              then: {
-                properties: {
-                  description: { type: "string", maxLength: 255, errorMessage: "description must be a string with a maximum length of 255" },
-                  require_resource_selection: { type: "boolean" },
-                }
-              }
+          allOf: make_placement_specific_properties(
+            account_navigation: {
+              root_account_only: { type: "boolean" },
+              default: { type: "string" }, # , enum: %w[disabled enabled] },
             },
-            {
-              if: {
-                properties: { placement: { const: "account_navigation" } }
-              },
-              then: {
-                properties: {
-                  root_account_only: { type: "boolean" },
-                  default: { type: "string" }, # , enum: %w[disabled enabled] },
-                }
-              }
+            editor_button: { use_tray: { type: ["boolean", "string"] } },
+            file_menu: { accept_media_types: { type: "string" } },
+            global_navigation: { icon_svg_path_64: { type: "string" } },
+            submission_type_selection: {
+              description: { type: "string", maxLength: 255, errorMessage: "description must be a string with a maximum length of 255" },
+              require_resource_selection: { type: "boolean" },
             },
-            {
-              if: {
-                properties: { placement: { const: "global_navigation" } }
-              },
-              then: {
-                properties: { icon_svg_path_64: { type: "string" } }
-              }
-            },
-            {
-              if: {
-                properties: { placement: { const: "file_menu" } }
-              },
-              then: {
-                properties: { accept_media_types: { type: "string" } }
-              }
-            },
-            {
-              if: {
-                properties: { placement: { const: "editor_button" } }
-              },
-              then: {
-                properties: { use_tray: { type: ["boolean", "string"] } }
-              }
+            ActivityAssetProcessor: {
+              eula: asset_processor_eula_schema,
             }
-          ]
-
+          )
         }
       }.freeze
+    end
+
+    def self.asset_processor_eula_schema
+      {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean" },
+          target_link_uri: { type: "string" },
+          custom_fields: { type: "object", additionalProperties: { type: "string" } },
+        },
+        required: %w[enabled]
+      }
     end
 
     # These can be set in the base-level settings, but only apply to specific placements

@@ -105,13 +105,13 @@ describe TokenScopes do
     let(:documented_scopes_and_descs) do
       scopes_from_yaml_file
         .reject { |_scope, obj| obj["undocumented"] }
-        .transform_values { _1["description"] }
+        .transform_values { it["description"] }
     end
 
     let(:undocumented_hidden_scopes_and_descs) do
       scopes_from_yaml_file
         .select { |_scope, obj| obj["undocumented"] }
-        .transform_values { _1["description"] }
+        .transform_values { it["description"] }
     end
 
     describe "LTI_SCOPES" do
@@ -157,6 +157,38 @@ describe TokenScopes do
     describe "ALL_LTI_SCOPES" do
       it "consists of LTI_SCOPES and LTI_HIDDEN_SCOPES keys" do
         expect(TokenScopes::ALL_LTI_SCOPES).to match_array(TokenScopes::LTI_SCOPES.keys + TokenScopes::LTI_HIDDEN_SCOPES.keys)
+      end
+    end
+  end
+
+  describe "public scopes" do
+    let(:account) { instance_double(Account, feature_enabled?: true) }
+    let(:scopes_hash) { TokenScopes.public_lti_scopes_hash_for_account(account) }
+    let(:scopes_list) { TokenScopes.public_lti_scopes_urls_for_account(account) }
+
+    def mock_ff_off(flag)
+      allow(account).to receive(:feature_enabled?).with(flag).and_return(false)
+    end
+
+    context "with all flags on" do
+      it "returns all scopes" do
+        expect(scopes_hash).to eq TokenScopes::LTI_SCOPES
+        expect(scopes_list).to eq TokenScopes::LTI_SCOPES.keys
+      end
+    end
+
+    context "with the lti_asset_processor flag off" do
+      before { mock_ff_off(:lti_asset_processor) }
+
+      it "is missing the asset scopes" do
+        asset_scopes = [
+          TokenScopes::LTI_ASSET_READ_ONLY_SCOPE,
+          TokenScopes::LTI_ASSET_REPORT_SCOPE,
+          TokenScopes::LTI_EULA_USER_SCOPE,
+          TokenScopes::LTI_EULA_DEPLOYMENT_SCOPE
+        ]
+        expect(scopes_hash).to eq TokenScopes::LTI_SCOPES.except(*asset_scopes)
+        expect(scopes_list).to eq TokenScopes::LTI_SCOPES.keys - asset_scopes
       end
     end
   end

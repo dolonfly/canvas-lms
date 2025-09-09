@@ -22,10 +22,10 @@ import QuizItemGroupView from '../QuizItemGroupView'
 import $ from 'jquery'
 import 'jquery-migrate'
 import fakeENV from '@canvas/test-utils/fakeENV'
-import assertions from '@canvas/test-utils/assertionsSpec'
 import '@canvas/jquery/jquery.simulate'
 import 'jqueryui/tooltip'
 import {waitFor} from '@testing-library/dom'
+import {isAccessible} from '@canvas/test-utils/assertions'
 
 const createView = function (collection) {
   if (collection == null) {
@@ -58,7 +58,7 @@ describe('QuizItemGroupView', () => {
 
   it('should be accessible', async () => {
     const view = createView()
-    await assertions.isAccessible(view, {a11yReport: true})
+    await isAccessible(view, {a11yReport: true})
   })
 
   it('#isEmpty is false if any items aren’t hidden', () => {
@@ -107,24 +107,24 @@ describe('QuizItemGroupView', () => {
 
   it('should rerender on filter change', () => {
     const view = createView()
-    expect(view.$el.find('.collectionViewItems li.quiz').length).toBe(2)
+    expect(view.$el.find('.collectionViewItems li.quiz')).toHaveLength(2)
 
     view.filterResults('foo')
-    expect(view.$el.find('.collectionViewItems li.quiz').length).toBe(1)
+    expect(view.$el.find('.collectionViewItems li.quiz')).toHaveLength(1)
   })
 
   it('should not render no content message if quizzes are available', () => {
     const view = createView()
-    expect(view.$el.find('.collectionViewItems li.quiz').length).toBe(2)
+    expect(view.$el.find('.collectionViewItems li.quiz')).toHaveLength(2)
     expect(view.$el.find('.no_content').is(':visible')).toBe(false)
   })
 
   it('should render no content message if no quizzes available', async () => {
     const collection = new QuizCollection([])
     const view = createView(collection)
-    expect(view.$el.find('.collectionViewItems li.quiz').length).toBe(0)
+    expect(view.$el.find('.collectionViewItems li.quiz')).toHaveLength(0)
     const noContentElement = view.$el.find('.no_content')
-    expect(noContentElement.length).toBe(1)
+    expect(noContentElement).toHaveLength(1)
     await waitFor(() => {
       const computedStyle = getComputedStyle(noContentElement[0])
       expect(computedStyle.display).not.toBe('none')

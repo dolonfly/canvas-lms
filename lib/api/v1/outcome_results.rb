@@ -122,16 +122,18 @@ module Api::V1::OutcomeResults
   end
 
   # Public: Returns an Array of serialized User objects for the linked hash.
-  def outcome_results_linked_users_json(users)
+  def outcome_results_linked_users_json(users, context)
+    includes = %w[sis_user_id avatar_url]
+    excludes = %w[personal_info]
+    user_json_preloads(users, false, { accounts: true })
+    users = users_json(users, @current_user, session, includes, context, nil, excludes)
+
+    allowed_fields = %w[id name display_name sortable_name sis_id integration_id login_id avatar_url]
     users.map do |u|
-      hash = {
-        id: u.id.to_s,
-        name: u.name,
-        display_name: u.short_name,
-        sortable_name: u.sortable_name
-      }
-      hash[:avatar_url] = avatar_url_for_user(u) if service_enabled?(:avatars)
-      hash
+      u[:id] = u[:id].to_s if u[:id]
+      u[:display_name] = u[:short_name] if u[:short_name]
+      u[:sis_id] = u[:sis_user_id] if u[:sis_user_id]
+      u.select! { |field| allowed_fields.include?(field) }
     end
   end
 
@@ -139,8 +141,7 @@ module Api::V1::OutcomeResults
   def outcome_results_include_alignments_json(alignments)
     alignments.map do |alignment|
       hash = { id: alignment.asset_string, name: alignment.title }
-      html_url = polymorphic_url([alignment.context, alignment]) rescue nil
-      hash[:html_url] = html_url if html_url
+      hash[:html_url] = outcome_alignment_html_url(alignment)
       hash
     end
   end
@@ -150,9 +151,19 @@ module Api::V1::OutcomeResults
       {
         id: a.asset_string,
         name: a.title,
-        html_url: a.is_a?(LiveAssessments::Assessment) ? "" : polymorphic_url([a.context, a]),
+        html_url: outcome_alignment_html_url(a),
         submission_types: a.try(:submission_types) || "magic_marker"
       }
+    end
+  end
+
+  def outcome_alignment_html_url(alignment)
+    if alignment.nil? || alignment.is_a?(LiveAssessments::Assessment)
+      ""
+    elsif alignment.is_a?(AssessmentQuestionBank)
+      course_question_bank_url(course_id: alignment.context.id, id: alignment.id)
+    else
+      polymorphic_url([alignment.context, alignment])
     end
   end
 
@@ -275,7 +286,7 @@ module Api::V1::OutcomeResults
         row << sis_user_id
         outcomes.each do |outcome|
           score = rollup.scores.find { |x| x.outcome == outcome }
-          row << (score ? score.score : nil)
+          row << score&.score
           row << (mastery_points || outcome&.data&.dig(:rubric_criterion, :mastery_points))
         end
         csv << row

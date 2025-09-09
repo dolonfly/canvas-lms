@@ -30,6 +30,7 @@ type Setting =
   | 'hide_dashcard_color_overlays'
   | 'comment_library_suggestions_enabled'
   | 'elementary_dashboard_disabled'
+  | 'suppress_assignments'
 
 type Role = {
   addable_by_user: boolean
@@ -66,8 +67,38 @@ export type GroupOutcome = {
   description: string
 }
 
+export interface BlueprintCourse {
+  id: number | string
+  name: string
+  enrollment_term_id: number | string
+}
+
+export interface SubAccount {
+  id: number | string
+  name: string
+}
+
+export interface Term {
+  id: number | string
+  name: string
+}
+
+export interface BlueprintCoursesData {
+  isMasterCourse: boolean
+  isChildCourse: boolean
+  accountId: number | string
+  masterCourse: BlueprintCourse
+  course: BlueprintCourse
+  subAccounts?: SubAccount[]
+  terms?: Term[]
+  canManageCourse?: boolean
+  canAutoPublishCourses?: boolean
+  itemNotificationFeatureEnabled?: boolean
+}
+
 export interface EnvCommon {
   ASSET_HOST: string
+  DOMAIN_ROOT_ACCOUNT_SFID: string
   active_brand_config_json_url: string
   active_brand_config: {
     variables: Record<string, string>
@@ -88,6 +119,7 @@ export interface EnvCommon {
   csp?: string
   current_user_id: string | null
   current_user_global_id: string
+  current_user_usage_metrics_id: string
   COURSE_ROLES: Role[]
   COURSE_USERS_PATH?: string
   current_user_roles: string[]
@@ -104,23 +136,28 @@ export interface EnvCommon {
   }[]
   ACCOUNT_ID: string
   DOMAIN_ROOT_ACCOUNT_ID: string
+  DOMAIN_ROOT_ACCOUNT_UUID: string
   ROOT_ACCOUNT_ID: string
+  PENDO_APP_ID: string
   ROOT_OUTCOME_GROUP: GroupOutcome
   k12: false
   help_link_name: string
   help_link_icon: string
   use_high_contrast: boolean
+  use_dyslexic_font?: boolean
   auto_show_cc: boolean
   disable_celebrations: boolean
   disable_keyboard_shortcuts: boolean
   LTI_LAUNCH_FRAME_ALLOWANCES: string[]
   LTI_TOOL_SCOPES?: {[key: string]: string[]}
   DEEP_LINKING_POST_MESSAGE_ORIGIN: string
+  HORIZON_DOMAIN: string
   comment_library_suggestions_enabled: boolean
   INCOMPLETE_REGISTRATION: boolean
   SETTINGS: Record<Setting, boolean>
   RAILS_ENVIRONMENT: 'development' | 'CD' | 'Beta' | 'Production' | string
   IN_PACED_COURSE: boolean
+  CONDITIONAL_RELEASE_SERVICE_ENABLED?: boolean
   PARSE_LINK_HEADER_THROW_ON_MAXLEN_EXCEEDED?: boolean
   PREFERENCES?: {
     hide_dashcard_color_overlays: boolean
@@ -180,6 +217,7 @@ export interface EnvCommon {
     pronouns: null | string
     fake_student: boolean
     avatar_is_fallback: boolean
+    email?: string
   }
   page_view_update_url: string
   IS_LARGE_ROSTER: boolean
@@ -202,10 +240,17 @@ export interface EnvCommon {
   K5_SUBJECT_COURSE: string
   LOCALE_TRANSLATION_FILE: string
   DEFAULT_DUE_TIME?: string
+  TIMEZONES: Array<{name: string; name_with_hour_offset: string}>
+  DEFAULT_TIMEZONE_NAME: string
+  captcha_site_key: string
 
   FEATURES: Partial<
     Record<
-      SiteAdminFeatureId | RootAccountFeatureId | BrandAccountFeatureId | OtherFeatureId,
+      | SiteAdminFeatureId
+      | RootAccountFeatureId
+      | RootAccountServiceId
+      | BrandAccountFeatureId
+      | OtherFeatureId,
       boolean
     >
   >
@@ -221,7 +266,7 @@ export interface EnvCommon {
     type?: string
     classes?: string
   }>
-  breadcrumbs?: {name: string; url: string | null}[]
+  breadcrumbs?: {name: string; url: string}[]
   enhanced_rubrics_enabled?: boolean
   enhanced_rubrics_copy_to?: boolean
   rubric_imports_exports?: boolean
@@ -231,6 +276,9 @@ export interface EnvCommon {
    * and ui/shared/trays/react/ContentTypeExternalToolDrawer.tsx
    */
   top_navigation_tools: Tool[]
+
+  BLUEPRINT_COURSES_DATA: BlueprintCoursesData | undefined
+  AI_FEEDBACK_LINK?: string
 }
 
 /**
@@ -239,14 +287,8 @@ export interface EnvCommon {
 export type SiteAdminFeatureId =
   | 'account_calendar_events'
   | 'account_level_blackout_dates'
-  | 'course_paces_for_students'
-  | 'course_paces_redesign'
-  | 'selective_release_backend'
-  | 'selective_release_ui_api'
-  | 'selective_release_edit_page'
   | 'enhanced_course_creation_account_fetching'
   | 'explicit_latex_typesetting'
-  | 'featured_help_links'
   | 'instui_for_import_page'
   | 'instui_nav'
   | 'media_links_use_attachment_id'
@@ -258,7 +300,18 @@ export type SiteAdminFeatureId =
   | 'courses_popout_sisid'
   | 'dashboard_graphql_integration'
   | 'speedgrader_studio_media_capture'
-
+  | 'validate_call_to_action'
+  | 'new_quizzes_navigation_updates'
+  | 'create_wiki_page_mastery_path_overrides'
+  | 'create_external_apps_side_tray_overrides'
+  | 'files_a11y_rewrite_toggle'
+  | 'files_a11y_rewrite'
+  | 'youtube_migration'
+  | 'youtube_overlay'
+  | 'hide_legacy_course_analytics'
+  | 'standardize_assignment_date_formatting'
+  | 'accessibility_tab_enable'
+  | 'scheduled_feedback_releases'
 /**
  * From ApplicationController#JS_ENV_ROOT_ACCOUNT_FEATURES
  */
@@ -266,12 +319,12 @@ export type RootAccountFeatureId =
   | 'buttons_and_icons_root_account'
   | 'create_course_subaccount_picker'
   | 'extended_submission_state'
-  | 'granular_permissions_manage_users'
   | 'instui_nav'
   | 'lti_deep_linking_module_index_menu_modal'
-  | 'lti_dynamic_registration'
   | 'lti_registrations_next'
-  | 'lti_overwrite_user_url_input_select_content_dialog'
+  | 'lti_registrations_page'
+  | 'lti_registrations_usage_data'
+  | 'lti_registrations_usage_tab'
   | 'mobile_offline_mode'
   | 'product_tours'
   | 'rce_transform_loaded_content'
@@ -282,11 +335,37 @@ export type RootAccountFeatureId =
   | 'rubric_criterion_range'
   | 'rce_lite_enabled_speedgrader_comments'
   | 'login_registration_ui_identity'
+  | 'course_paces_skip_selected_days'
+  | 'course_pace_download_document'
+  | 'course_pace_draft_state'
+  | 'course_pace_time_selection'
+  | 'course_pace_pacing_status_labels'
+  | 'course_pace_pacing_with_mastery_paths'
+  | 'modules_requirements_allow_percentage'
+  | 'lti_asset_processor'
+  | 'lti_asset_processor_discussions'
+  | 'course_pace_weighted_assignments'
+  | 'course_pace_allow_bulk_pace_assign'
+  | 'disable_iframe_sandbox_file_show'
+  | 'ams_service'
+  | 'lti_apps_page_ai_translation'
+  | 'open_tools_in_new_tab'
+  | 'restrict_student_access'
+  | 'horizon_learner_app'
+  | 'horizon_learning_provider_app_on_contextless_routes'
+
+/**
+ * From ApplicationController#JS_ENV_ROOT_ACCOUNT_SERVICES
+ */
+export type RootAccountServiceId = 'account_survey_notifications'
 
 /**
  * From ApplicationController#JS_ENV_BRAND_ACCOUNT_FEATURES
  */
-export type BrandAccountFeatureId = 'embedded_release_notes' | 'consolidated_media_player'
+export type BrandAccountFeatureId =
+  | 'embedded_release_notes'
+  | 'consolidated_media_player'
+  | 'discussion_checkpoints'
 
 /**
  * Feature id exported in ApplicationController that aren't mentioned in

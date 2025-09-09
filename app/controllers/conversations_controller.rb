@@ -151,6 +151,7 @@ class ConversationsController < ApplicationController
   include KalturaHelper
   include Api::V1::Conversation
   include Api::V1::Progress
+  include HorizonMode
 
   before_action :require_user, except: [:public_feed]
   before_action :reject_student_view_student
@@ -158,6 +159,7 @@ class ConversationsController < ApplicationController
   before_action :infer_scope, only: %i[index show create update add_recipients add_message remove_messages]
   before_action :normalize_recipients, only: [:create, :add_recipients]
   before_action :infer_tags, only: [:create, :add_recipients]
+  before_action :load_canvas_career, only: %i[index]
 
   # whether it's a bulk private message, or a big group conversation,
   # batch up all delayed jobs to make this more responsive to the user
@@ -169,7 +171,7 @@ class ConversationsController < ApplicationController
   # Returns the paginated list of conversations for the current user, most
   # recent ones first.
   #
-  # @argument scope [String, "unread"|"starred"|"archived"]
+  # @argument scope [String, "unread"|"starred"|"archived"|"sent"]
   #   When set, only return conversations of the specified type. For example,
   #   set to "unread" to return only conversations that haven't been read.
   #   The default behavior is to return all non-archived conversations (i.e.
@@ -281,11 +283,11 @@ class ConversationsController < ApplicationController
         if params[:include_all_conversation_ids]
           @conversations_json = { conversations: @conversations_json, conversation_ids: @conversations_scope.conversation_ids }
         end
-        InstStatsd::Statsd.increment("inbox.visit.scope.inbox.pages_loaded.legacy") if params[:scope] == "inbox"
-        InstStatsd::Statsd.increment("inbox.visit.scope.unread.pages_loaded.legacy") if params[:scope] == "unread"
-        InstStatsd::Statsd.increment("inbox.visit.scope.sent.pages_loaded.legacy") if params[:scope] == "sent"
-        InstStatsd::Statsd.increment("inbox.visit.scope.starred.pages_loaded.legacy") if params[:scope] == "starred"
-        InstStatsd::Statsd.increment("inbox.visit.scope.archived.pages_loaded.legacy") if params[:scope] == "archived"
+        InstStatsd::Statsd.distributed_increment("inbox.visit.scope.inbox.pages_loaded.legacy") if params[:scope] == "inbox"
+        InstStatsd::Statsd.distributed_increment("inbox.visit.scope.unread.pages_loaded.legacy") if params[:scope] == "unread"
+        InstStatsd::Statsd.distributed_increment("inbox.visit.scope.sent.pages_loaded.legacy") if params[:scope] == "sent"
+        InstStatsd::Statsd.distributed_increment("inbox.visit.scope.starred.pages_loaded.legacy") if params[:scope] == "starred"
+        InstStatsd::Statsd.distributed_increment("inbox.visit.scope.archived.pages_loaded.legacy") if params[:scope] == "archived"
         render json: @conversations_json
       end
       format.html do
@@ -308,22 +310,17 @@ class ConversationsController < ApplicationController
         hash[:INBOX_AUTO_RESPONSE_ENABLED] = Account.site_admin.feature_enabled?(:inbox_settings) &&
                                              @domain_root_account.enable_inbox_auto_response? &&
                                              (!is_student || (is_student && !@domain_root_account.disable_inbox_auto_response_for_students?))
-
+        translation_flags = Translation.get_translation_flags(@domain_root_account.feature_enabled?(:translate_inbox_messages), @domain_root_account)
         js_env({
                  CONVERSATIONS: hash,
                  apollo_caching: Account.site_admin.feature_enabled?(:apollo_caching),
                  conversation_cache_key: Base64.encode64("#{@current_user.uuid}jamDN74lLSmfnmo74Hb6snyBnmc6q"),
                  react_inbox_labels: Account.site_admin.feature_enabled?(:react_inbox_labels),
-                 inbox_translation_languages: @domain_root_account.feature_enabled?(:translate_inbox_messages) ? Translation.languages : [],
+                 inbox_translation_languages: @domain_root_account.feature_enabled?(:translate_inbox_messages) ? Translation.languages(translation_flags) : [],
                  inbox_translation_enabled: @domain_root_account.feature_enabled?(:translate_inbox_messages)
                })
         @page_title = t("Inbox")
-        InstStatsd::Statsd.increment("inbox.visit.react")
-        InstStatsd::Statsd.count("inbox.visit.scope.inbox.count.react", @current_user.conversations.default.size)
-        InstStatsd::Statsd.count("inbox.visit.scope.sent.count.react", @current_user.all_conversations.sent.size)
-        InstStatsd::Statsd.count("inbox.visit.scope.unread.count.react", @current_user.conversations.unread.size)
-        InstStatsd::Statsd.count("inbox.visit.scope.starred.count.react", @current_user.starred_conversations.size)
-        InstStatsd::Statsd.count("inbox.visit.scope.archived.count.react", @current_user.conversations.archived.size)
+        InstStatsd::Statsd.distributed_increment("inbox.visit.react")
         css_bundle :canvas_inbox
         js_bundle :inbox
         render html: "", layout: true
@@ -401,9 +398,7 @@ class ConversationsController < ApplicationController
     if params[:context_code].present?
       context = Context.find_by_asset_string(params[:context_code])
 
-      recipients_are_instructors = all_recipients_are_instructors?(context, @recipients)
-
-      if context.is_a?(Course) && !recipients_are_instructors && !observer_to_linked_students(@recipients) && !context.grants_right?(@current_user, session, :send_messages)
+      if context.is_a?(Course) && missing_right_to_send_any_recipient(@recipients, context) && !context.grants_right?(@current_user, session, :send_messages)
         return render_error("Unable to send messages to users in #{context.name}", "")
       elsif !valid_context?(context)
         return render_error("context_code", "invalid")
@@ -458,20 +453,20 @@ class ConversationsController < ApplicationController
                                            group: batch_group_messages)
 
         InstStatsd::Statsd.count("inbox.conversation.created.legacy", batch.recipient_count)
-        InstStatsd::Statsd.increment("inbox.message.sent.legacy")
-        InstStatsd::Statsd.increment("inbox.conversation.sent.legacy")
+        InstStatsd::Statsd.distributed_increment("inbox.message.sent.legacy")
+        InstStatsd::Statsd.distributed_increment("inbox.conversation.sent.legacy")
         if message.has_media_objects || params[:media_comment_id]
-          InstStatsd::Statsd.increment("inbox.message.sent.media.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.message.sent.media.legacy")
         end
         if !message[:attachment_ids].nil? && params[:attachment_ids] != ""
-          InstStatsd::Statsd.increment("inbox.message.sent.attachment.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.message.sent.attachment.legacy")
         end
         InstStatsd::Statsd.count("inbox.message.sent.recipients.legacy", @recipients.count)
         if context_type == "Account" || context_type.nil?
-          InstStatsd::Statsd.increment("inbox.conversation.sent.account_context.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.conversation.sent.account_context.legacy")
         end
         if params[:bulk_message] == "1"
-          InstStatsd::Statsd.increment("inbox.conversation.sent.individual_message_option.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.conversation.sent.individual_message_option.legacy")
         end
         if mode == :async
           headers["X-Conversation-Batch-Id"] = batch.id.to_s
@@ -487,20 +482,20 @@ class ConversationsController < ApplicationController
       else
         @conversation = @current_user.initiate_conversation(@recipients, !group_conversation, subject: params[:subject], context_type:, context_id:)
         @conversation.add_message(message, tags: @tags, update_for_sender: false, cc_author: true)
-        InstStatsd::Statsd.increment("inbox.conversation.created.legacy")
-        InstStatsd::Statsd.increment("inbox.message.sent.legacy")
-        InstStatsd::Statsd.increment("inbox.conversation.sent.legacy")
+        InstStatsd::Statsd.distributed_increment("inbox.conversation.created.legacy")
+        InstStatsd::Statsd.distributed_increment("inbox.message.sent.legacy")
+        InstStatsd::Statsd.distributed_increment("inbox.conversation.sent.legacy")
         if params[:bulk_message] == "1"
-          InstStatsd::Statsd.increment("inbox.conversation.sent.individual_message_option.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.conversation.sent.individual_message_option.legacy")
         end
         if context_type == "Account" || context_type.nil?
-          InstStatsd::Statsd.increment("inbox.conversation.sent.account_context.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.conversation.sent.account_context.legacy")
         end
         if message.has_media_objects || params[:media_comment_id]
-          InstStatsd::Statsd.increment("inbox.message.sent.media.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.message.sent.media.legacy")
         end
         if !message[:attachment_ids].nil? && message[:attachment_ids] != ""
-          InstStatsd::Statsd.increment("inbox.message.sent.attachment.legacy")
+          InstStatsd::Statsd.distributed_increment("inbox.message.sent.attachment.legacy")
         end
         InstStatsd::Statsd.count("inbox.message.sent.recipients.legacy", @recipients.count)
         render json: [conversation_json(@conversation.reload, @current_user, session, include_indirect_participants: true, messages: [message])], status: :created
@@ -718,11 +713,11 @@ class ConversationsController < ApplicationController
   def update
     prev_conversation_state = @conversation.deep_dup
     if @conversation.update(params.require(:conversation).permit(*API_ALLOWED_FIELDS))
-      InstStatsd::Statsd.increment("inbox.conversation.archived.legacy") if params.require(:conversation)["workflow_state"] == "archived"
-      InstStatsd::Statsd.increment("inbox.conversation.unarchived.legacy") if ["read", "unread"].include?(params.require(:conversation)["workflow_state"]) && prev_conversation_state.workflow_state == "archived"
-      InstStatsd::Statsd.increment("inbox.conversation.starred.legacy") if ActiveModel::Type::Boolean.new.cast(params[:conversation][:starred]) && !prev_conversation_state.starred
-      InstStatsd::Statsd.increment("inbox.conversation.unstarred.legacy") if !ActiveModel::Type::Boolean.new.cast(params[:conversation][:starred]) && prev_conversation_state.starred
-      InstStatsd::Statsd.increment("inbox.conversation.unread.legacy") if params.require(:conversation)["workflow_state"] == "unread" && prev_conversation_state.workflow_state == "read"
+      InstStatsd::Statsd.distributed_increment("inbox.conversation.archived.legacy") if params.require(:conversation)["workflow_state"] == "archived"
+      InstStatsd::Statsd.distributed_increment("inbox.conversation.unarchived.legacy") if ["read", "unread"].include?(params.require(:conversation)["workflow_state"]) && prev_conversation_state.workflow_state == "archived"
+      InstStatsd::Statsd.distributed_increment("inbox.conversation.starred.legacy") if ActiveModel::Type::Boolean.new.cast(params[:conversation][:starred]) && !prev_conversation_state.starred
+      InstStatsd::Statsd.distributed_increment("inbox.conversation.unstarred.legacy") if !ActiveModel::Type::Boolean.new.cast(params[:conversation][:starred]) && prev_conversation_state.starred
+      InstStatsd::Statsd.distributed_increment("inbox.conversation.unread.legacy") if params.require(:conversation)["workflow_state"] == "unread" && prev_conversation_state.workflow_state == "read"
       render json: conversation_json(@conversation, @current_user, session)
     else
       render json: @conversation.errors, status: :bad_request
@@ -966,13 +961,13 @@ class ConversationsController < ApplicationController
       media_comment_id: params[:media_comment_id],
       media_comment_type: params[:media_comment_type]
     )
-    InstStatsd::Statsd.increment("inbox.message.sent.legacy")
-    InstStatsd::Statsd.increment("inbox.message.sent.isReply.legacy")
+    InstStatsd::Statsd.distributed_increment("inbox.message.sent.legacy")
+    InstStatsd::Statsd.distributed_increment("inbox.message.sent.isReply.legacy")
     if params[:media_comment_id] || ConversationMessage.where(id: message[:message]&.id).first&.has_media_objects
-      InstStatsd::Statsd.increment("inbox.message.sent.media.legacy")
+      InstStatsd::Statsd.distributed_increment("inbox.message.sent.media.legacy")
     end
     if !message[:message].nil? && !message[:message][:attachment_ids].nil? && message[:message][:attachment_ids] != ""
-      InstStatsd::Statsd.increment("inbox.message.sent.attachment.legacy")
+      InstStatsd::Statsd.distributed_increment("inbox.message.sent.attachment.legacy")
     end
     InstStatsd::Statsd.count("inbox.message.sent.recipients.legacy", message[:recipients_count])
     render json: message[:message].nil? ? [] : conversation_json(@conversation.reload, @current_user, session, messages: [message[:message]]), status: message[:status]

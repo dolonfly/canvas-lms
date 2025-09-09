@@ -91,7 +91,7 @@ describe RichContentApiController do
 
       post "generate", params: { course_id: @course.id, prompt: "bad input", type_of_request: "generate" }, format: "json"
 
-      expect(response.status).to eq(429)
+      expect(response).to have_http_status(:too_many_requests)
       expect(response.parsed_body["error"]).to include("1")
     end
 
@@ -101,7 +101,7 @@ describe RichContentApiController do
 
       post "generate", params: { course_id: @course.id, prompt: "nope", type_of_request: "generate" }, format: "json"
 
-      expect(response).to be_unauthorized
+      expect(response).to be_forbidden
     end
 
     it "returns an error if there is no llm config" do

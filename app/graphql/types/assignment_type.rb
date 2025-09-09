@@ -26,6 +26,7 @@ module Types
     implements Interfaces::TimestampInterface
     implements Interfaces::ModuleItemInterface
     implements Interfaces::LegacyIDInterface
+    implements Interfaces::AssignedDatesInterface
 
     alias_method :assignment, :object
 
@@ -48,6 +49,13 @@ module Types
     class AssignmentGradingType < Types::BaseEnum
       graphql_name "GradingType"
       Assignment::ALLOWED_GRADING_TYPES.each { |type| value(type) }
+    end
+
+    class GradingRole < Types::BaseEnum
+      description "The grading role of the current user for this assignment"
+      value "moderator", "User is a moderator for the assignment"
+      value "provisional_grader", "User is a provisional grader for the assignment"
+      value "grader", "User is a standard grader for the assignment"
     end
 
     class AssignmentPeerReviews < ApplicationObjectType
@@ -121,6 +129,19 @@ module Types
       end
     end
 
+    class AssignmentRubricAssessmentType < ApplicationObjectType
+      description "RubricAssessments on an Assignment"
+
+      field :assessments_count,
+            Int,
+            "The count of RubricAssessments on an Assignment.",
+            null: true
+
+      def assessments_count
+        Loaders::AssignmentRubricAssessmentsCountLoader.load(object)
+      end
+    end
+
     class AssignmentScoreStatisticType < ApplicationObjectType
       graphql_name "AssignmentScoreStatistic"
       description "Statistics for an Assignment"
@@ -155,6 +176,31 @@ module Types
             null: true
     end
 
+    class AnonymousStudentIdentityType < ApplicationObjectType
+      description "An anonymous student identity"
+
+      field :anonymous_id, ID, null: false
+      field :name, String, null: false
+      field :position, Int, null: false
+    end
+
+    class AssignedStudentsFilterInputType < Types::BaseInputObject
+      graphql_name "AssignedStudentsFilter"
+
+      argument :search_term,
+               String,
+               required: false,
+               prepare: :prepare_search_term
+
+      def prepare_search_term(term)
+        if term.presence && term.length < SearchTermHelper::MIN_SEARCH_TERM_LENGTH
+          raise GraphQL::ExecutionError, "search term must be at least #{SearchTermHelper::MIN_SEARCH_TERM_LENGTH} characters"
+        end
+
+        term
+      end
+    end
+
     global_id_field :id
 
     field :name, String, null: true
@@ -175,6 +221,27 @@ module Types
       assignment.restrict_quantitative_data?(current_user, check_extra_permissions)
     end
 
+    field :provisional_grading_locked, Boolean, "Indicates if the user is locked out of provisional grading for this assignment.", null: false
+    def provisional_grading_locked
+      return false unless assignment.moderated_grader_limit_reached?
+      return false unless assignment.context.grants_any_right?(current_user, :manage_grades, :view_all_grades)
+      return false if assignment.grades_published?
+      return false if assignment.permits_moderation?(current_user)
+      return false if assignment.provisional_moderation_graders.where(user: current_user).exists?
+
+      true
+    end
+
+    field :grading_role, GradingRole, "The grading role of the current user for this assignment. Returns null if the user does not have sufficient grading permissions.", null: true
+    def grading_role
+      unless assignment.context.grants_any_right?(current_user, :manage_grades, :view_all_grades)
+        return nil
+      end
+
+      role = assignment.grading_role(current_user)
+      role&.to_s
+    end
+
     def self.overridden_field(field_name, description)
       field field_name, DateTimeType, description, null: true do
         argument :apply_overrides, Boolean, <<~MD, required: false, default_value: true
@@ -185,7 +252,7 @@ module Types
         MD
       end
 
-      define_method(field_name) do |apply_overrides:|
+      define_method(field_name) do |apply_overrides: true|
         load_association(:context).then do |course|
           if !apply_overrides && course.grants_any_right?(current_user, *RoleOverride::GRANULAR_MANAGE_ASSIGNMENT_PERMISSIONS)
             assignment.send(field_name)
@@ -201,6 +268,12 @@ module Types
     overridden_field :unlock_at, "the unlock date (assignment is unlocked after this date)"
 
     field :lock_info, LockInfoType, null: true
+
+    # needed for instructure.atlassian.net/browse/PFS-23713
+    field :suppress_assignment,
+          Boolean,
+          "internal use",
+          null: false
 
     field :post_to_sis,
           Boolean,
@@ -222,6 +295,11 @@ module Types
       assignment
     end
 
+    field :rubric_assessment, AssignmentRubricAssessmentType, null: true
+    def rubric_assessment
+      assignment
+    end
+
     field :anonymous_grading,
           Boolean,
           null: true
@@ -236,8 +314,15 @@ module Types
     field :has_submitted_submissions,
           Boolean,
           "If true, the assignment has been submitted to by at least one student",
-          method: :has_submitted_submissions?,
           null: true
+    def has_submitted_submissions
+      Loaders::AssignmentHasSubmissionsLoader.for.load(assignment.id).then do |has_submissions|
+        # Set cache for both methods that check submission existence
+        assignment.instance_variable_set(:@has_student_submissions, has_submissions)
+        assignment.instance_variable_set(:@has_submitted_submissions, has_submissions)
+        assignment.has_student_submissions?
+      end
+    end
     field :omit_from_final_grade,
           Boolean,
           "If true, the assignment will be omitted from the student's final grade",
@@ -253,6 +338,7 @@ module Types
     field :anonymize_students, Boolean, method: :anonymize_students?, null: true
     field :expects_external_submission, Boolean, method: :expects_external_submission?, null: true
     field :expects_submission, Boolean, method: :expects_submission?, null: true
+    field :grades_published_at, String, null: true
     field :important_dates, Boolean, null: true
     field :in_closed_grading_period, Boolean, method: :in_closed_grading_period?, null: true
     field :non_digital_submission, Boolean, method: :non_digital_submission?, null: true
@@ -261,6 +347,21 @@ module Types
 
     field :can_unpublish, Boolean, method: :can_unpublish?, null: true
     field :due_date_required, Boolean, method: :due_date_required?, null: true
+
+    field :has_rubric, Boolean, null: false
+    def has_rubric
+      Loaders::AssignmentLoaders::HasRubricLoader.load(object.id)
+    end
+    field :muted, Boolean, null: true
+
+    field :assignment_visibility, [ID], null: true do
+      description "Returns empty array if visible to everyone"
+    end
+    def assignment_visibility
+      return unless object.course.grants_any_right?(current_user, :read_as_admin, :manage_grades, *RoleOverride::GRANULAR_MANAGE_ASSIGNMENT_PERMISSIONS)
+
+      Loaders::AssignmentVisibilityLoader.load(object.id)
+    end
 
     field :originality_report_visibility, String, null: true
     def originality_report_visibility
@@ -271,7 +372,7 @@ module Types
 
     field :rubric, RubricType, null: true
     def rubric
-      load_association(:rubric)
+      assignment.active_rubric_association? ? load_association(:rubric) : nil
     end
 
     field :rubric_association, RubricAssociationType, null: true
@@ -368,7 +469,11 @@ module Types
                                               context: assignment.context,
                                               user: current_user,
                                               in_app: context[:in_app],
-                                              preloaded_attachments:)
+                                              preloaded_attachments:,
+                                              options: {
+                                                domain_root_account: context[:domain_root_account],
+                                              },
+                                              location: assignment.asset_string)
         end
       end
     end
@@ -433,7 +538,7 @@ module Types
 
     field :post_manually, Boolean, null: true
     def post_manually
-      assignment.post_manually?
+      Loaders::AssignmentLoaders::PostManuallyLoader.load(object.id)
     end
 
     field :published, Boolean, null: true
@@ -457,6 +562,9 @@ module Types
           Boolean,
           "specifies all other variables that can determine visiblity.",
           null: false
+    def visible_to_everyone
+      Loaders::DatesOverridableLoader.for.load(assignment).then(&:visible_to_everyone)
+    end
 
     field :assignment_overrides, AssignmentOverrideType.connection_type, null: true
     def assignment_overrides
@@ -464,7 +572,9 @@ module Types
       # overrides... there's also the totally different method found in
       # assignment_overrides_json. they may not return the same results?
       # ¯\_(ツ)_/¯
-      AssignmentOverrideApplicator.overrides_for_assignment_and_user(assignment, current_user)
+      Loaders::DatesOverridableLoader.for.load(assignment).then do |preloaded_assignment|
+        AssignmentOverrideApplicator.overrides_for_assignment_and_user(preloaded_assignment, current_user)
+      end
     end
 
     field :has_group_category,
@@ -478,6 +588,19 @@ module Types
           "specifies that students are being graded as a group (as opposed to being graded individually).",
           method: :grade_as_group?,
           null: false
+
+    field :rubric_self_assessment_enabled,
+          Boolean,
+          "specifies that students can self-assess using the assignment rubric.",
+          null: true
+
+    field :can_update_rubric_self_assessment,
+          Boolean,
+          "specifies that the current user can update the rubric self-assessment.",
+          null: true
+    def can_update_rubric_self_assessment
+      assignment.can_update_rubric_self_assessment?
+    end
 
     field :group_set, GroupSetType, null: true
     def group_set
@@ -500,7 +623,9 @@ module Types
       SubmissionSearch.new(assignment, current_user, session, filter).search
     end
 
-    field :my_sub_assignment_submissions_connection, SubmissionType.connection_type, null: true
+    field :my_sub_assignment_submissions_connection, SubmissionType.connection_type, null: true do
+      description "submissions for sub-assignments belonging to the current user"
+    end
     def my_sub_assignment_submissions_connection
       return nil if current_user.nil?
 
@@ -508,6 +633,8 @@ module Types
         submissions.active.where(user_id: current_user)
       end
     end
+
+    field :grading_standard_id, ID, null: true
 
     field :grading_standard, GradingStandardType, null: true
     def grading_standard
@@ -529,6 +656,22 @@ module Types
                   ]).then do
         students = assignment.representatives(user: current_user)
         scope.where(user_id: students)
+      end
+    end
+
+    field :lti_asset_processors_connection, LtiAssetProcessorType.connection_type, null: true
+    def lti_asset_processors_connection
+      load_association(:context).then do |course|
+        next unless course.root_account.feature_enabled?(:lti_asset_processor)
+
+        # Check if user has manage_grades permission or if student can read their own grade
+        if course.grants_right?(current_user, :manage_grades)
+          load_association(:lti_asset_processors)
+        elsif current_user && (submission = assignment.submissions.find_by(user: current_user))
+          if submission.user_can_read_grade?(current_user)
+            load_association(:lti_asset_processors)
+          end
+        end
       end
     end
 
@@ -559,12 +702,12 @@ module Types
       end
     end
 
-    field :has_sub_assignments, Boolean, null: false
+    field :has_sub_assignments, Boolean, "Boolean: returns true if the assignment is checkpointed. A checkpointed assignment has checkpoints ( also known as sub_assignments)", null: false
 
-    field :checkpoints, [CheckpointType], null: true
+    field :checkpoints, [CheckpointType], "A list of checkpoints (also known as sub_assignments) that are associated with this assignment", null: true
     def checkpoints
       load_association(:context).then do |course|
-        if course.root_account&.feature_enabled?(:discussion_checkpoints)
+        if course.discussion_checkpoints_enabled?
           load_association(:sub_assignments)
         end
       end
@@ -589,6 +732,99 @@ module Types
             submissions.graded.count
           end
         end
+      end
+    end
+
+    field :assignment_target_connection, AssignmentOverrideType.connection_type, null: true do
+      argument :order_by, AssignmentTargetSortOrderInputType, required: false
+    end
+    def assignment_target_connection(order_by: nil)
+      load_association(:context).then do |context|
+        return unless context.grants_any_right?(current_user, *RoleOverride::GRANULAR_MANAGE_ASSIGNMENT_PERMISSIONS)
+
+        scope = assignment.all_assignment_overrides.active
+
+        if order_by.present?
+          field = order_by[:field]
+          direction = (order_by[:direction] == "descending") ? "DESC NULLS LAST" : "ASC"
+
+          raise "Sort by field '#{field}' is not supported" unless %w[title due_at lock_at unlock_at].include?(field)
+
+          scope = scope.order(Arel.sql("assignment_overrides.#{field} #{direction}"))
+        end
+
+        scope
+      end
+    end
+
+    field :anonymous_student_identities, [AnonymousStudentIdentityType], null: true
+    def anonymous_student_identities
+      return nil unless assignment.context.grants_right?(current_user, :manage_grades)
+
+      assignment.anonymous_student_identities.values
+    end
+
+    field :auto_grade_assignment_issues, Types::EligibilityIssueType, null: true, description: "Issues related to the assignment"
+    def auto_grade_assignment_issues
+      GraphQLHelpers::AutoGradeEligibilityHelper.validate_assignment(assignment:)
+    end
+
+    field :auto_grade_assignment_errors, [String], null: false, description: "Errors related to the assignment"
+    def auto_grade_assignment_errors
+      issues = GraphQLHelpers::AutoGradeEligibilityHelper.validate_assignment(assignment:)
+      issues ? [issues[:message]] : []
+    end
+
+    field :is_new_quiz, Boolean, null: false, description: "Assignment is connected to a New Quiz"
+    def is_new_quiz
+      assignment.quiz_lti?
+    end
+
+    field :module_items, [Types::ModuleItemType], null: true
+    def module_items
+      case object.submission_types
+      when "online_quiz"
+        load_association(:quiz).then do |quiz|
+          Loaders::AssociationLoader.for(QuizType, :context_module_tags).load(quiz)
+        end
+
+      when "discussion_topic"
+        load_association(:discussion_topic).then do |discussion|
+          Loaders::AssociationLoader.for(DiscussionType, :context_module_tags).load(discussion)
+        end
+      else
+        load_association(:context_module_tags)
+      end
+    end
+
+    field :assigned_students, UserType.connection_type, null: true do
+      argument :filter, AssignedStudentsFilterInputType, required: false
+    end
+    def assigned_students(filter: {})
+      return nil unless assignment.context.grants_right?(current_user, :manage_grades)
+
+      search_term = filter[:search_term].presence
+      scope = assignment.students_with_visibility(assignment.context.participating_students_by_date.not_fake_student)
+
+      if search_term
+        scope = scope.name_like(search_term, "peer_review")
+      end
+
+      scope
+    end
+
+    field :grader_identities_connection, GraderIdentityType.connection_type, null: true do
+      description "Grader identities if moderated assignment"
+    end
+    def grader_identities_connection
+      return nil unless object.moderated_grading? &&
+                        # The current user is an admin, moderator
+                        (object.permits_moderation?(current_user) ||
+                        # or provisional grader
+                        object.moderation_graders.where(user: current_user).exists?)
+
+      Loaders::AssignmentLoaders::OrderedModerationGradersWithSlotTakenLoader.load(object.id).then do |graders|
+        AbstractAssignment.build_grader_identities(graders, anonymize: !object.can_view_other_grader_identities?(current_user))
       end
     end
   end

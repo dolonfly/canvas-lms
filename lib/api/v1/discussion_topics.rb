@@ -88,7 +88,7 @@ module Api::V1::DiscussionTopics
       root_topics = get_root_topic_data(topics, opts[:root_topic_fields])
     end
     # ignore :include_sections_user_count for non-course contexts like groups
-    if opts[:include_sections_user_count] && context && context.is_a?(Course)
+    if opts[:include_sections_user_count] && context.is_a?(Course)
       opts[:context_user_count] = GuardRail.activate(:secondary) { context.enrollments.not_fake.active_or_pending_by_date_ignoring_access.distinct.count(:user_id) }
     end
 
@@ -197,6 +197,11 @@ module Api::V1::DiscussionTopics
     # topic can be announcement
     json[:is_announcement] = topic.is_announcement
 
+    json[:sort_order] = topic.sort_order
+    json[:sort_order_locked] = topic.sort_order_locked
+    json[:expanded] = topic.expanded
+    json[:expanded_locked] = topic.expanded_locked
+
     json
   end
 
@@ -255,7 +260,7 @@ module Api::V1::DiscussionTopics
       topic_course = Course.find_by(id: context.context_id)
     end
 
-    paced_course = topic_course ? topic_course.account.feature_enabled?(:course_paces) && topic_course.enable_course_paces? : nil
+    paced_course = topic_course&.enable_course_paces?
     fields[:in_paced_course] = paced_course if paced_course
 
     locked_json(fields, topic, user, "topic", check_policies: true, deep_check_if_needed: true)
@@ -269,7 +274,7 @@ module Api::V1::DiscussionTopics
         elsif opts[:text_only]
           html_to_text(topic.message, preserve_links: true)
         else
-          api_user_content(topic.message, context)
+          api_user_content(topic.message, context, location: topic.asset_string)
         end
     end
 
@@ -320,7 +325,7 @@ module Api::V1::DiscussionTopics
     if entry.deleted?
       json[:deleted] = true
     else
-      json[:message] = api_user_content(entry.message, context, user)
+      json[:message] = api_user_content(entry.message, context, user, location: entry.asset_string)
     end
 
     json[:user] = user_display_json(entry.user, context) if includes.include?(:display_user)

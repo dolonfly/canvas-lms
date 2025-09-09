@@ -20,14 +20,14 @@
 module Canvas::OAuth
   describe Token do
     let(:code) { "code123code" }
-    let(:key) { DeveloperKey.create! }
+    let(:key) { DeveloperKey.create!(name: "test_key_#{SecureRandom.hex(4)}") }
     let(:user) { User.create! }
     let(:token) { Token.new(key, code) }
 
     def stub_out_cache(client_id = nil, scopes = nil)
       if client_id
         allow(token).to receive_messages(cached_code_entry: '{"client_id": ' + client_id.to_s +
-                        ', "user": ' + user.id.to_s +
+                        ', "user": ' + user.id.to_s + ', "purpose": "' + key.name + '"' +
                         (scopes ? ', "scopes": ' + scopes.to_json : "") + "}")
       else
         allow(token).to receive_messages(cached_code_entry: "{}")
@@ -79,6 +79,12 @@ module Canvas::OAuth
         hash = token.code_data
         expect(hash["client_id"]).to eq key.id
         expect(hash["user"]).to eq user.id
+      end
+    end
+
+    describe "#purpose" do
+      it "returns the key name as the purpose if not set" do
+        expect(token.access_token.purpose).to eq key.name
       end
     end
 
@@ -208,16 +214,18 @@ module Canvas::OAuth
                                      "id" => user.id,
                                      "name" => user.name,
                                      "global_id" => user.global_id.to_s,
-                                     "effective_locale" => "en"
+                                     "effective_locale" => "en",
+                                     "fake_student" => false
                                    })
       end
 
       it "returns the expires_in parameter" do
-        allow(Time).to receive(:now).and_return(DateTime.parse("2015-07-10T09:29:00Z").utc.to_time)
-        access_token = token.access_token
-        access_token.expires_at = DateTime.parse("2015-07-10T10:29:00Z")
-        access_token.save!
-        expect(json["expires_in"]).to eq 3600
+        Timecop.freeze(Time.zone.parse("2015-07-10T09:29:00Z")) do
+          access_token = token.access_token
+          access_token.expires_at = Time.zone.parse("2015-07-10T10:29:00Z")
+          access_token.save!
+          expect(json["expires_in"]).to eq 3600
+        end
       end
 
       it "does not put anything else into the json" do

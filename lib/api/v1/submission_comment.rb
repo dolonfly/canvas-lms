@@ -48,14 +48,15 @@ module Api::V1::SubmissionComment
 
     if submission_comment.media_comment?
       sc_hash["media_comment"] = media_comment_json(
-        media_id: submission_comment.media_comment_id,
-        media_type: submission_comment.media_comment_type
+        { media_id: submission_comment.media_comment_id,
+          media_type: submission_comment.media_comment_type },
+        location: submission_comment.asset_string
       )
     end
 
     unless submission_comment.attachments.blank?
       sc_hash["attachments"] = submission_comment.attachments.map do |a|
-        attachment_json(a, user)
+        attachment_json(a, user, { location: submission_comment.asset_string })
       end
     end
     if @current_user && submission_comment.grants_right?(@current_user, :read_author)
@@ -82,6 +83,11 @@ module Api::V1::SubmissionComment
     comment_methods = display_avatars ? [:avatar_path] : []
 
     submission_comments.map do |comment|
+      # workaround to avoid N+1 query problem in SubmissionComment#serialization_methods
+      if !comment.association(:root_account).loaded? && course.association(:root_account).loaded? && course.root_account.present?
+        comment.root_account = course.root_account
+      end
+
       json = comment.as_json(include_root: false, methods: comment_methods, only: ANONYMOUS_MODERATED_JSON_ATTRIBUTES)
       json[:publishable] = comment.publishable_for?(current_user)
       author_id = comment.author_id.to_s

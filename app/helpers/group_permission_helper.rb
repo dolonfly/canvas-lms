@@ -20,19 +20,19 @@
 module GroupPermissionHelper
   RIGHTS_MAP = {
     add: {
-      collaborative: [:manage_groups, :manage_groups_add],
+      collaborative: [:manage_groups_add],
       non_collaborative: [:manage_tags_add]
     },
     manage: {
-      collaborative: [:manage_groups, :manage_groups_manage],
+      collaborative: [:manage_groups_manage],
       non_collaborative: [:manage_tags_manage]
     },
     delete: {
-      collaborative: [:manage_groups, :manage_groups_delete],
+      collaborative: [:manage_groups_delete],
       non_collaborative: [:manage_tags_delete]
     },
     view: {
-      collaborative: [:manage_groups, *RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS],
+      collaborative: RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS,
       non_collaborative: RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS
     }
   }.freeze
@@ -75,6 +75,12 @@ module GroupPermissionHelper
     rights = determine_rights_for_type(action_category, non_collaborative)
 
     authorized_action(context, current_user, rights)
+  end
+
+  def check_group_context_rights(context:, current_user:, action_category:, non_collaborative: nil)
+    rights = determine_rights_for_type(action_category, non_collaborative)
+
+    context.grants_any_right?(current_user, *rights)
   end
 
   private

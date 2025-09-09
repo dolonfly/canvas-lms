@@ -16,41 +16,61 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, {useState} from 'react'
+import {showFlashError} from '@canvas/alerts/react/FlashAlert'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {Button} from '@instructure/ui-buttons'
 import {Flex} from '@instructure/ui-flex'
+import {Focusable} from '@instructure/ui-focusable'
 import {Heading} from '@instructure/ui-heading'
-import {SignInLinks} from '../shared'
-import {TextInput} from '@instructure/ui-text-input'
 import {Text} from '@instructure/ui-text'
+import {TextInput} from '@instructure/ui-text-input'
+import React, {useEffect, useRef, useState} from 'react'
+import {useNewLogin, useNewLoginData} from '../context'
 import {forgotPassword} from '../services'
-import {showFlashAlert} from '@canvas/alerts/react/FlashAlert'
-import {useNewLogin} from '../context/NewLoginContext'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {createErrorMessage, EMAIL_REGEX} from '../shared/helpers'
+import {assignLocation} from '@canvas/util/globalUtils'
+import {LOGIN_ENTRY_URL} from '../routes/routes'
 
-const I18n = useI18nScope('new_login')
+const I18n = createI18nScope('new_login')
 
 const ForgotPassword = () => {
-  const {isUiActionPending, setIsUiActionPending, loginHandleName} = useNewLogin()
+  const {isUiActionPending, setIsUiActionPending} = useNewLogin()
+  const {loginHandleName} = useNewLoginData()
+
   const [email, setEmail] = useState('')
-  const [isEmailValid, setIsEmailValid] = useState(false)
+  const [emailError, setEmailError] = useState('')
   const [emailSent, setEmailSent] = useState(false)
   const [submittedEmail, setSubmittedEmail] = useState('')
 
-  const validateEmail = (value: string) => {
-    setIsEmailValid(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()))
+  const emailInputRef = useRef<HTMLInputElement | null>(null)
+
+  const confirmationHeadingRef = useRef<HTMLHeadingElement | null>(null)
+  useEffect(() => {
+    if (emailSent) {
+      confirmationHeadingRef.current?.focus()
+    }
+  }, [emailSent])
+
+  const validateForm = (): boolean => {
+    setEmailError('')
+
+    if (!EMAIL_REGEX.test(email)) {
+      setEmailError(
+        I18n.t('Please enter a valid %{loginHandleName}.', {
+          loginHandleName: loginHandleName?.toLowerCase(),
+        }),
+      )
+      emailInputRef.current?.focus()
+      return false
+    }
+
+    return true
   }
 
-  const handleForgotPassword = async (event: React.FormEvent) => {
+  const handleForgotPassword = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    if (!isEmailValid) {
-      showFlashAlert({
-        message: I18n.t('Please enter your email address.'),
-        type: 'error',
-      })
-      return
-    }
+    if (isUiActionPending || !validateForm()) return
 
     setIsUiActionPending(true)
 
@@ -60,68 +80,76 @@ const ForgotPassword = () => {
       if (response.status === 200 && response.data?.requested) {
         setSubmittedEmail(email)
         setEmail('')
-        setIsEmailValid(false)
         setEmailSent(true)
-
-        showFlashAlert({
-          message: I18n.t('Password recovery email successfully sent.', {email}),
-          type: 'success',
-        })
       } else {
-        showFlashAlert({
-          message: I18n.t('No account found for this email address.'),
-          type: 'warning',
-        })
+        setEmailError(I18n.t('No account found for this email address.'))
+        emailInputRef.current?.focus()
       }
-    } catch (_error: unknown) {
-      showFlashAlert({
-        message: I18n.t('Something went wrong. Please try again later.'),
-        type: 'error',
-      })
+    } catch (error: any) {
+      showFlashError(I18n.t('Something went wrong. Please try again later.'))(error)
     } finally {
       setIsUiActionPending(false)
     }
   }
 
-  const handleEmailChange = (_: any, value: string) => {
-    setEmail(value)
-    validateEmail(value)
+  const handleEmailChange = (_: React.ChangeEvent<HTMLInputElement>, value: string) => {
+    setEmail(value.trim())
   }
+
+  const handleCancel = () => assignLocation(LOGIN_ENTRY_URL)
 
   const passwordRecoveryForm = (
     <>
-      <Text>
-        {I18n.t(
-          'Enter your %{loginHandleName} and we’ll send you a link to change your password.',
-          {loginHandleName}
-        )}
-      </Text>
+      <Flex direction="column" gap="small">
+        <Heading as="h1" level="h2">
+          {I18n.t('Forgot password?')}
+        </Heading>
 
-      <form onSubmit={handleForgotPassword}>
+        <Text>
+          {I18n.t(
+            'Enter your %{loginHandleName} and we’ll send you a link to change your password.',
+            {loginHandleName: loginHandleName?.toLowerCase()},
+          )}
+        </Text>
+      </Flex>
+
+      <form onSubmit={handleForgotPassword} noValidate={true}>
         <Flex direction="column" gap="large">
           <TextInput
+            aria-describedby="emailHelp"
+            autoComplete="email"
+            disabled={isUiActionPending}
             id="email"
+            inputRef={inputElement => (emailInputRef.current = inputElement)}
+            messages={createErrorMessage(emailError)}
+            onChange={handleEmailChange}
             renderLabel={loginHandleName}
             type="email"
             value={email}
-            onChange={handleEmailChange}
-            autoComplete="email"
-            aria-describedby="emailHelp"
+            isRequired={true}
+            data-testid="email-input"
           />
 
-          <Flex direction="column" gap="small">
+          <Flex direction="row" gap="small">
+            <Button
+              color="secondary"
+              display="block"
+              onClick={handleCancel}
+              disabled={isUiActionPending}
+              data-testid="cancel-button"
+            >
+              {I18n.t('Back')}
+            </Button>
+
             <Button
               type="submit"
               color="primary"
               display="block"
-              disabled={!isEmailValid || isUiActionPending}
+              disabled={isUiActionPending}
+              data-testid="submit-button"
             >
-              {I18n.t('Submit')}
+              {I18n.t('Next')}
             </Button>
-
-            <Flex.Item align="center">
-              <SignInLinks />
-            </Flex.Item>
           </Flex>
         </Flex>
       </form>
@@ -130,25 +158,45 @@ const ForgotPassword = () => {
 
   const confirmationMessage = (
     <>
-      <Text>
-        {I18n.t(
-          'A recovery email has been sent to %{email}. Please check your inbox and follow the instructions to reset your password. This may take up to 30 minutes. If you don’t receive an email, be sure to check your spam folder.',
-          {email: submittedEmail}
-        )}
-      </Text>
+      <Flex direction="column" gap="small">
+        <Focusable>
+          {({attachRef}) => (
+            <Heading
+              as="h1"
+              data-testid="confirmation-heading"
+              elementRef={el => {
+                attachRef(el)
+                confirmationHeadingRef.current = el as HTMLHeadingElement | null
+              }}
+              level="h2"
+              tabIndex={-1}
+            >
+              {I18n.t('Check Your Email')}
+            </Heading>
+          )}
+        </Focusable>
 
-      <Flex.Item align="center" overflowY="visible" overflowX="visible">
-        <SignInLinks />
-      </Flex.Item>
+        <Text data-testid="confirmation-message">
+          {I18n.t(
+            'A recovery email has been sent to %{email}. Please check your inbox and follow the instructions to reset your password. This may take up to 10 minutes. If you don’t receive an email, be sure to check your spam folder.',
+            {email: submittedEmail},
+          )}
+        </Text>
+      </Flex>
+
+      <Button
+        color="secondary"
+        display="block"
+        onClick={handleCancel}
+        data-testid="confirmation-back-button"
+      >
+        {I18n.t('Back')}
+      </Button>
     </>
   )
 
   return (
     <Flex direction="column" gap="large">
-      <Heading level="h2" as="h1">
-        {I18n.t('Forgot Password')}
-      </Heading>
-
       {emailSent ? confirmationMessage : passwordRecoveryForm}
     </Flex>
   )

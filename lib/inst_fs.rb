@@ -176,7 +176,7 @@ module InstFS
       # >   file_object: File.open("public/images/a.png")
       # > )
 
-      token = direct_upload_jwt
+      token = direct_upload_jwt(file_object)
       url = "#{app_host}/files?token=#{token}"
 
       data = {}
@@ -409,8 +409,7 @@ module InstFS
         host: options[:oauth_host]
       }
       claims[:tenant_auth] = @token.tenant_auth if @token&.tenant_auth.present?
-      original_url = parse_original_url(options[:original_url])
-      claims[:original_url] = original_url if original_url.present?
+      claims[:fallback_url] = options[:fallback_url] if options[:fallback_url].present?
       if options[:acting_as] && options[:acting_as] != options[:user]
         claims[:acting_as_user_id] = options[:acting_as].global_id.to_s
       end
@@ -436,14 +435,17 @@ module InstFS
       service_jwt(claims, LONG_JWT_EXPIRATION)
     end
 
-    def direct_upload_jwt
-      service_jwt({
-                    iat: Time.now.utc.to_i,
-                    user_id: nil,
-                    host: "canvas",
-                    resource: "/files",
-                  },
-                  LONG_JWT_EXPIRATION)
+    def direct_upload_jwt(file_object)
+      claims = {
+        iat: Time.now.utc.to_i,
+        user_id: nil,
+        host: "canvas",
+        resource: "/files",
+      }
+
+      claims[:filesize] = file_object.size if file_object.respond_to?(:size)
+
+      service_jwt(claims, LONG_JWT_EXPIRATION)
     end
 
     def session_jwt(user, host)
@@ -498,23 +500,6 @@ module InstFS
       }
       jwt_contents[:tenant_auth] = attachment.instfs_tenant_auth if attachment.instfs_tenant_auth.present?
       service_jwt(jwt_contents, SHORT_JWT_EXPIRATION)
-    end
-
-    def parse_original_url(url)
-      if url
-        uri = Addressable::URI.parse(url)
-        query = (uri.query_values || {}).with_indifferent_access
-        # We only want to redirect once, if the redirect param is present then we already redirected.
-        # In which case we don't send the original_url param again
-        if Canvas::Plugin.value_to_boolean(query[:redirect])
-          nil
-        else
-          query[:redirect] = true
-          query[:no_cache] = true
-          uri.query_values = query
-          uri.to_s
-        end
-      end
     end
 
     def amend_claims_for_access_token(claims, access_token, root_account)

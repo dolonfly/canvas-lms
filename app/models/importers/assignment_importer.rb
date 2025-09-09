@@ -114,6 +114,7 @@ module Importers
       item ||= context.assignments.temp_record # new(:context => context)
 
       item.updating_user = migration.user
+      item.saving_user = migration.user
       item.saved_by = :migration
       item.mark_as_importing!(migration)
       master_migration = migration&.for_master_course_import? # propagate null dates only for blueprint syncs
@@ -193,10 +194,16 @@ module Importers
           item.submission_types = "not_graded"
         end
       end
-      if hash[:assignment_group_migration_id]
-        item.assignment_group = context.assignment_groups.active.where(migration_id: hash[:assignment_group_migration_id]).first
+
+      if Account.site_admin.feature_enabled?(:wiki_page_mastery_path_no_assignment_group)
+        if hash[:submission_types] == "wiki_page" && context.conditional_release?
+          item.assignment_group = nil
+        else
+          associate_assignment_group(hash, context, item)
+        end
+      else
+        associate_assignment_group(hash, context, item)
       end
-      item.assignment_group ||= context.assignment_groups.active.where(name: t(:imported_assignments_group, "Imported Assignments")).first_or_create
 
       if item.points_possible.to_i < 0
         item.points_possible = 0
@@ -228,7 +235,7 @@ module Importers
         rubric = context.rubrics.where(migration_id: hash[:rubric_migration_id]).first if hash[:rubric_migration_id]
         rubric ||= context.available_rubric(hash[:rubric_id]) if hash[:rubric_id]
         if rubric
-          assoc = rubric.associate_with(item, context, purpose: "grading", skip_updating_points_possible: true)
+          assoc = rubric.associate_with(item, context, purpose: "grading", skip_updating_points_possible: true, skip_updating_rubric_association_count: true)
           assoc.use_for_grading = !!hash[:rubric_use_for_grading] if hash.key?(:rubric_use_for_grading)
           assoc.hide_score_total = !!hash[:rubric_hide_score_total] if hash.key?(:rubric_hide_score_total)
           assoc.hide_points = !!hash[:rubric_hide_points] if hash.key?(:rubric_hide_points)
@@ -239,6 +246,7 @@ module Importers
             assoc.summary_data[:saved_comments] = hash[:saved_rubric_comments]
           end
           assoc.skip_updating_points_possible = true
+          assoc.skip_updating_rubric_association_count = true
           assoc.save
 
           item.points_possible ||= rubric.points_possible if item.infer_grading_type == "points"
@@ -294,7 +302,7 @@ module Importers
           # the quiz is published because it has an assignment
           q.assignment = item
           q.generate_quiz_data
-          q.published_at = Time.now
+          q.published_at = Time.zone.now
           q.workflow_state = "available"
           q.save
         end
@@ -418,7 +426,7 @@ module Importers
 
     def self.handle_sub_assignments(assignment_hash, parent_item, migration)
       return unless assignment_hash[:sub_assignments].present?
-      return unless parent_item.context.root_account.feature_enabled?(:discussion_checkpoints)
+      return unless parent_item.context.discussion_checkpoints_enabled?
 
       parent_item.has_sub_assignments = true
 
@@ -445,6 +453,7 @@ module Importers
 
       if tool_hash
         active_proxies = Lti::ToolProxy.find_active_proxies_for_context_by_vendor_code_and_product_code(context:, vendor_code: tool_hash["vendor_code"], product_code: tool_hash["product_code"])
+        return migration.add_warning(I18n.t("The export had an improperly attached similarity detection tool, so the import won't include it")) if active_proxies.blank? && tool_hash["vendor_code"].blank? && tool_hash["product_code"].blank? && Account.site_admin.feature_enabled?(:exclude_deleted_lti2_tools_on_assignment_export)
         return migration.add_warning(I18n.t("We were unable to find a tool profile match for vendor_code: \"%{vendor_code}\" product_code: \"%{product_code}\".", vendor_code: tool_hash["vendor_code"], product_code: tool_hash["product_code"])) if active_proxies.blank?
       else
         item.assignment_configuration_tool_lookups.destroy_all if migration.for_master_course_import?
@@ -498,7 +507,7 @@ module Importers
             # In some cases the tool ID in the source context does not match the
             # tool ID from the destination context. This check should help find
             # a matching tool correctly.
-            tool = ContextExternalTool.find_external_tool(hash[:external_tool_url], context, tool_id)
+            tool = Lti::ToolFinder.from_url(hash[:external_tool_url], context, preferred_tool_id: tool_id)
 
             # If no match is found in the first search, fall back on using the tool ID
             # provided in the migration hash if a tool with that ID is present
@@ -507,7 +516,7 @@ module Importers
 
             tag.content_id = tool&.id
           elsif hash[:external_tool_migration_id]
-            tool = context.context_external_tools.where(migration_id: hash[:external_tool_migration_id]).first
+            tool = Lti::ContextToolFinder.only_for(context).where(migration_id: hash[:external_tool_migration_id]).first
             tag.content_id = tool.id if tool
           end
           if hash[:external_tool_data_json]
@@ -634,7 +643,7 @@ module Importers
         item.save_without_broadcasting!
         return item
       end
-      shift_options = CourseContentImporter.shift_date_options(migration.course, migration.date_shift_options)
+      shift_options = CourseContentImporter.shift_date_options_from_migration(migration)
 
       original_due_at = item.due_at
       original_lock_at = item.lock_at
@@ -646,7 +655,7 @@ module Importers
       item.lock_at = CourseContentImporter.shift_date(item.lock_at, shift_options) if item.lock_at
       item.unlock_at = CourseContentImporter.shift_date(item.unlock_at, shift_options) if item.unlock_at
       item.peer_reviews_due_at = CourseContentImporter.shift_date(item.peer_reviews_due_at, shift_options) if item.peer_reviews_due_at
-      item.needs_update_cached_due_dates = item.update_cached_due_dates?
+      item.needs_update_cached_due_dates ||= item.update_cached_due_dates?
 
       if item.invalid? && CourseContentImporter.error_on_dates?(item, ATTRIBUTES_FOR_DATE_SHIFT)
         migration.add_warning(t("Couldn't adjust dates on assignment %{name} (ID %{id})", name: item.title, id: item.id&.to_s))
@@ -665,6 +674,13 @@ module Importers
 
       item.save_without_broadcasting!
       item
+    end
+
+    def self.associate_assignment_group(hash, context, item)
+      if hash[:assignment_group_migration_id]
+        item.assignment_group = context.assignment_groups.active.where(migration_id: hash[:assignment_group_migration_id]).first
+      end
+      item.assignment_group ||= context.assignment_groups.active.where(name: t(:imported_assignments_group, "Imported Assignments")).first_or_create
     end
   end
 end

@@ -16,57 +16,49 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
-import classNames from 'classnames'
 import {Flex} from '@instructure/ui-flex'
 import {Img} from '@instructure/ui-img'
 import {Responsive} from '@instructure/ui-responsive'
-import {Text} from '@instructure/ui-text'
-import {TruncateText} from '@instructure/ui-truncate-text'
-import {useNewLogin} from '../context/NewLoginContext'
+import {canvas} from '@instructure/ui-themes'
+import React from 'react'
+import {useNewLoginData} from '../context'
 
-interface Props {
-  className?: string
-}
+const LoginLogo = () => {
+  const {loginLogoUrl, loginLogoText} = useNewLoginData()
 
-const LoginLogo = ({className}: Props) => {
-  const {loginLogoUrl: src, loginLogoAlt: alt} = useNewLogin()
-
-  if (!src) return null
+  if (!loginLogoUrl) return null
 
   return (
     <Responsive
       match="media"
       query={{
-        tablet: {minWidth: '48rem'},
-        desktop: {minWidth: '75rem'},
+        tablet: {minWidth: canvas.breakpoints.tablet}, // 768px
       }}
     >
       {(_props, matches) => {
-        const largerScreen = matches?.includes('desktop')
+        const isTablet = matches?.includes('tablet')
+        const width = isTablet ? '18.75rem' : '17.5rem' // 300px, 280px
+        const height = isTablet ? '7.5rem' : '5rem' // 120px, 80px
+
         return (
           <Flex
             direction="column"
-            height={largerScreen ? '7.5rem' : '5rem'}
-            gap="small"
+            height={height}
+            gap="x-small"
             alignItems="center"
             justifyItems="center"
-            className={classNames(className)}
           >
-            <Flex.Item
-              style={{maxWidth: largerScreen ? '18.75rem' : '11.25rem'}}
-              shouldShrink={true}
-            >
-              <Img width="100%" height="100%" constrain="contain" src={src} alt={alt} />
+            <Flex.Item width={width} shouldShrink={true} shouldGrow={true}>
+              <Img
+                alt={loginLogoText ?? ''}
+                constrain="contain"
+                data-testid="login-logo-img"
+                display="block"
+                height="100%"
+                src={loginLogoUrl}
+                width="100%"
+              />
             </Flex.Item>
-
-            {alt && (
-              <Flex.Item textAlign="center">
-                <Text size="x-small">
-                  <TruncateText>{alt}</TruncateText>
-                </Text>
-              </Flex.Item>
-            )}
           </Flex>
         )
       }}

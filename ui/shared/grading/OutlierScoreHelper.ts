@@ -1,4 +1,3 @@
-// @ts-nocheck
 /*
  * Copyright (C) 2016 - present Instructure, Inc.
  *
@@ -25,6 +24,7 @@ function isNegativePoints(score: number | null) {
   return typeof score === 'number' && score < 0
 }
 
+// @ts-expect-error
 export function isUnusuallyHigh(score, pointsPossible) {
   if (pointsPossible === 0 || pointsPossible == null) {
     return false
@@ -36,9 +36,11 @@ export function isUnusuallyHigh(score, pointsPossible) {
 export default class OutlierScoreHelper {
   score: number | null
 
-  pointsPossible: number
+  pointsPossible: number | null
 
-  constructor(score?: number | null, pointsPossible: number) {
+  // @ts-expect-error
+  constructor(score?: number | null, pointsPossible: number | null) {
+    // @ts-expect-error
     this.score = score
     this.pointsPossible = pointsPossible
   }

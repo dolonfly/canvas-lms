@@ -133,14 +133,13 @@ describe "Student Gradebook - Assignment Details" do
         expect(StudentGradesPage.submission_comments.first).to include_text "good job"
       end
 
-      it "does not show submission comments if assignment is muted" do
+      it "does show submission comments if assignment is muted" do
         @asn.ensure_post_policy(post_manually: true)
         @sub.submission_comments.create!(comment: "good job")
         user_session @students[0]
         get "/courses/#{@course.id}/grades"
         muted_row = f("tr#submission_#{@asn.id}")
         expect(muted_row).to contain_jqcss("i[title='Instructor has not posted this grade']")
-        expect(f("a[aria-label='Read comments']").attribute("style")).to eq "visibility: hidden;"
       end
     end
 
@@ -178,7 +177,7 @@ describe "Student Gradebook - Assignment Details" do
     context "discussion Checkpoints" do
       before do
         @course.enroll_student(@students[0], enrollment_state: "active")
-        @course.root_account.enable_feature!(:discussion_checkpoints)
+        @course.account.enable_feature!(:discussion_checkpoints)
         @reply_to_topic, @reply_to_entry = graded_discussion_topic_with_checkpoints(context: @course)
       end
 

@@ -130,7 +130,7 @@ class CourseSection < ActiveRecord::Base
   delegate :available?, to: :course
 
   def concluded?
-    now = Time.now
+    now = Time.zone.now
     if end_at && restrict_enrollments_to_section_dates
       end_at < now
     else
@@ -166,12 +166,7 @@ class CourseSection < ActiveRecord::Base
     can :read and can :delete
 
     given do |user, session|
-      manage_perm = if root_account.feature_enabled? :granular_permissions_manage_users
-                      :allow_course_admin_actions
-                    else
-                      :manage_admin_users
-                    end
-      course.grants_any_right?(user, session, :manage_students, manage_perm)
+      course.grants_any_right?(user, session, :manage_students, :allow_course_admin_actions)
     end
     can :read
 
@@ -245,7 +240,6 @@ class CourseSection < ActiveRecord::Base
   end
 
   def infer_defaults
-    self.root_account_id ||= (course.root_account_id rescue nil) || Account.default.id
     raise "Course required" unless course
 
     self.root_account_id = course.root_account_id || Account.default.id
@@ -282,7 +276,7 @@ class CourseSection < ActiveRecord::Base
 
     all_attrs = { course_id: course.id }
     if root_account_id_changed?
-      all_attrs[:root_account_id] = self.root_account_id
+      all_attrs[:root_account_id] = root_account_id
     end
 
     CourseSection.unique_constraint_retry do
@@ -340,16 +334,20 @@ class CourseSection < ActiveRecord::Base
     move_to_course(course, **)
   end
 
-  def uncrosslist(**)
+  def uncrosslist(**opts)
     return unless self.nonxlist_course_id
 
     if nonxlist_course.workflow_state == "deleted"
       nonxlist_course.workflow_state = "claimed"
       nonxlist_course.save!
+
+      if (user = opts[:updating_user]) && (source = opts[:source])
+        Auditors::Course.record_claimed(nonxlist_course, user, source:)
+      end
     end
     nonxlist_course = self.nonxlist_course
     self.nonxlist_course = nil
-    move_to_course(nonxlist_course, **)
+    move_to_course(nonxlist_course, **opts)
   end
 
   def crosslisted?

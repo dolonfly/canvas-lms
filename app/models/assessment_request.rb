@@ -28,6 +28,7 @@ class AssessmentRequest < ActiveRecord::Base
   belongs_to :assessor_asset, polymorphic: [:submission], polymorphic_prefix: true
   belongs_to :assessor, class_name: "User"
   belongs_to :rubric_association
+  belongs_to :peer_review_sub_assignment, optional: true
   has_many :submission_comments, -> { published }
   has_many :ignores, dependent: :destroy, as: :asset
   belongs_to :rubric_assessment
@@ -113,7 +114,7 @@ class AssessmentRequest < ActiveRecord::Base
 
   def send_reminder!
     @send_reminder = true
-    self.updated_at = Time.now
+    self.updated_at = Time.zone.now
     save!
   ensure
     @send_reminder = nil
@@ -134,7 +135,7 @@ class AssessmentRequest < ActiveRecord::Base
   end
 
   def assessor_name
-    rubric_assessment.assessor_name rescue ((assessor.name rescue nil) || t("#unknown", "Unknown"))
+    rubric_assessment&.assessor_name || assessor.name || t("#unknown", "Unknown")
   end
 
   def incomplete?
@@ -163,7 +164,7 @@ class AssessmentRequest < ActiveRecord::Base
   end
 
   def asset_title
-    (asset.assignment.title rescue asset.title) rescue t("#unknown", "Unknown")
+    asset.assignment.title
   end
 
   def comment_added
@@ -171,7 +172,7 @@ class AssessmentRequest < ActiveRecord::Base
   end
 
   def asset_user_name
-    asset.user.name rescue t("#unknown", "Unknown")
+    asset.user.name
   end
 
   def self.serialization_excludes

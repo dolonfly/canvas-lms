@@ -39,6 +39,7 @@ class Types::DiscussionCheckpointDateSetType < Types::BaseEnum
   value "CourseSection"
   value "Group"
   value "ADHOC"
+  value "Course"
 end
 
 class Mutations::DiscussionCheckpointDate < GraphQL::Schema::InputObject
@@ -47,7 +48,7 @@ class Mutations::DiscussionCheckpointDate < GraphQL::Schema::InputObject
   argument :lock_at, Types::DateTimeType, required: false
   argument :set_id, Integer, required: false
   argument :set_type, Types::DiscussionCheckpointDateSetType, required: false
-  argument :student_ids, [Integer], required: false
+  argument :student_ids, [ID], required: false
   argument :type, Types::DiscussionCheckpointDateType, required: true
   argument :unlock_at, Types::DateTimeType, required: false
 
@@ -76,6 +77,8 @@ class Mutations::DiscussionBase < Mutations::BaseMutation
   argument :allow_rating, Boolean, required: false
   argument :checkpoints, [Mutations::DiscussionCheckpoints], required: false
   argument :delayed_post_at, Types::DateTimeType, required: false
+  argument :expanded, Boolean, required: false
+  argument :expanded_locked, Boolean, required: false
   argument :file_id, ID, required: false, prepare: GraphQLHelpers.relay_or_legacy_id_prepare_func("Attachment")
   argument :group_category_id, ID, required: false
   argument :lock_at, Types::DateTimeType, required: false
@@ -87,18 +90,30 @@ class Mutations::DiscussionBase < Mutations::BaseMutation
   argument :podcast_has_student_posts, Boolean, required: false
   argument :published, Boolean, required: false
   argument :require_initial_post, Boolean, required: false
+  argument :sort_order, Types::DiscussionSortOrderType, required: false
+  argument :sort_order_locked, Boolean, required: false
   argument :specific_sections, String, required: false
   argument :title, String, required: false
   argument :todo_date, Types::DateTimeType, required: false
 
   field :discussion_topic, Types::DiscussionType, null:
 
-  # These are inputs that are allowed to be directly assigned from graphql to the model without additional processing or logic involved
-  ALLOWED_INPUTS = %i[title message require_initial_post allow_rating only_graders_can_rate only_visible_to_overrides podcast_enabled podcast_has_student_posts].freeze
+    # These are inputs that are allowed to be directly assigned from graphql to the model without additional processing or logic involved
+    ALLOWED_INPUTS = %i[title require_initial_post allow_rating only_graders_can_rate only_visible_to_overrides podcast_enabled podcast_has_student_posts expanded expanded_locked sort_order_locked].freeze
 
   def process_common_inputs(input, is_announcement, discussion_topic)
     model_attrs = input.to_h.slice(*ALLOWED_INPUTS)
     discussion_topic.assign_attributes(model_attrs)
+
+    # we have some corrupt data, where dt.message is nil, and input message empty string breaks the update in case content is locked
+    # due to all the rails hooks around validations, and content tag auto updates, its almost impossible to data fixup it
+    # we change the message only if client explicitly sent a message
+    if input.key?(:message)
+      # if input message or dt.message is a non empty string, we want the update (so we can clear the message)
+      should_change_message = input[:message].present? || discussion_topic.message.present?
+      # update with the input, or if its explicitly nil, set it to empty string
+      discussion_topic.message = input[:message] || "" if should_change_message
+    end
 
     discussion_topic.workflow_state = "active" if input.key?(:published) && (input[:published] || is_announcement)
 
@@ -117,6 +132,11 @@ class Mutations::DiscussionBase < Mutations::BaseMutation
       end
 
       discussion_topic.attachment = attachment
+    end
+    if input.key?(:sort_order)
+      sort_order = input[:sort_order].to_s
+      sort_order = DiscussionTopic::SortOrder::DEFAULT unless DiscussionTopic::SortOrder::TYPES.include?(sort_order)
+      discussion_topic.sort_order = sort_order
     end
   end
 
@@ -182,7 +202,7 @@ class Mutations::DiscussionBase < Mutations::BaseMutation
 
   # Adapted from LearningObjectDatesController#update_ungraded_object
   def update_ungraded_discussion(discussion_topic, overrides)
-    return if discussion_topic.assignment.present? || discussion_topic.context_type == "Group" || discussion_topic.is_announcement || !Account.site_admin.feature_enabled?(:selective_release_ui_api)
+    return if discussion_topic.assignment.present? || discussion_topic.context_type == "Group" || discussion_topic.is_announcement
 
     batch = prepare_assignment_overrides_for_batch_update(discussion_topic, overrides, @current_user) if overrides
     discussion_topic.transaction do

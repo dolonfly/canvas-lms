@@ -21,12 +21,11 @@ module Lti
   module IMS
     # @API LTI Dynamic Registrations
     # @internal
-    # Implements the 1EdTech LTI 1.3 Dynamic Registration <a href="/doc/api/registration.html">spec</a>.
-    # See the <a href="/doc/api/registration.html">Registration guide</a> for how to use this API.
+    # Implements the 1EdTech LTI 1.3 Dynamic Registration <a href="file.registration.html">spec</a>.
+    # See the <a href="file.registration.html">Registration guide</a> for how to use this API.
     class DynamicRegistrationController < ApplicationController
       REGISTRATION_TOKEN_EXPIRATION = 1.hour
 
-      before_action :require_dynamic_registration_flag, except: [:create]
       before_action :require_user, except: [:create]
       before_action :require_account, except: [:create]
 
@@ -34,6 +33,8 @@ module Lti
       # attempt to find the bearer token, which is not stored with
       # the other Canvas tokens.
       skip_before_action :load_user, only: [:create]
+
+      include Api::V1::Lti::Registration
 
       def require_account
         require_context_with_permission(account_context, :manage_developer_keys)
@@ -53,7 +54,7 @@ module Lti
 
       def registration_token
         uuid = SecureRandom.uuid
-        current_time = DateTime.now.iso8601
+        current_time = Time.zone.now.iso8601
         user_id = @current_user.id
         root_account_global_id = account_context.global_id
         unified_tool_id = params[:unified_tool_id].presence
@@ -78,12 +79,22 @@ module Lti
         }
       end
 
-      def registration_by_uuid
-        render json: Lti::IMS::Registration.find_by(guid: params[:registration_uuid])
+      def lti_registration_by_uuid
+        reg = Lti::IMS::Registration.find_by!(guid: params[:registration_uuid])
+        render json: lti_registration_json(reg.lti_registration,
+                                           @current_user,
+                                           session,
+                                           @context,
+                                           includes: %i[configuration overlay],
+                                           overlay: reg.lti_registration.overlay_for(@context))
+      end
+
+      def ims_registration_by_uuid
+        render json: Lti::IMS::Registration.find_by!(guid: params[:registration_uuid]).as_json(context: account_context)
       end
 
       def show
-        render json: Lti::IMS::Registration.find(params[:registration_id])
+        render json: Lti::IMS::Registration.find(params[:registration_id]).as_json(context: account_context)
       end
 
       def oidc_configuration_url(registration_token)
@@ -103,9 +114,35 @@ module Lti
 
       def update_registration_overlay
         registration = Lti::IMS::Registration.find(params[:registration_id])
-        registration.registration_overlay = JSON.parse(request.body.read)
-        registration.save!
-        registration.update_external_tools!
+        # Historically, the overlay for an IMS Registration lived on its
+        # registration_overlay column. However, we're transitioning over to using
+        # the Lti::Overlay and Lti::Registration models, so that more than just Dynamic
+        # Registrations can be overlaid, hence the reason for keeping two data
+        # sources in sync.
+        Lti::IMS::Registration.transaction do
+          registration_overlay = JSON.parse(request.body.read)
+          overlay = registration.lti_registration.overlay_for(@context)
+
+          # Let the registration validate the data they passed
+          registration.update!(registration_overlay:)
+
+          # also update the DK scopes
+          if registration_overlay["disabledScopes"].present?
+            registration.developer_key.update!(scopes: registration.scopes - registration_overlay["disabledScopes"])
+          end
+
+          data = Schemas::Lti::IMS::RegistrationOverlay.to_lti_overlay(registration_overlay)
+
+          if overlay.blank?
+            Lti::Overlay.create!(registration: registration.lti_registration,
+                                 updated_by: @current_user,
+                                 account: account_context,
+                                 data:)
+          else
+            overlay.update!(data:, updated_by: @current_user)
+          end
+          registration.update_external_tools!
+        end
         render json: registration
       end
 
@@ -130,20 +167,16 @@ module Lti
           return
         end
 
-        unless root_account.feature_enabled? :lti_dynamic_registration
-          render status: :not_found, template: "shared/errors/404_message"
-          return
-        end
-
         Schemas::Lti::IMS::OidcRegistration.to_model_attrs(params.to_unsafe_h) =>
-          {errors:, registration_attrs:}
+          { errors:, registration_attrs: }
         return render status: :unprocessable_entity, json: { errors: } if errors.present?
 
         registration_url = jwt["registration_url"]
 
         root_account.shard.activate do
+          current_user = User.find(jwt["user_id"])
           developer_key = DeveloperKey.new(
-            current_user: User.find(jwt["user_id"]),
+            current_user:,
             name: registration_attrs["client_name"],
             account: root_account.site_admin? ? nil : root_account,
             redirect_uris: registration_attrs["redirect_uris"],
@@ -151,10 +184,11 @@ module Lti
             oidc_initiation_url: registration_attrs["initiate_login_uri"],
             is_lti_key: true,
             scopes: registration_attrs["scopes"],
-            icon_url: registration_attrs["logo_uri"]
+            icon_url: registration_attrs["logo_uri"],
+            skip_lti_sync: true
           )
 
-          registration = Lti::IMS::Registration.new(
+          ims_registration = Lti::IMS::Registration.new(
             developer_key:,
             root_account_id: root_account.id,
             guid: jwt["uuid"],
@@ -163,12 +197,30 @@ module Lti
             **registration_attrs
           )
 
+          registration = Lti::Registration.new(
+            developer_key:,
+            account: root_account,
+            created_by: current_user,
+            updated_by: current_user,
+            admin_nickname: registration_attrs["client_name"],
+            name: registration_attrs["client_name"],
+            vendor: ims_registration.vendor,
+            ims_registration:
+          )
+
+          deployment = nil
+
           ActiveRecord::Base.transaction do
             developer_key.save!
+            ims_registration.save!
             registration.save!
+
+            if root_account.feature_enabled?(:lti_registrations_next)
+              deployment = registration.new_external_tool(root_account, current_user:, available: false)
+            end
           end
 
-          render_registration(registration, developer_key) if registration.persisted?
+          render_registration(ims_registration, developer_key, deployment) if ims_registration.persisted?
         end
       end
 
@@ -202,7 +254,7 @@ module Lti
 
       private
 
-      def render_registration(registration, developer_key)
+      def render_registration(registration, developer_key, deployment)
         render json: {
           client_id: developer_key.global_id.to_s,
           application_type: Lti::IMS::Registration::REQUIRED_APPLICATION_TYPE,
@@ -220,7 +272,8 @@ module Lti
               "https://#{Lti::IMS::Registration::CANVAS_EXTENSION_LABEL}/lti/registration_config_url": lti_registration_config_url(registration.global_id),
             }
           ),
-        }
+          deployment_id: deployment&.deployment_id
+        }.compact
       end
 
       def respond_with_error(status_code, message)
@@ -228,12 +281,6 @@ module Lti
                json: {
                  errorMessage: message
                }
-      end
-
-      def require_dynamic_registration_flag
-        unless account_context.feature_enabled? :lti_dynamic_registration
-          render status: :not_found, template: "shared/errors/404_message"
-        end
       end
     end
   end

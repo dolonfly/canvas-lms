@@ -17,13 +17,13 @@
  */
 
 import React from 'react'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {Modal} from '@instructure/ui-modal'
 import {CloseButton} from '@instructure/ui-buttons'
 import {Heading} from '@instructure/ui-heading'
 import {Text} from '@instructure/ui-text'
 
-const I18n = useI18nScope('rubrics-assessment-tray')
+const I18n = createI18nScope('rubrics-assessment-tray')
 
 type LongDescriptionModalProps = {
   open: boolean
@@ -54,9 +54,11 @@ export const LongDescriptionModal = ({
         <Heading>{modalHeader}</Heading>
       </Modal.Header>
       <Modal.Body>
-        <Text lineHeight="double" wrap="break-word">
-          <div dangerouslySetInnerHTML={{__html: longDescription}} />
-        </Text>
+        <Text
+          lineHeight="double"
+          wrap="break-word"
+          dangerouslySetInnerHTML={{__html: longDescription ?? ''}}
+        />
       </Modal.Body>
     </Modal>
   )

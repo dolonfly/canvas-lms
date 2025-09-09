@@ -16,19 +16,25 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, {useEffect} from 'react'
+import React, {useEffect, useState} from 'react'
 import {Element, useEditor, useNode, type Node} from '@craftjs/core'
 
 import {NoSections} from '../../common'
 import {Container} from '../Container/Container'
-import {useClassNames, isNthChild, getContrastingColor} from '../../../../utils'
+import {
+  useClassNames,
+  isNthChild,
+  isTransparent,
+  getContrastingColor,
+  getEffectiveBackgroundColor,
+} from '../../../../utils'
 import {type GroupBlockProps, defaultAlignment} from './types'
 import {GroupBlockToolbar} from './GroupBlockToolbar'
 import {BlockResizer} from '../../../editor/BlockResizer'
 
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 
-const I18n = useI18nScope('block-editor')
+const I18n = createI18nScope('block-editor')
 
 export const GroupBlock = (props: GroupBlockProps) => {
   const {
@@ -46,6 +52,11 @@ export const GroupBlock = (props: GroupBlockProps) => {
   const {enabled} = useEditor(state => ({
     enabled: state.options.enabled,
   }))
+  const {actions, node} = useNode((n: Node) => {
+    return {
+      node: n,
+    }
+  })
   const clazz = useClassNames(enabled, {empty: false}, [
     'block',
     'group-block',
@@ -54,11 +65,7 @@ export const GroupBlock = (props: GroupBlockProps) => {
     `${verticalAlignment}-valign`,
     `${roundedCorners ? 'rounded-corners' : ''}`,
   ])
-  const {actions, node} = useNode((n: Node) => {
-    return {
-      node: n,
-    }
-  })
+  const [containerRef, setContainerRef] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
     if (isColumn) {
@@ -70,7 +77,7 @@ export const GroupBlock = (props: GroupBlockProps) => {
 
   useEffect(() => {
     if (resizable !== node.data.custom.isResizable) {
-      actions.setCustom((custom: Object) => {
+      actions.setCustom((custom: object) => {
         // @ts-expect-error
         custom.isResizable = resizable
       })
@@ -84,9 +91,12 @@ export const GroupBlock = (props: GroupBlockProps) => {
   if (height) {
     styl.height = `${height}px`
   }
-  if (background) {
+  if (background && !isTransparent(background)) {
     styl.backgroundColor = background
     styl.color = getContrastingColor(background)
+  } else if (containerRef) {
+    const gbcolor = getEffectiveBackgroundColor(containerRef)
+    styl.color = getContrastingColor(gbcolor)
   } else {
     styl.backgroundColor = 'transparent'
   }
@@ -98,7 +108,7 @@ export const GroupBlock = (props: GroupBlockProps) => {
   }
 
   return (
-    <Container className={clazz} style={styl}>
+    <Container className={clazz} style={styl} ref={setContainerRef}>
       <Element id="group__inner" is={NoSections} canvas={true} className="group-block__inner" />
     </Container>
   )
@@ -117,7 +127,7 @@ GroupBlock.craft = {
     canMoveIn: (incomingNodes: Node[]) => {
       return !incomingNodes.some(
         (incomingNode: Node) =>
-          incomingNode.data.custom.isSection || incomingNode.data.name === 'GroupBlock'
+          incomingNode.data.custom.isSection || incomingNode.data.name === 'GroupBlock',
       )
     },
   },

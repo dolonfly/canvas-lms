@@ -53,12 +53,23 @@ class Mutations::AssignmentBase::AssignmentPeerReviewsUpdate < GraphQL::Schema::
   argument :intra_reviews, Boolean, required: false
 end
 
+class Mutations::AssignmentBase::LtiAssetProcessorCreateOrUpdate < GraphQL::Schema::InputObject
+  # Structure should match up with UI's AttachedAssetProcessorDto
+  argument :existing_id, Int, required: false
+  # OR:
+  argument :new_content_item, Mutations::LtiContentItems::LtiAssetProcessorDto, required: false
+end
+
 class Mutations::AssignmentBase::AssignmentInputBase < GraphQL::Schema::InputObject
   argument :ab_guid, [String], required: false
+  argument :asset_processors, [Mutations::AssignmentBase::LtiAssetProcessorCreateOrUpdate], required: false
   argument :assignment_group_id, ID, required: false
   argument :assignment_overrides, [Mutations::AssignmentBase::AssignmentOverrideCreateOrUpdate], required: false
   argument :due_at, Types::DateTimeType, required: false
-  argument :for_checkpoints, Boolean, required: false
+  argument :for_checkpoints,
+           Boolean,
+           "if true, this assignment is a parent assignment for checkpoints. cannot set points_possible, due_at, lock_at, or unlock_at",
+           required: false
   argument :grading_standard_id, ID, required: false
   argument :grading_type, Types::AssignmentType::AssignmentGradingType, required: false
   argument :group_category_id, ID, required: false
@@ -69,6 +80,7 @@ class Mutations::AssignmentBase::AssignmentInputBase < GraphQL::Schema::InputObj
   argument :peer_reviews, Mutations::AssignmentBase::AssignmentPeerReviewsUpdate, required: false
   argument :points_possible, Float, required: false
   argument :post_to_sis, Boolean, required: false
+  argument :suppress_assignment, Boolean, required: false
   argument :unlock_at, Types::DateTimeType, required: false
 end
 
@@ -103,9 +115,7 @@ class Mutations::AssignmentBase::Mutation < Mutations::BaseMutation
 
     attr_reader :session
 
-    def context
-      @working_assignment.context
-    end
+    delegate :context, to: :@working_assignment
 
     def grading_periods?
       @working_assignment.context.try(:grading_periods?)
@@ -115,9 +125,7 @@ class Mutations::AssignmentBase::Mutation < Mutations::BaseMutation
       ArbitraryStrongishParams::ANYTHING
     end
 
-    def value_to_boolean(value)
-      Canvas::Plugin.value_to_boolean(value)
-    end
+    delegate :value_to_boolean, to: :"Canvas::Plugin"
 
     def process_incoming_html_content(html)
       Api::Html::Content.process_incoming(html)
@@ -140,7 +148,10 @@ class Mutations::AssignmentBase::Mutation < Mutations::BaseMutation
   argument :assignment_overrides, [Mutations::AssignmentBase::AssignmentOverrideCreateOrUpdate], required: false
   argument :description, String, required: false
   argument :due_at, Types::DateTimeType, required: false
-  argument :for_checkpoints, Boolean, required: false
+  argument :for_checkpoints,
+           Boolean,
+           "if true, this assignment is a parent assignment for checkpoints. cannot set points_possible, due_at, lock_at, or unlock_at",
+           required: false
   argument :grade_group_students_individually, Boolean, required: false
   argument :grading_standard_id, ID, required: false
   argument :grading_type, Types::AssignmentType::AssignmentGradingType, required: false
@@ -157,6 +168,7 @@ class Mutations::AssignmentBase::Mutation < Mutations::BaseMutation
   argument :post_to_sis, Boolean, required: false
   argument :state, Types::AssignmentType::AssignmentStateType, required: false
   argument :submission_types, [Types::AssignmentSubmissionType], required: false
+  argument :suppress_assignment, Boolean, required: false
   argument :unlock_at, Types::DateTimeType, required: false
 
   # the return data if the update is successful

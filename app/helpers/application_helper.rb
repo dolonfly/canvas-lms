@@ -26,7 +26,7 @@ module ApplicationHelper
   include Canvas::LockExplanation
   include DatadogRumHelper
   include NewQuizzesFeaturesHelper
-  include HeapHelper
+  include UsageMetricsHelper
 
   BYTE_UNITS = %w[B KB MB GB TB PB EB ZB YB].freeze
 
@@ -42,7 +42,7 @@ module ApplicationHelper
     user_id = user.is_a?(User) ? user.id : user
     Rails
       .cache
-      .fetch(["context_user_name", context, user_id].cache_key, { expires_in: 15.minutes }) do
+      .fetch(["context_user_name", context, user_id].cache_key, { expires_in: 15.minutes }) do # rubocop:disable Lint/UselessDefaultValueArgument -- this is not an Array or Hash
         user = User.find_by(id: user_id)
         user && context_user_name_display(user)
       end
@@ -127,7 +127,7 @@ module ApplicationHelper
       opts["#{context_name}_id"] = context.id
       res = url_for opts
     else
-      res = context_name.to_s + opts.to_json.to_s
+      res = context_name.to_s + opts.to_json
     end
     @context_url_lookup[lookup] = res
   end
@@ -167,7 +167,7 @@ module ApplicationHelper
     end.any?
   end
 
-  def hidden(include_style = false)
+  def hidden(include_style: false)
     include_style ? "style='display:none;'".html_safe : "display: none;"
   end
 
@@ -231,7 +231,7 @@ module ApplicationHelper
     @script_chunks ||= []
     preload_chunks =
       new_js_bundles.map do |(bundle, plugin, *)|
-        ::Canvas::Cdn.registry.scripts_for("#{plugin ? "#{plugin}-" : ""}#{bundle}")
+        ::Canvas::Cdn.registry.scripts_for("#{"#{plugin}-" if plugin}#{bundle}")
       end.flatten.uniq - @script_chunks - @rendered_preload_chunks # subtract out the ones we already preloaded in the <head>
     @rendered_preload_chunks += preload_chunks
 
@@ -250,7 +250,7 @@ module ApplicationHelper
         concat javascript_tag new_js_bundles.map { |(bundle, plugin, defer)|
                                 defer ||= defer_js_bundle?(bundle)
                                 container = defer ? "window.deferredBundles" : "window.bundles"
-                                "(#{container} || (#{container} = [])).push('#{plugin ? "#{plugin}-" : ""}#{bundle}');"
+                                "(#{container} || (#{container} = [])).push('#{"#{plugin}-" if plugin}#{bundle}');"
                               }.join("\n")
       end
     end
@@ -268,7 +268,7 @@ module ApplicationHelper
     @rendered_css_bundles += new_css_bundles
 
     unless new_css_bundles.empty?
-      bundles = new_css_bundles.map { |(bundle, plugin)| css_url_for(bundle, plugin) }
+      bundles = new_css_bundles.map { |(bundle, plugin)| css_url_for(bundle, plugin:) }
       bundles << css_url_for("disable_transitions") if disable_css_transitions?
       bundles << { media: "all" }
       tags = bundles.map { |bundle| stylesheet_link_tag(bundle) }
@@ -289,11 +289,13 @@ module ApplicationHelper
   def css_variant(opts = {})
     use_high_contrast =
       @current_user&.prefers_high_contrast? || opts[:force_high_contrast]
+    use_dyslexic_font = @current_user&.prefers_dyslexic_font?
     "new_styles" + + (use_high_contrast ? "_high_contrast" : "_normal_contrast") +
+      (use_dyslexic_font ? "_dyslexic" : "") +
       (I18n.rtl? ? "_rtl" : "")
   end
 
-  def css_url_for(bundle_name, plugin = false, opts = {})
+  def css_url_for(bundle_name, plugin: false, force_high_contrast: false)
     bundle_path =
       if plugin
         "../../gems/plugins/#{plugin}/app/stylesheets/#{bundle_name}"
@@ -301,8 +303,8 @@ module ApplicationHelper
         "bundles/#{bundle_name}"
       end
 
-    cache = BrandableCSS.cache_for(bundle_path, css_variant(opts))
-    base_dir = cache[:includesNoVariables] ? "no_variables" : css_variant(opts)
+    cache = BrandableCSS.cache_for(bundle_path, css_variant(force_high_contrast:))
+    base_dir = cache[:includesNoVariables] ? "no_variables" : css_variant(force_high_contrast:)
     File.join("/dist", "brandable_css", base_dir, "#{bundle_path}-#{cache[:combinedChecksum]}.css")
   end
 
@@ -333,6 +335,10 @@ module ApplicationHelper
 
   def include_common_stylesheets
     stylesheet_link_tag css_url_for(:common), media: "all"
+  end
+
+  def include_masquerade_stylesheets
+    stylesheet_link_tag css_url_for(:user_masquerade), media: "all"
   end
 
   def embedded_chat_quicklaunch_params
@@ -370,26 +376,7 @@ module ApplicationHelper
       Rails
       .cache
       .fetch(["active_external_tool_for", @context, tool_id].cache_key, expires_in: 1.hour) do
-        # don't use for groups. they don't have account_chain_ids
-        tool = @context.context_external_tools.active.where(tool_id:).first
-
-        unless tool
-          # account_chain_ids is in the order we need to search for tools
-          # unfortunately, the db will return an arbitrary one first.
-          # so, we pull all the tools (probably will only have one anyway) and look through them here
-          account_chain_ids = @context.account_chain_ids
-
-          tools =
-            ContextExternalTool
-            .active
-            .where(context_type: "Account", context_id: account_chain_ids, tool_id:)
-            .to_a
-          account_chain_ids.each do |account_id|
-            tool = tools.find { |t| t.context_id == account_id }
-            break if tool
-          end
-        end
-        tool
+        Lti::ContextToolFinder.ordered_by_context_for(@context).where(tool_id:).first
       end
   end
 
@@ -402,32 +389,6 @@ module ApplicationHelper
     available_section_tabs.find { |tc| tc[:id] == tool.asset_string }.present?
   end
 
-  def license_help_link
-    @include_license_dialog = true
-    css_bundle("license_help")
-    js_bundle("license_help")
-    icon = safe_join ["<i class='icon-question' aria-hidden='true'></i>".html_safe]
-    link_to(
-      icon,
-      "#",
-      role: "button",
-      class: "license_help_link no-hover",
-      title: I18n.t("Help with content licensing")
-    )
-  end
-
-  def visibility_help_link
-    js_bundle("visibility_help")
-    icon = safe_join ["<i class='icon-question' aria-hidden='true'></i>".html_safe]
-    link_to(
-      icon,
-      "#",
-      role: "button",
-      class: "visibility_help_link no-hover",
-      title: I18n.t("Help with course visibilities")
-    )
-  end
-
   def equella_enabled?
     @equella_settings ||= @context.equella_settings if @context.respond_to?(:equella_settings)
     @equella_settings ||= @domain_root_account.try(:equella_settings)
@@ -435,14 +396,9 @@ module ApplicationHelper
   end
 
   def show_user_create_course_button(user, account = nil)
-    return true if account&.grants_any_right?(user, session, :manage_courses, :create_courses)
+    return true if account&.grants_right?(user, :create_courses)
 
-    @domain_root_account.manually_created_courses_account.grants_any_right?(
-      user,
-      session,
-      :manage_courses,
-      :create_courses
-    )
+    @domain_root_account.manually_created_courses_account.grants_right?(user, :create_courses)
   end
 
   # Public: Create HTML for a sidebar button w/ icon.
@@ -532,7 +488,7 @@ module ApplicationHelper
     # called outside of Lti::ContextToolFinder to make sure that
     # @context is non-nil and also a type of Context that would have
     # tools in it (ie Course/Account/Group/User)
-    contexts = ContextExternalTool.contexts_to_search(@context)
+    contexts = Lti::ToolFinderUtils.contexts_to_search(@context)
     return [] if contexts.empty?
 
     cached_tools =
@@ -1068,7 +1024,10 @@ module ApplicationHelper
                     #{script_src_directive}\
                     script-src-elem 'self' 'unsafe-inline' #{allow_list_domains};\
                     font-src 'self' data: #{allow_list_domains};\
-                    connect-src 'self' #{allow_list_domains};"
+                    connect-src 'self' #{allow_list_domains};\
+                    worker-src 'self' blob: #{allow_list_domains};\
+                    manifest-src 'self' #{allow_list_domains};\
+                    media-src 'self' #{allow_list_domains};"
 
       directives.squish + csp_report_uri
     else
@@ -1148,6 +1107,10 @@ module ApplicationHelper
     request.fullpath =~ %r{groups/#{group.id}}
   end
 
+  def enable_content_view_if_requested
+    @content_only = Canvas::Plugin.value_to_boolean(params[:content_only])
+  end
+
   def link_to_parent_signup(auth_type)
     data = reg_link_data(auth_type)
     link_to(
@@ -1195,16 +1158,27 @@ module ApplicationHelper
   end
 
   def generate_access_verifier(return_url: nil, fallback_url: nil, authorization: nil)
-    Users::AccessVerifier.generate(
-      authorization:,
-      user: @current_user,
-      real_user: logged_in_user,
-      developer_key: @access_token&.developer_key,
-      root_account: @domain_root_account,
-      oauth_host: request.host_with_port,
-      return_url:,
-      fallback_url:
-    )
+    if @advantage_token_developer_key.present?
+      DeveloperKeys::AccessVerifier.generate(
+        authorization:,
+        developer_key: @advantage_token_developer_key,
+        root_account: @domain_root_account,
+        oauth_host: request.host_with_port,
+        return_url:,
+        fallback_url:
+      )
+    else
+      Users::AccessVerifier.generate(
+        authorization:,
+        user: @current_user,
+        real_user: logged_in_user,
+        developer_key: @access_token&.developer_key,
+        root_account: @domain_root_account,
+        oauth_host: request.host_with_port,
+        return_url:,
+        fallback_url:
+      )
+    end
   end
 
   def validate_access_verifier
@@ -1378,30 +1352,37 @@ module ApplicationHelper
     render json: { location:, token: file_authenticator.instfs_bearer_token }
   end
 
-  def authenticated_url_options(attachment)
-    options = { original_url: request.original_url }
+  def authenticated_url_options(attachment, options: {})
+    options[:fallback_url] ||= request.original_url
     options[:tenant_auth] = attachment.instfs_tenant_auth if attachment&.instfs_tenant_auth.present?
     options
   end
 
-  def authenticated_download_url(attachment)
-    file_authenticator.download_url(attachment, options: authenticated_url_options(attachment))
+  def authenticated_download_url(attachment, options: {})
+    file_authenticator.download_url(attachment, options: authenticated_url_options(attachment, options:))
   end
 
-  def authenticated_inline_url(attachment)
-    file_authenticator.inline_url(attachment, options: authenticated_url_options(attachment))
+  def authenticated_inline_url(attachment, options: {})
+    file_authenticator.inline_url(attachment, options: authenticated_url_options(attachment, options:))
   end
 
-  def authenticated_thumbnail_url(attachment, options = {})
-    options[:original_url] = request.original_url
-    file_authenticator.thumbnail_url(attachment, options)
+  def authenticated_thumbnail_url(attachment, options: {})
+    file_authenticator.thumbnail_url(attachment, authenticated_url_options(attachment, options:))
   end
 
   def thumbnail_image_url(attachment, uuid = nil, url_options = {})
-    # this thumbnail url is a route that redirects to local/s3 appropriately.
-    # deferred redirect through route because it may be saved for later use
-    # after a direct link to attachment.thumbnail_url would have expired
-    super(attachment, uuid || attachment.uuid, url_options)
+    # thumbnail_image_url is used in a lot of the remaining ERBs and in the API, so rather than edit those large amount
+    # of places now, we'll shim in this call to the plain_url.  When we go to remove the old thumbnail_image_url when
+    # this feature is on, we can then update the method name to remove plain and we should be able to just remove this
+    # method (and update call sites that pass the uuid.)
+    if attachment.root_account.feature_enabled?(:file_association_access)
+      thumbnail_image_plain_url(attachment, url_options)
+    else
+      # this thumbnail url is a route that redirects to local/s3 appropriately.
+      # deferred redirect through route because it may be saved for later use
+      # after a direct link to attachment.thumbnail_url would have expired
+      super(attachment, uuid || attachment.uuid, url_options)
+    end
   end
 
   def prefetch_assignment_external_tools
@@ -1453,7 +1434,7 @@ module ApplicationHelper
   end
 
   def append_default_due_time_js_env(context, hash)
-    hash[:DEFAULT_DUE_TIME] = context.default_due_time if context&.default_due_time.present? && context.root_account.feature_enabled?(:default_due_time)
+    hash[:DEFAULT_DUE_TIME] = context.default_due_time if context&.default_due_time.present?
   end
 
   def number_to_human_size_mb(number, options = {})

@@ -18,7 +18,7 @@
 
 import React, {useState} from 'react'
 import {useNavigate} from 'react-router-dom'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {IconButton} from '@instructure/ui-buttons'
 import {IconMoreLine} from '@instructure/ui-icons'
 import {Popover} from '@instructure/ui-popover'
@@ -29,7 +29,7 @@ import {DeleteRubricModal} from './DeleteRubricModal'
 import type {RubricCriterion} from '@canvas/rubrics/react/types/rubric'
 import DirectShareCourseTray from '@canvas/direct-sharing/react/components/DirectShareCourseTray'
 
-const I18n = useI18nScope('rubrics-list-table')
+const I18n = createI18nScope('rubrics-list-table')
 
 export type RubricPopoverProps = {
   id?: string
@@ -44,6 +44,7 @@ export type RubricPopoverProps = {
   freeFormCriterionComments?: boolean
   hasRubricAssociations?: boolean
   onArchiveRubricChange: () => void
+  workflowState?: string
   active: boolean
 }
 
@@ -60,6 +61,7 @@ export const RubricPopover = ({
   freeFormCriterionComments,
   hasRubricAssociations,
   onArchiveRubricChange,
+  workflowState,
   active,
 }: RubricPopoverProps) => {
   const navigate = useNavigate()
@@ -89,6 +91,7 @@ export const RubricPopover = ({
         freeFormCriterionComments={freeFormCriterionComments}
         accountId={accountId}
         courseId={courseId}
+        workflowState={workflowState}
       />
       <DeleteRubricModal
         isOpen={isDeleteRubricModalOpen}
@@ -143,14 +146,19 @@ export const RubricPopover = ({
           {window.ENV.enhanced_rubrics_copy_to && courseId && (
             <Menu.Item
               data-testid={`copy-to-${courseId}-button`}
-              onClick={() => setCopyToOpen(true)}
+              onClick={() => {
+                setPopoverIsOpen(false)
+                setCopyToOpen(true)
+              }}
             >
               {I18n.t('Copy To')}
             </Menu.Item>
           )}
-          <Menu.Item data-testid="archive-rubric-button" onClick={handleArchiveRubric}>
-            {active ? I18n.t('Archive') : I18n.t('Un-Archive')}
-          </Menu.Item>
+          {workflowState !== 'draft' && (
+            <Menu.Item data-testid="archive-rubric-button" onClick={handleArchiveRubric}>
+              {active ? I18n.t('Archive') : I18n.t('Un-Archive')}
+            </Menu.Item>
+          )}
           {/* <Menu.Item data-testid="download-rubric-button" onClick={() => {}}>
             {I18n.t('Download')}
           </Menu.Item>

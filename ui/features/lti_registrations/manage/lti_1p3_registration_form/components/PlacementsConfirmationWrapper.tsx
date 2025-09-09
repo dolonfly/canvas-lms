@@ -16,15 +16,10 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
-import {
-  PlacementsConfirmation,
-  UNDOCUMENTED_PLACEMENTS,
-} from '../../registration_wizard_forms/PlacementsConfirmation'
-import {useOverlayStore} from '../hooks/useOverlayStore'
-import type {Lti1p3RegistrationOverlayStore} from '../Lti1p3RegistrationOverlayState'
+import {PlacementsConfirmation} from '../../registration_wizard_forms/PlacementsConfirmation'
+import type {Lti1p3RegistrationOverlayStore} from '../../registration_overlay/Lti1p3RegistrationOverlayStore'
 import type {InternalLtiConfiguration} from '../../model/internal_lti_configuration/InternalLtiConfiguration'
-import {AllLtiPlacements} from '../../model/LtiPlacement'
+import {AllLtiPlacements, InternalOnlyLtiPlacements} from '../../model/LtiPlacement'
 import {RegistrationModalBody} from '../../registration_wizard/RegistrationModalBody'
 
 export type PlacementsConfirmationProps = {
@@ -32,21 +27,32 @@ export type PlacementsConfirmationProps = {
   overlayStore: Lti1p3RegistrationOverlayStore
 }
 
-const allPlacements = [...AllLtiPlacements]
-  .filter(p => !UNDOCUMENTED_PLACEMENTS.includes(p as any))
-  .sort()
+const allPlacements = [...AllLtiPlacements].sort()
 
 export const PlacementsConfirmationWrapper = ({
   internalConfig,
   overlayStore,
 }: PlacementsConfirmationProps) => {
-  const [state, actions] = useOverlayStore(overlayStore)
+  const {state, ...actions} = overlayStore()
+
+  const internalConfigPlacements = internalConfig.placements.map(p => p.placement)
+  const availablePlacements = allPlacements.filter(
+    p => !InternalOnlyLtiPlacements.includes(p as any) || internalConfigPlacements.includes(p),
+  )
 
   return (
     <RegistrationModalBody>
       <PlacementsConfirmation
         appName={internalConfig.title}
-        availablePlacements={allPlacements}
+        availablePlacements={availablePlacements.filter(p => {
+          if ('ActivityAssetProcessor' === p) {
+            return window.ENV.FEATURES.lti_asset_processor
+          }
+          if ('ActivityAssetProcessorContribution' === p) {
+            return window.ENV.FEATURES.lti_asset_processor_discussions
+          }
+          return true
+        })}
         enabledPlacements={state.placements.placements ?? []}
         courseNavigationDefaultHidden={state.placements.courseNavigationDefaultDisabled ?? false}
         onToggleDefaultDisabled={actions.toggleCourseNavigationDefaultDisabled}

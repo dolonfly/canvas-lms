@@ -24,15 +24,32 @@ module LearnPlatform
       @learnplatform = Canvas::Plugin.find(:learnplatform)
     end
 
+    def valid_basic_auth_params?
+      learnplatform.settings["username"].present? && learnplatform.settings["password"].present? && !learnplatform.settings["username"].empty? && !learnplatform.settings["password"].empty?
+    end
+
+    def valid_token_auth_params?
+      learnplatform.settings["jwt_issuer"].present? && learnplatform.settings["jwt_secret"].present? && !learnplatform.settings["jwt_issuer"].empty? && !learnplatform.settings["jwt_secret"].empty?
+    end
+
     def valid_learnplatform?
-      learnplatform&.enabled? && !learnplatform.settings["username"].empty? && !learnplatform.settings["password"].empty?
+      learnplatform.enabled? && (valid_basic_auth_params? || valid_token_auth_params?)
     end
 
     def fetch_learnplatform_response(endpoint, expires, params = {})
       base_url = learnplatform.settings["base_url"]
-      name = learnplatform.settings["username_dec"]
-      pass = learnplatform.settings["password_dec"]
-      authorization = "Basic #{Base64.encode64("#{name}:#{pass}")}"
+
+      if valid_token_auth_params?
+        jwt_issuer = learnplatform.settings["jwt_issuer_dec"]
+        secret = learnplatform.settings["jwt_secret_dec"]
+        payload = { iss: jwt_issuer, exp: Time.now.to_i + 3600 }
+        token = JWT.encode(payload, secret, "HS256")
+        authorization = "Bearer #{token}"
+      elsif valid_basic_auth_params?
+        name = learnplatform.settings["username_dec"]
+        pass = learnplatform.settings["password_dec"]
+        authorization = "Basic #{Base64.encode64("#{name}:#{pass}")}"
+      end
 
       begin
         cache_key = ["learnplatform", endpoint, authorization, params].cache_key
@@ -63,24 +80,38 @@ module LearnPlatform
       fetch_learnplatform_response(endpoint, 1.hour, params)
     end
 
-    def product(id)
+    def product(id, params = {})
       return {} unless valid_learnplatform?
 
       endpoint = "/api/v2/lti/tools/#{id}"
-      fetch_learnplatform_response(endpoint, 1.hour)
+      fetch_learnplatform_response(endpoint, 1.hour, params)
     end
 
-    def products_by_category
+    def products_by_category(params = {})
       return {} unless valid_learnplatform?
 
       endpoint = "/api/v2/lti/tools_by_display_group"
-      fetch_learnplatform_response(endpoint, 1.hour)
+      fetch_learnplatform_response(endpoint, 1.hour, params)
     end
 
-    def product_filters
+    def product_filters(params = {})
       return {} unless valid_learnplatform?
 
       endpoint = "/api/v2/lti/tools_filters"
+      fetch_learnplatform_response(endpoint, 1.hour, params)
+    end
+
+    def products_by_organization(organization_salesforce_id, params = {})
+      return {} unless valid_learnplatform?
+
+      endpoint = "/api/v2/lti/organizations/#{organization_salesforce_id}/tools"
+      fetch_learnplatform_response(endpoint, 1.hour, params)
+    end
+
+    def custom_filters(salesforce_id)
+      return {} unless valid_learnplatform?
+
+      endpoint = "/api/v2/lti/organizations/#{salesforce_id}/tools_filters"
       fetch_learnplatform_response(endpoint, 1.hour)
     end
   end

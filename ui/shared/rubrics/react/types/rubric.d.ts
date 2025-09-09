@@ -28,10 +28,13 @@ export type Rubric = {
   title: string
   workflowState?: string
   unassessed?: boolean
+  canUpdateRubric?: boolean
   hasRubricAssociations?: boolean
 }
 
 export type RubricAssociation = {
+  associationType: 'Assignment' | 'Account' | 'Course'
+  associationId: string
   hidePoints: boolean
   hideScoreTotal: boolean
   useForGrading: boolean
@@ -50,6 +53,7 @@ export type RubricCriterion = {
   ratings: RubricRating[]
   learningOutcomeId?: string
   outcome?: RubricOutcome
+  isGenerated?: boolean // frontend only, for tracking LLM generated criteria
 }
 
 export type RubricRating = {
@@ -74,14 +78,16 @@ export type RubricAssessment = {
 export type RubricAssessmentData = {
   id: string
   points?: number
+  pointsPossible?: number
   criterionId: string
   learningOutcomeId?: string
   comments: string
-  commentsEnabled: boolean
+  commentsEnabled?: boolean
   description: string
   ignoreForScoring?: boolean
   rubricSavedComments?: string[]
   saveCommentsForLater?: boolean
+  updatedAt?: string
 }
 
 export type UpdateAssessmentData = {
@@ -116,4 +122,21 @@ export type RubricImport = {
   }[]
   progress: number
   workflowState: string
+}
+
+export type RubricSubmissionUser = {
+  name?: string
+  avatarUrl?: string
+}
+
+export type RubricSelfAssessmentData = {
+  score: number
+  data: (Omit<RubricAssessmentData, 'points'> & {
+    criterion_id: string
+    points: {
+      text: string | undefined
+      valid: boolean
+      value: number | undefined
+    }
+  })[]
 }

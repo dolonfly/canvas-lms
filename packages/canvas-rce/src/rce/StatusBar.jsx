@@ -35,6 +35,8 @@ import {
   IconMiniArrowEndLine,
   IconFullScreenLine,
   IconExitFullScreenLine,
+  IconAddLine,
+  IconCheckMarkIndeterminateLine,
 } from '@instructure/ui-icons'
 import formatMessage from '../format-message'
 import ResizeHandle from './ResizeHandle'
@@ -46,7 +48,7 @@ export const PRETTY_HTML_EDITOR_VIEW = 'PRETTY'
 export const RAW_HTML_EDITOR_VIEW = 'RAW'
 
 // I don't know why eslint is reporting this, the props are all used
-/* eslint-disable react/no-unused-prop-types */
+
 StatusBar.propTypes = {
   id: string.isRequired,
   rceIsFullscreen: bool,
@@ -69,15 +71,13 @@ StatusBar.propTypes = {
 }
 
 StatusBar.defaultProps = {
-  a11yBadgeColor: '#0374B5',
+  a11yBadgeColor: '#2B7ABC',
   a11yErrorsCount: 0,
   disabledPlugins: [],
 }
 
-/* eslint-enable react/no-unused-prop-types */
-
 // we use the array index because pathname may not be unique
-/* eslint-disable react/no-array-index-key */
+
 function renderPathString({path}) {
   return path.reduce((result, pathName, index) => {
     return result.concat(
@@ -86,19 +86,16 @@ function renderPathString({path}) {
           {index > 0 ? <IconMiniArrowEndLine /> : null}
           {pathName}
         </Text>
-      </span>
+      </span>,
     )
   }, [])
 }
-/* eslint-enable react/no-array-index-key */
 
 function emptyTagIcon() {
   return (
-    <SVGIcon viewBox="0 0 24 24" fontSize="24px">
-      <g role="presentation">
-        <text textAnchor="middle" x="12px" y="18px" fontSize="16">
-          &lt;/&gt;
-        </text>
+    <SVGIcon viewBox="0 0 1920 1920" width="1em" height="1em">
+      <g role="presentation" transform="scale(28.7) translate(0, 8)">
+        <path d="M0 29.61L0 25.51L23.71 15.50L23.71 19.87L4.91 27.59L23.71 35.38L23.71 39.75L0 29.61ZM26.46 45.87L36.84 8.86L40.36 8.86L30.00 45.87L26.46 45.87ZM66.80 29.61L43.09 39.75L43.09 35.38L61.87 27.59L43.09 19.87L43.09 15.50L66.80 25.51L66.80 29.61Z"></path>
       </g>
     </SVGIcon>
   )
@@ -232,7 +229,7 @@ export default function StatusBar(props) {
     const message =
       props.editorView === PRETTY_HTML_EDITOR_VIEW
         ? formatMessage(
-            'Sadly, the pretty HTML editor is not keyboard accessible. Access the raw HTML editor here.'
+            'Sadly, the pretty HTML editor is not keyboard accessible. Access the raw HTML editor here.',
           )
         : formatMessage('Access the pretty HTML editor')
     const label =
@@ -253,7 +250,7 @@ export default function StatusBar(props) {
             props.onChangeView(
               props.editorView === PRETTY_HTML_EDITOR_VIEW
                 ? RAW_HTML_EDITOR_VIEW
-                : PRETTY_HTML_EDITOR_VIEW
+                : PRETTY_HTML_EDITOR_VIEW,
             )
           }}
           onFocus={() => setFocusedBtnId('rce-editormessage-btn')}
@@ -327,7 +324,7 @@ export default function StatusBar(props) {
         one {1 word}
       other {# words}
     }`,
-      {count: props.wordCount}
+      {count: props.wordCount},
     )
     return (
       <>
@@ -347,11 +344,12 @@ export default function StatusBar(props) {
     )
   }
 
-  function renderSection3(html_view, fullscreen, resize_handle) {
+  function renderSection3({html_view, fullscreen, resize_handle, a11y_resize_handlers}) {
     return (
       <>
         <div className={css(styles.separator)} />
         {html_view && renderToggleHtml()}
+        {a11y_resize_handlers && renderAccessibleResizeHandle()}
         {fullscreen && renderFullscreen()}
         {resize_handle && renderResizeHandle()}
       </>
@@ -362,7 +360,7 @@ export default function StatusBar(props) {
     return preferredHtmlEditor() === RAW_HTML_EDITOR_VIEW
       ? formatMessage('Shift-O to open the pretty html editor.')
       : formatMessage(
-          'The pretty html editor is not keyboard accessible. Press Shift O to open the raw html editor.'
+          'The pretty html editor is not keyboard accessible. Press Shift O to open the raw html editor.',
         )
   }
 
@@ -436,7 +434,9 @@ export default function StatusBar(props) {
         withBackground={false}
         withBorder={false}
       >
-        {props.rceIsFullscreen ? <IconExitFullScreenLine /> : <IconFullScreenLine />}
+        <div style={{fontSize: '0.9rem'}}>
+          {props.rceIsFullscreen ? <IconExitFullScreenLine /> : <IconFullScreenLine />}
+        </div>
       </IconButton>
     )
   }
@@ -455,10 +455,53 @@ export default function StatusBar(props) {
     )
   }
 
+  function renderAccessibleResizeHandle() {
+    if (props.rceIsFullscreen) return null
+
+    const increaseBtnId = 'rce-resize-increase-btn'
+    const decreaseBtnId = 'rce-resize-decrease-btn'
+
+    const handleResize = deltaY => {
+      props.onResize(null, {deltaY, deltaX: 0})
+    }
+
+    return (
+      <>
+        <IconButton
+          data-btn-id={increaseBtnId}
+          data-testid={increaseBtnId}
+          color="secondary"
+          title={formatMessage('Increase Rich Content Area')}
+          tabIndex={tabIndexForBtn(increaseBtnId)}
+          onFocus={() => setFocusedBtnId(increaseBtnId)}
+          withBackground={false}
+          withBorder={false}
+          onClick={() => handleResize(5)}
+        >
+          <IconAddLine />
+        </IconButton>
+        <IconButton
+          data-btn-id={decreaseBtnId}
+          data-testid={decreaseBtnId}
+          color="secondary"
+          title={formatMessage('Decrease Rich Content Area')}
+          tabIndex={tabIndexForBtn(decreaseBtnId)}
+          onFocus={() => setFocusedBtnId(decreaseBtnId)}
+          withBackground={false}
+          withBorder={false}
+          onClick={() => handleResize(-5)}
+        >
+          <IconCheckMarkIndeterminateLine />
+        </IconButton>
+      </>
+    )
+  }
+
   const flexJustify = isHtmlView() ? 'end' : 'start'
   const html_view = isFeature('html_view') && isAvailable('instructure_html_view')
   const fullscreen = isFeature('fullscreen') && isAvailable('instructure_fullscreen')
   const resize_handle = isFeature('resize_handle')
+  const a11y_resize_handlers = isFeature('a11y_resize_handlers')
 
   return (
     <InstUISettingsProvider
@@ -487,7 +530,7 @@ export default function StatusBar(props) {
 
           {isFeature('word_count') && isAvailable('instructure_wordcount') && renderWordCount()}
           {(html_view || fullscreen || resize_handle) &&
-            renderSection3(html_view, fullscreen, resize_handle)}
+            renderSection3({html_view, fullscreen, resize_handle, a11y_resize_handlers})}
         </Flex.Item>
       </Flex>
     </InstUISettingsProvider>

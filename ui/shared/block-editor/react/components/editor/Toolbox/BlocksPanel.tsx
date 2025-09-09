@@ -25,19 +25,17 @@ import {View} from '@instructure/ui-view'
 import {IconAdminToolsLine} from '@instructure/ui-icons'
 
 import {ButtonBlock, ButtonBlockIcon} from '../../user/blocks/ButtonBlock'
-import {TextBlock, TextBlockIcon} from '../../user/blocks/TextBlock'
-import {HeadingBlock, HeadingBlockIcon} from '../../user/blocks/HeadingBlock'
-import {ResourceCard, ResourceCardIcon} from '../../user/blocks/ResourceCard'
 import {ImageBlock, ImageBlockIcon} from '../../user/blocks/ImageBlock'
+import {MediaBlock, MediaBlockIcon} from '../../user/blocks/MediaBlock'
 import {IconBlock, IconBlockIcon} from '../../user/blocks/IconBlock'
-import {RCEBlock, RCEBlockIcon} from '../../user/blocks/RCEBlock'
+import {RCETextBlock, RCETextBlockIcon} from '../../user/blocks/RCETextBlock'
 import {TabsBlock, TabsBlockIcon} from '../../user/blocks/TabsBlock'
 import {GroupBlock, GroupBlockIcon} from '../../user/blocks/GroupBlock'
 import {DividerBlock, DividerBlockIcon} from '../../user/blocks/DividerBlock'
 
 import {createFromTemplate} from '../../../utils'
 import {type BlockTemplate, type TemplateNodeTree} from '../../../types'
-import {type TemplatePanelProps, type KeyboardOrMouseEvent} from './types'
+import {type TemplatePanelProps} from './types'
 import {EditTemplateButtons} from './EditTemplateButtons'
 
 type BlocksPanelProps = TemplatePanelProps & {
@@ -75,7 +73,7 @@ const BlocksPanel = ({
         })
       return candidateId
     },
-    [query]
+    [query],
   )
 
   // if a node is selected, find where w/in that node to add the new block
@@ -96,13 +94,14 @@ const BlocksPanel = ({
       event.preventDefault()
       const parentId = getBlockTargetParent()
       if (!parentId) {
+         
         window.alert("I don't know where to put this block")
         return
       }
       const node_tree = query.parseReactElement(element).toNodeTree()
       actions.addNodeTree(node_tree, parentId)
     },
-    [actions, getBlockTargetParent, query]
+    [actions, getBlockTargetParent, query],
   )
 
   const handleAddBlockKey = useCallback(
@@ -111,7 +110,7 @@ const BlocksPanel = ({
         handleAddBlock(element, e)
       }
     },
-    [handleAddBlock]
+    [handleAddBlock],
   )
 
   const handleAddBlockTemplate = useCallback(
@@ -126,7 +125,7 @@ const BlocksPanel = ({
         actions.addNodeTree(node_tree, parentId)
       }
     },
-    [actions, getBlockTargetParent, query, templates]
+    [actions, getBlockTargetParent, query, templates],
   )
 
   const handleAddBlockTemplateKey = useCallback(
@@ -135,7 +134,7 @@ const BlocksPanel = ({
         handleAddBlockTemplate(id)
       }
     },
-    [handleAddBlockTemplate]
+    [handleAddBlockTemplate],
   )
 
   const renderBox = (label: string, icon: string, element: JSX.Element) => {
@@ -190,6 +189,7 @@ const BlocksPanel = ({
         role="button"
         onClick={handleAddBlockTemplate.bind(null, template.id)}
         onKeyDown={handleAddBlockTemplateKey.bind(null, template.id)}
+        data-testid="blocks-panel-view-item-template-block"
       >
         <Flex
           direction="column"
@@ -223,12 +223,10 @@ const BlocksPanel = ({
   return (
     <Flex gap="x-small" justifyItems="space-between" alignItems="center" wrap="wrap">
       {renderBox('Button', ButtonBlockIcon, <ButtonBlock text="Click me" />)}
-      {renderBox('Text', TextBlockIcon, <TextBlock />)}
-      {renderBox('RCE', RCEBlockIcon, <RCEBlock text="" />)}
+      {renderBox('Text', RCETextBlockIcon, <RCETextBlock text="" />)}
       {renderBox('Icon', IconBlockIcon, <IconBlock iconName="apple" />)}
-      {renderBox('Heading', HeadingBlockIcon, <HeadingBlock />)}
-      {renderBox('Resource Card', ResourceCardIcon, <ResourceCard />)}
       {renderBox('Image', ImageBlockIcon, <ImageBlock />)}
+      {renderBox('Media', MediaBlockIcon, <MediaBlock />)}
       {renderBox('Group', GroupBlockIcon, <GroupBlock />)}
       {renderBox('Tabs', TabsBlockIcon, <TabsBlock />)}
       {renderBox('Divider', DividerBlockIcon, <DividerBlock />)}

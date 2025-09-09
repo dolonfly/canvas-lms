@@ -6,7 +6,7 @@ externally from the main application, in your own programs and scripts.
 This documentation describes the resources that make up the API.
 
 To get started, you'll want to review the general basics, including the
-information below and the page on <a href="oauth.html">Authentication using OAuth2</a>.
+information below and the page on <a href="file.oauth.html">Authentication using OAuth2</a>.
 
 API Changes
 ------
@@ -73,7 +73,7 @@ OAuth2 Token sent in query string:
 curl "https://canvas.instructure.com/api/v1/courses?access_token=<ACCESS-TOKEN>"
 ```
 
-Read more about <a href="oauth.html">OAuth2 and how to get access tokens.</a>
+Read more about <a href="file.oauth.html">OAuth2 and how to get access tokens.</a>
 
 SSL
 ---
@@ -82,6 +82,13 @@ Note that if you make an API call using HTTP instead of HTTPS, you will
 be redirected to HTTPS. However, at that point, the credentials
 have already been sent in clear over the internet. Please make
 sure that you are using HTTPS.
+
+Canvas Experiences
+------
+
+Canvas LMS supports several experiences including Canvas Career and Canvas
+for Elementary. The vast majority of these API resources are shared, though
+some are applicable only to certain experiences.
 
 About this Documentation
 ------------------------

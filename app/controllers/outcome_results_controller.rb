@@ -464,7 +464,11 @@ class OutcomeResultsController < ApplicationController
     #   app/controllers/quizzes/quizzes_controller.rb
     #   app/controllers/quizzes_next/quizzes_api_controller.rb
     #   app/controllers/application_controller.rb
-    [results_type, "context_uuid", @context.uuid, "current_user_uuid", @current_user.uuid, "account_uuid", @domain_root_account.uuid]
+
+    # If there are outcome ids in the params we need to take them into consideration when caching
+    outcome_ids_key = Digest::MD5.hexdigest(params[:outcome_ids].split(",").sort.join("|")) if params[:outcome_ids].present?
+
+    [results_type, "context_uuid", @context.uuid, "current_user_uuid", @current_user.uuid, "account_uuid", @domain_root_account.uuid, outcome_ids_key].compact
   end
 
   # used in sLMGB/LMGB
@@ -509,12 +513,15 @@ class OutcomeResultsController < ApplicationController
     # NOTE: If viewing all sections and a user is concluded or inactive in one section and not another,
     # the student should always be visible
 
-    join_query = "LEFT JOIN #{Enrollment.quoted_table_name} ON enrollments.type IN ('StudentEnrollment', 'StudentViewEnrollment') AND enrollments.user_id = users.id"
-    if params[:section_id]
-      join_query += " AND enrollments.course_section_id = #{params[:section_id]}"
+    user_query = User.joins(:enrollments)
+                     .where(enrollments: { type: ["StudentEnrollment", "StudentViewEnrollment"], course_id: @context.id })
+                     .where.not(enrollments: { workflow_state: filters })
+
+    if params[:section_id]&.to_i&.positive?
+      user_query = user_query.where(enrollments: { course_section_id: params[:section_id].to_i })
     end
 
-    @users = User.joins(join_query).where("#{Enrollment.quoted_table_name}.course_id = #{@context.id} AND enrollments.workflow_state NOT IN (?)", filters).distinct
+    @users = user_query.distinct
   end
 
   # used in LMGB
@@ -555,7 +562,7 @@ class OutcomeResultsController < ApplicationController
 
   def handle_inst_statsd_outcomes_page_views
     if student_lmgb_view? || observer_lmgb_view?
-      InstStatsd::Statsd.increment("outcomes_page_views", tags: { type: "student_lmgb" })
+      InstStatsd::Statsd.distributed_increment("outcomes_page_views", tags: { type: "student_lmgb" })
     end
   end
 
@@ -648,7 +655,7 @@ class OutcomeResultsController < ApplicationController
   end
 
   def include_users
-    outcome_results_linked_users_json(@users)
+    outcome_results_linked_users_json(@users, @context)
   end
 
   def include_alignments
@@ -694,7 +701,8 @@ class OutcomeResultsController < ApplicationController
     return true unless params[:sort_by]
 
     sort_by = params[:sort_by]
-    reject! "invalid sort_by parameter value" if sort_by && !%w[student outcome].include?(sort_by)
+    sortable_fields = %w[student student_name student_sis_id student_integration_id student_login_id outcome]
+    reject! "invalid sort_by parameter value" if sort_by && !sortable_fields.include?(sort_by)
     if sort_by == "outcome"
       sort_outcome_id = params[:sort_outcome_id]
       reject! "missing required sort_outcome_id parameter value" unless sort_outcome_id
@@ -818,12 +826,25 @@ class OutcomeResultsController < ApplicationController
   end
 
   def apply_sort_order(relation)
-    if params[:sort_by] == "student"
-      order_clause = User.sortable_name_order_by_clause(User.quoted_table_name)
-      order_clause = "#{order_clause} DESC" if params[:sort_order] == "desc"
-      relation.order(Arel.sql(order_clause))
-    else
+    order_by = case params[:sort_by]
+               when "student_name"
+                 "name"
+               when "student_sis_id"
+                 "sis_id"
+               when "student_integration_id"
+                 "integration_id"
+               when "student_login_id"
+                 "login_id"
+               when "student"
+                 "username"
+               else
+                 nil
+               end
+
+    if order_by.nil?
       relation
+    else
+      UserSearch.order_scope(relation, @context, { sort: order_by, order: params[:sort_order] })
     end
   end
 end

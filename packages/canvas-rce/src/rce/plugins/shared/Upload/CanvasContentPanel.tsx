@@ -46,13 +46,13 @@ export default function CanvasContentPanel({
 
   // storeProps has functions that collide with what we want to do in a block editor setting
   const baseStoreProps = useStoreProps()
-  const {onImageEmbed: _, ...storeProps} = baseStoreProps
+  const {onImageEmbed: _, onMediaEmbed: _m, ...storeProps} = baseStoreProps
 
   function handleFilterChange(
     newFilter: any,
     onChangeContext: (arg0: {contextType: any; contextId: any}) => void,
     onChangeSearchString: (arg0: any) => void,
-    onChangeSortBy: (arg0: {sort: any; dir: any}) => void
+    onChangeSortBy: (arg0: {sort: any; dir: any}) => void,
   ) {
     const newFilterSettings = {...newFilter}
     if (newFilterSettings.sortValue) {
@@ -97,6 +97,10 @@ export default function CanvasContentPanel({
     setFileUrl(image.href)
   }
 
+  const handleMediaClick = (media: {id: string}) => {
+    setFileUrl(`/media_attachments_iframe/${media.id}`)
+  }
+
   return (
     <Flex as="div" direction="column" tabIndex={-1}>
       <Flex.Item padding="medium">
@@ -107,7 +111,7 @@ export default function CanvasContentPanel({
               newFilter,
               storeProps.onChangeContext,
               storeProps.onChangeSearchString,
-              storeProps.onChangeSortBy
+              storeProps.onChangeSortBy,
             )
           }}
         />
@@ -128,6 +132,7 @@ export default function CanvasContentPanel({
                   onEditClick={setLink}
                   selectedLink={link}
                   onImageEmbed={handleImageClick}
+                  onMediaEmbed={handleMediaClick}
                   {...storeProps}
                 />
               </ErrorBoundary>

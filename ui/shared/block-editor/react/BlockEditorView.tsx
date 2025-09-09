@@ -16,7 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, {useEffect, useState} from 'react'
+import React, {useCallback, useEffect, useState} from 'react'
 import {Editor, Frame} from '@craftjs/core'
 import {blocks} from './components/blocks'
 import {
@@ -25,33 +25,36 @@ import {
   type BlockEditorDataTypes,
   type BlockEditorData,
 } from './utils/transformations'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 
 import './style.css'
 
-const I18n = useI18nScope('block-editor')
+const I18n = createI18nScope('block-editor')
 
 type BlockEditorViewProps = {
   content: BlockEditorDataTypes
+  onRendered?: () => void
 }
 
-const BlockEditorView = ({content}: BlockEditorViewProps) => {
+const BlockEditorView = ({content, onRendered}: BlockEditorViewProps) => {
   const [data] = useState<BlockEditorData>(() => {
-    if (content?.blocks) {
-      return transform(content)
-    }
-    return {version: '0.2', blocks: undefined} as BlockEditorData
+    return transform(content)
   })
+
+  // onNodesChanged gets called once when first rendering the blocks
+  // since this is a view and not and editor, this is OK
+  const handleNodesChange = useCallback(() => {
+    onRendered?.()
+  }, [onRendered])
 
   useEffect(() => {
     if (data.version !== LATEST_BLOCK_DATA_VERSION) {
-      // eslint-disable-next-line no-alert
       alert(I18n.t('Unknown block data version "%{v}", mayhem may ensue', {v: data.version}))
     }
   }, [data.version])
 
   return (
-    <Editor enabled={false} resolver={blocks}>
+    <Editor enabled={false} resolver={blocks} onNodesChange={handleNodesChange}>
       <Frame data={data.blocks} />
     </Editor>
   )

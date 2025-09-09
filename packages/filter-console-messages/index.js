@@ -32,13 +32,14 @@ const consoleMessagesToIgnore = {
     /.*A theme registry has already been initialized.*/,
     // from an old discussions edit page
     /Error: Not implemented: navigation \(except hash changes\)/,
-    // Until INSTUI updates FormPropTypes.message
-    // see https://github.com/instructure/instructure-ui/issues/815
-    'Invalid prop `messages[0].text` of type `object` supplied to',
     /unknown pseudo-class selector/,
 
-    // until INSTUI fixes this in v8
-    'Warning: Failed prop type: Invalid prop `color` of value `secondary` supplied to `CondensedButton`, expected one of ["primary","primary-inverse"].',
+    /uses the legacy childContextTypes API which is no longer supported/,
+    /findDOMNode is deprecated/,
+
+    // React 18 act() warnings for Popup component that creates its own roots
+    /Warning: The current testing environment is not configured to support act\(\.\.\.\)/,
+    /Warning: Attempted to synchronously unmount a root while React was already rendering/,
   ],
   warn: [
     // Uncomment the following line if all the react 16.9 deprecations are cluttering up

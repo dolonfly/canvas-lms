@@ -19,12 +19,12 @@
 import React, {useState, useRef, useEffect, useContext, useCallback} from 'react'
 import PropTypes from 'prop-types'
 import {CreateOrEditSetModal} from '@canvas/groups/react/CreateOrEditSetModal'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 
 import {View} from '@instructure/ui-view'
 import {Flex} from '@instructure/ui-flex'
 import {TextInput} from '@instructure/ui-text-input'
-import {FormFieldGroup} from '@instructure/ui-form-field'
+import {FormField, FormFieldGroup} from '@instructure/ui-form-field'
 import {
   IconAddLine,
   IconPublishSolid,
@@ -45,6 +45,10 @@ import {GradedDiscussionOptions} from '../DiscussionOptions/GradedDiscussionOpti
 import {NonGradedDateOptions} from '../DiscussionOptions/NonGradedDateOptions'
 import {AnonymousSelector} from '../DiscussionOptions/AnonymousSelector'
 import {
+  DEFAULT_SORT_ORDER,
+  DEFAULT_SORT_ORDER_LOCKED,
+  DEFAULT_EXPANDED_STATE,
+  DEFAULT_EXPANDED_LOCKED,
   DiscussionDueDatesContext,
   defaultEveryoneOption,
   defaultEveryoneElseOption,
@@ -53,6 +57,7 @@ import {
   REPLY_TO_TOPIC,
   REPLY_TO_ENTRY,
 } from '../../util/constants'
+import {ViewSettings} from '../DiscussionOptions/ViewSettings'
 
 import {AttachmentDisplay} from '@canvas/discussions/react/components/AttachmentDisplay/AttachmentDisplay'
 import {responsiveQuerySizes} from '@canvas/discussions/react/utils'
@@ -82,8 +87,10 @@ import {SendEditNotificationModal} from '../SendEditNotificationModal'
 import {Views, DiscussionTopicFormViewSelector} from './DiscussionTopicFormViewSelector'
 import {MasteryPathsReactWrapper} from '@canvas/conditional-release-editor/react/MasteryPathsReactWrapper'
 import {showPostToSisFlashAlert} from '@canvas/due-dates/util/differentiatedModulesUtil'
+import {existingAttachedAssetProcessorFromGraphql} from '@canvas/lti/model/AssetProcessor'
+import {useAssetProcessorsState} from '@canvas/lti-asset-processor/react/hooks/AssetProcessorsState'
 
-const I18n = useI18nScope('discussion_create')
+const I18n = createI18nScope('discussion_create')
 
 const instUINavEnabled = () => window.ENV?.FEATURES?.instui_nav
 
@@ -139,6 +146,12 @@ function DiscussionTopicForm({
   const isUnpublishedAnnouncement =
     isAnnouncement && !ENV.DISCUSSION_TOPIC?.ATTRIBUTES.course_published
   const published = currentDiscussionTopic?.published ?? false
+  const shouldMasteryPathsBeVisible = ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED && !isAnnouncement
+  const masteryPathsWithCoursePaces =
+    ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED &&
+    ENV.IN_PACED_COURSE &&
+    ENV.FEATURES.course_pace_pacing_with_mastery_paths
+  const userIsRestricted = ENV.USER_HAS_RESTRICTED_VISIBILITY
 
   const announcementAlertProps = () => {
     if (isUnpublishedAnnouncement) {
@@ -147,7 +160,7 @@ function DiscussionTopicForm({
         key: 'announcement-course-unpublished-alert',
         variant: 'warning',
         text: I18n.t(
-          'Notifications will not be sent retroactively for announcements created before publishing your course or before the course start date. You may consider using the Available from option and set to publish on a future date.'
+          'Notifications will not be sent retroactively for announcements created before publishing your course or before the course start date. You may consider using the Available from option and set to publish on a future date.',
         ),
       }
     } else {
@@ -157,15 +170,24 @@ function DiscussionTopicForm({
 
   const allSectionsOption = {id: 'all', name: 'All Sections'}
 
-  const checkpointsToolTipText = I18n.t(
-    'Checkpoints can be set to have different due dates and point values for the initial response and the subsequent replies.'
-  )
+  const isAlreadyAGroupDiscussion = !!currentDiscussionTopic?.groupSet?._id
+
+  const isCheckpointsForbidden =
+    currentDiscussionTopic?.assignment?.hasSubmittedSubmissions ||
+    currentDiscussionTopic?.entryCounts?.repliesCount > 0
+
+  const checkPointsToolTipText = isCheckpointsForbidden
+    ? I18n.t('Checkpoints cannot be toggled after replies have been made.')
+    : I18n.t(
+        'Checkpoints can be set to have different due dates and point values for the initial response and the subsequent replies.',
+      )
 
   const inputWidth = '100%'
 
   const initialSelectedView = window.location.hash.includes('mastery-paths-editor')
     ? Views.MasteryPaths
     : Views.Details
+
   const [selectedView, setSelectedView] = useState(initialSelectedView)
 
   const [title, setTitle] = useState(currentDiscussionTopic?.title || '')
@@ -177,47 +199,62 @@ function DiscussionTopicForm({
 
   const [rceContent, setRceContent] = useState(currentDiscussionTopic?.message || '')
 
+  const isRceContentChanged = () => {
+    const originalContent = new DOMParser().parseFromString(
+      currentDiscussionTopic?.message || '',
+      'text/html',
+    ).body.innerHTML
+    const newContent = new DOMParser().parseFromString(rceContent, 'text/html').body.innerHTML
+
+    return originalContent !== newContent
+  }
+
   let sectionsDefault = []
   if (
     !currentDiscussionTopic?.isSectionSpecific ||
     currentDiscussionTopic?.courseSections?.length > 0
   ) {
-    sectionsDefault =
-      currentDiscussionTopic?.courseSections?.length > 0
-        ? currentDiscussionTopic.courseSections.map(section => section._id)
-        : ['all']
+    if (currentDiscussionTopic?.courseSections?.length > 0) {
+      sectionsDefault = currentDiscussionTopic.courseSections.map(section => section._id)
+    } else {
+      if (userIsRestricted) {
+        sectionsDefault = sections.map(section => section.id)
+      } else {
+        sectionsDefault = ['all']
+      }
+    }
   }
 
   const [sectionIdsToPostTo, setSectionIdsToPostTo] = useState(sectionsDefault)
 
   const [discussionAnonymousState, setDiscussionAnonymousState] = useState(
-    currentDiscussionTopic?.anonymousState || 'off'
+    currentDiscussionTopic?.anonymousState || 'off',
   )
   // default anonymousAuthorState to true, since it is the default selection for partial anonymity
   // otherwise, it is just ignored anyway
   const [anonymousAuthorState, setAnonymousAuthorState] = useState(
-    currentDiscussionTopic?.isAnonymousAuthor || true
+    currentDiscussionTopic?.isAnonymousAuthor || true,
   )
   const [isThreaded, setIsThreaded] = useState(
     currentDiscussionTopic?.discussionType === 'threaded' ||
       (currentDiscussionTopic?.discussionType === 'side_comment' &&
         ENV?.DISCUSSION_TOPIC?.ATTRIBUTES?.has_threaded_replies) ||
-      Object.keys(currentDiscussionTopic).length === 0
+      Object.keys(currentDiscussionTopic).length === 0,
   )
   const [requireInitialPost, setRequireInitialPost] = useState(
-    currentDiscussionTopic?.requireInitialPost || false
+    currentDiscussionTopic?.requireInitialPost || false,
   )
   const [enablePodcastFeed, setEnablePodcastFeed] = useState(
-    currentDiscussionTopic?.podcastEnabled || false
+    currentDiscussionTopic?.podcastEnabled || false,
   )
   const [includeRepliesInFeed, setIncludeRepliesInFeed] = useState(
-    currentDiscussionTopic?.podcastHasStudentPosts || false
+    currentDiscussionTopic?.podcastHasStudentPosts || false,
   )
   const [isGraded, setIsGraded] = useState(!!currentDiscussionTopic?.assignment || false)
 
   const [allowLiking, setAllowLiking] = useState(currentDiscussionTopic?.allowRating || false)
   const [onlyGradersCanLike, setOnlyGradersCanLike] = useState(
-    currentDiscussionTopic?.onlyGradersCanRate || false
+    currentDiscussionTopic?.onlyGradersCanRate || false,
   )
   const [addToTodo, setAddToTodo] = useState(!!currentDiscussionTopic?.todoDate || false)
   const [todoDate, setTodoDate] = useState(currentDiscussionTopic?.todoDate || null)
@@ -225,14 +262,14 @@ function DiscussionTopicForm({
   const [addToStudentToDoTimeRef, setAddToStudentToDoTimeRef] = useState()
 
   const [isGroupDiscussion, setIsGroupDiscussion] = useState(
-    !!currentDiscussionTopic?.groupSet || false
+    !!currentDiscussionTopic?.groupSet || false,
   )
   const [groupCategoryId, setGroupCategoryId] = useState(
-    currentDiscussionTopic?.groupSet?._id || null
+    currentDiscussionTopic?.groupSet?._id || null,
   )
   const [groupCategorySelectError, setGroupCategorySelectError] = useState([])
   const [locked, setLocked] = useState(
-    isAnnouncement ? currentDiscussionTopic.locked ?? !ENV.CREATE_ANNOUNCEMENTS_UNLOCKED : false
+    isAnnouncement ? (currentDiscussionTopic.locked ?? !ENV.CREATE_ANNOUNCEMENTS_UNLOCKED) : false,
   )
   const [availableFrom, setAvailableFrom] = useState(currentDiscussionTopic?.delayedPostAt || null)
   const [availableUntil, setAvailableUntil] = useState(currentDiscussionTopic?.lockAt || null)
@@ -242,13 +279,23 @@ function DiscussionTopicForm({
   ])
 
   const [pointsPossible, setPointsPossible] = useState(
-    currentDiscussionTopic?.assignment?.pointsPossible || 0
+    currentDiscussionTopic?.assignment?.pointsPossible || 0,
   )
+
+  const assetProcessors = useAssetProcessorsState(s => s.attachedProcessors)
+  const setFromExistingAttachedProcessors = useAssetProcessorsState(
+    s => s.setFromExistingAttachedProcessors,
+  )
+  useEffect(() => {
+    const graphqlAps = currentDiscussionTopic?.assignment?.ltiAssetProcessorsConnection?.nodes || []
+    setFromExistingAttachedProcessors(graphqlAps.map(existingAttachedAssetProcessorFromGraphql))
+  }, [currentDiscussionTopic?.assignment?.assetProcessors, setFromExistingAttachedProcessors])
+
   const [displayGradeAs, setDisplayGradeAs] = useState(
-    currentDiscussionTopic?.assignment?.gradingType || 'points'
+    currentDiscussionTopic?.assignment?.gradingType || 'points',
   )
   const [assignmentGroup, setAssignmentGroup] = useState(
-    currentDiscussionTopic?.assignment?.assignmentGroup?._id || ''
+    currentDiscussionTopic?.assignment?.assignmentGroup?._id || '',
   )
   const [peerReviewAssignment, setPeerReviewAssignment] = useState(() => {
     if (currentDiscussionTopic?.assignment?.peerReviews?.enabled) {
@@ -260,43 +307,49 @@ function DiscussionTopicForm({
   })
 
   const [peerReviewsPerStudent, setPeerReviewsPerStudent] = useState(
-    currentDiscussionTopic?.assignment?.peerReviews?.count || 1
+    currentDiscussionTopic?.assignment?.peerReviews?.count || 1,
   )
   const [peerReviewDueDate, setPeerReviewDueDate] = useState(
-    currentDiscussionTopic?.assignment?.peerReviews?.dueAt || ''
+    currentDiscussionTopic?.assignment?.peerReviews?.dueAt || '',
   )
   const [assignedInfoList, setAssignedInfoList] = useState(
-    isEditing ? buildAssignmentOverrides(currentDiscussionTopic) : buildDefaultAssignmentOverride()
+    isEditing ? buildAssignmentOverrides(currentDiscussionTopic) : buildDefaultAssignmentOverride(),
   )
 
   const [gradedDiscussionRefMap, setGradedDiscussionRefMap] = useState(new Map())
 
   const [importantDates, setImportantDates] = useState(
-    currentDiscussionTopic?.assignment?.importantDates || false
+    currentDiscussionTopic?.assignment?.importantDates || false,
   )
 
   const [abGuid, setAbGuid] = useState(null)
 
+  // Suppressed assignment state
+  const [suppressedAssignment, setSuppressedAssignment] = useState(
+    (currentDiscussionTopic?.assignment?.suppressAssignment && ENV.SETTINGS.suppress_assignments) ||
+      false,
+  )
+
   // Checkpoints states
   const [isCheckpoints, setIsCheckpoints] = useState(
     (currentDiscussionTopic?.assignment?.hasSubAssignments && ENV.DISCUSSION_CHECKPOINTS_ENABLED) ||
-      false
+      false,
   )
 
   const getCheckpointsPointsPossible = checkpointLabel => {
     const checkpoint = currentDiscussionTopic?.assignment?.checkpoints?.find(
-      c => c.tag === checkpointLabel
+      c => c.tag === checkpointLabel,
     )
     return checkpoint ? checkpoint.pointsPossible : 0
   }
   const [pointsPossibleReplyToTopic, setPointsPossibleReplyToTopic] = useState(
-    getCheckpointsPointsPossible(REPLY_TO_TOPIC)
+    getCheckpointsPointsPossible(REPLY_TO_TOPIC),
   )
   const [pointsPossibleReplyToEntry, setPointsPossibleReplyToEntry] = useState(
-    getCheckpointsPointsPossible(REPLY_TO_ENTRY)
+    getCheckpointsPointsPossible(REPLY_TO_ENTRY),
   )
   const [replyToEntryRequiredCount, setReplyToEntryRequiredCount] = useState(
-    currentDiscussionTopic?.replyToEntryRequiredCount || 1
+    currentDiscussionTopic?.replyToEntryRequiredCount || 1,
   )
 
   const [showGroupCategoryModal, setShowGroupCategoryModal] = useState(false)
@@ -305,21 +358,34 @@ function DiscussionTopicForm({
   const [attachmentToUpload, setAttachmentToUpload] = useState(false)
 
   const [usageRightsData, setUsageRightsData] = useState(
-    currentDiscussionTopic?.attachment?.usageRights || {}
+    currentDiscussionTopic?.attachment?.usageRights || {},
   )
   const [usageRightsErrorState, setUsageRightsErrorState] = useState(false)
 
   const [postToSis, setPostToSis] = useState(
-    !!currentDiscussionTopic?.assignment?.postToSis || false
+    !!currentDiscussionTopic?.assignment?.postToSis || false,
   )
 
   const [gradingSchemeId, setGradingSchemeId] = useState(
-    currentDiscussionTopic?.assignment?.gradingStandard?._id || undefined
+    currentDiscussionTopic?.assignment?.gradingStandard?._id || undefined,
   )
 
   const [intraGroupPeerReviews, setIntraGroupPeerReviews] = useState(
     // intra_group_peer_reviews
-    !!currentDiscussionTopic?.assignment?.peerReviews?.intraReviews || false
+    !!currentDiscussionTopic?.assignment?.peerReviews?.intraReviews || false,
+  )
+
+  const [expanded, setExpanded] = useState(
+    currentDiscussionTopic?.expanded ?? DEFAULT_EXPANDED_STATE,
+  )
+  const [expandedLocked, setExpandedLocked] = useState(
+    currentDiscussionTopic?.expandedLocked ?? DEFAULT_EXPANDED_LOCKED,
+  )
+  const [sortOrder, setSortOrder] = useState(
+    currentDiscussionTopic?.sortOrder ?? DEFAULT_SORT_ORDER,
+  )
+  const [sortOrderLocked, setSortOrderLocked] = useState(
+    currentDiscussionTopic?.sortOrderLocked ?? DEFAULT_SORT_ORDER_LOCKED,
   )
 
   const [lastShouldPublish, setLastShouldPublish] = useState(false)
@@ -336,7 +402,7 @@ function DiscussionTopicForm({
   }
   const hasGroupOverrides = () =>
     assignedInfoList.some(
-      info => info.assignedList.find(assetCode => assetCode.includes('group')) !== undefined
+      info => info.assignedList.find(assetCode => assetCode.includes('group')) !== undefined,
     )
   const assignmentDueDateContext = {
     assignedInfoList,
@@ -361,18 +427,22 @@ function DiscussionTopicForm({
     pointsPossible,
     isGraded,
     isCheckpoints,
-    postToSis: ENV.FEATURES.selective_release_edit_page ? postToSisForCards.current : postToSis,
+    postToSis: postToSisForCards.current,
+  }
+
+  const getSectionList = () => {
+    const sectionsForUser = [...sections]
+    if (!userIsRestricted) {
+      sectionsForUser.push(allSectionsOption)
+    }
+    return sectionsForUser
   }
 
   useEffect(() => {
     // Expects to force the focus the errors on re-render once
-    if (
-      shouldForceFocusAfterRenderRef.current &&
-      ENV.FEATURES.selective_release_ui_api &&
-      ENV.FEATURES.selective_release_edit_page
-    ) {
+    if (shouldForceFocusAfterRenderRef.current) {
       const sectionViewRef = document.getElementById(
-        'manage-assign-to-container'
+        'manage-assign-to-container',
       )?.reactComponentInstance
       if (sectionViewRef?.focusErrors()) {
         shouldForceFocusAfterRenderRef.current = false
@@ -394,6 +464,13 @@ function DiscussionTopicForm({
     if (!isGroupDiscussion) setGroupCategoryId(null)
   }, [isGroupDiscussion])
 
+  useEffect(() => {
+    if (isGraded) {
+      setAddToTodo(false)
+      setTodoDate(null)
+    }
+  }, [isGraded])
+
   const setAbGuidPostMessageListener = event => {
     const validatedAbGuid = isGuidDataValid(event)
     if (validatedAbGuid) {
@@ -409,7 +486,7 @@ function DiscussionTopicForm({
         document.querySelector('#assignment_external_tools'),
         'assignment_edit',
         parseInt(ENV.context_id, 10),
-        parseInt(currentDiscussionTopic?.assignment?._id, 10)
+        parseInt(currentDiscussionTopic?.assignment?._id, 10),
       )
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -425,7 +502,7 @@ function DiscussionTopicForm({
     }
 
     window.dispatchEvent(
-      new CustomEvent('triggerMasteryPathsUpdateAssignment', {detail: {assignmentInfo}})
+      new CustomEvent('triggerMasteryPathsUpdateAssignment', {detail: {assignmentInfo}}),
     )
   }, [gradingSchemeId, displayGradeAs, pointsPossible, isGraded])
 
@@ -436,7 +513,7 @@ function DiscussionTopicForm({
     shouldShowTodoSettings,
     shouldShowPostToSectionOption,
     shouldShowAnonymousOptions,
-    shouldShowAnnouncementOnlyOptions,
+    shouldShowViewSettings,
     shouldShowGroupOptions,
     shouldShowGradedDiscussionOptions,
     shouldShowUsageRightsOption,
@@ -448,6 +525,8 @@ function DiscussionTopicForm({
     shouldShowCheckpointsOptions,
     shouldShowAssignToForUngradedDiscussions,
     shouldShowAllowParticipantsToCommentOption,
+    shouldShowSuppressAssignmentOption,
+    groupContextType,
   } = useShouldShowContent(
     isGraded,
     isAnnouncement,
@@ -456,24 +535,32 @@ function DiscussionTopicForm({
     discussionAnonymousState,
     isEditing,
     isStudent,
-    published
+    published,
+    isCheckpoints,
+    isAlreadyAGroupDiscussion,
   )
 
   const canGroupDiscussion = !isEditing || currentDiscussionTopic?.canGroup || false
 
   const createSubmitPayload = shouldPublish => {
+    let message = currentDiscussionTopic?.message
+
+    if (isRceContentChanged()) {
+      message = rceContent
+    }
+
     const payload = {
       // Static payload properties
       title,
-      message: rceContent,
+      message,
       podcastEnabled: enablePodcastFeed,
       discussionType: isThreaded ? 'threaded' : 'not_threaded',
       podcastHasStudentPosts: includeRepliesInFeed,
       published: shouldPublish,
       isAnnouncement,
       fileId: attachment?._id,
-      delayedPostAt: availableFrom,
-      lockAt: availableUntil,
+      delayedPostAt: isCheckpoints ? null : availableFrom,
+      lockAt: isCheckpoints ? null : availableUntil,
       // Conditional payload properties
       assignment: prepareAssignmentPayload(
         abGuid,
@@ -495,34 +582,34 @@ function DiscussionTopicForm({
         masteryPathsOption,
         importantDates,
         isCheckpoints,
-        currentDiscussionTopic?.assignment
+        currentDiscussionTopic?.assignment,
+        suppressedAssignment,
+        assetProcessors,
       ),
       checkpoints: prepareCheckpointsPayload(
         assignedInfoList,
         pointsPossibleReplyToTopic,
         pointsPossibleReplyToEntry,
         replyToEntryRequiredCount,
-        isCheckpoints
+        isCheckpoints,
       ),
       groupCategoryId: isGroupDiscussion ? groupCategoryId : null,
       specificSections: shouldShowPostToSectionOption ? sectionIdsToPostTo.join() : 'all',
-      locked: shouldShowAnnouncementOnlyOptions ? locked : false,
+      locked: isAnnouncement ? locked : false,
       // we allow requireInitial posts for group discussions created from the course,
       // just not from discussions created from within the group context directly
       requireInitialPost: ENV.context_is_not_group ? requireInitialPost : false,
       todoDate: addToTodo ? todoDate : null,
       allowRating: shouldShowLikingOption ? allowLiking : false,
       onlyGradersCanRate: shouldShowLikingOption ? onlyGradersCanLike : false,
+      expanded,
+      expandedLocked,
+      sortOrder,
+      sortOrderLocked,
       ...(shouldShowUsageRightsOption && {usageRightsData}),
     }
 
-    if (
-      !isGraded &&
-      ENV.FEATURES?.selective_release_ui_api &&
-      !isAnnouncement &&
-      ENV.context_type !== 'Group' &&
-      !isGroupDiscussion
-    ) {
+    if (!isGraded && !isAnnouncement && ENV.context_type !== 'Group' && !isGroupDiscussion) {
       delete payload.specificSections
       Object.assign(
         payload,
@@ -530,9 +617,18 @@ function DiscussionTopicForm({
           assignedInfoList,
           defaultEveryoneOption,
           defaultEveryoneElseOption,
-          masteryPathsOption
-        )
+          masteryPathsOption,
+        ),
       )
+    } else if (isGraded && !isGroupDiscussion && ENV.context_type !== 'Group' && !isCheckpoints) {
+      // Well, its fairly lame to call prepUngraded inside if isGraded, but availableUntil/From is ignored by selective release, so we need to fetch it somehow.
+      const {delayedPostAt, lockAt} = prepareUngradedDiscussionOverridesPayload(
+        assignedInfoList,
+        defaultEveryoneOption,
+        defaultEveryoneElseOption,
+        masteryPathsOption,
+      )
+      Object.assign(payload, {delayedPostAt, lockAt})
     }
 
     const previousAnonymousState = !currentDiscussionTopic?.anonymousState
@@ -597,7 +693,7 @@ function DiscussionTopicForm({
       sectionIdsToPostTo,
       assignedInfoList,
       postToSis,
-      showPostToSisFlashAlert('manage-assign-to', !ENV.FEATURES.selective_release_edit_page)
+      showPostToSisFlashAlert('manage-assign-to', false),
     )
 
   const continueSubmitForm = (shouldPublish, shouldNotifyUsers = false) => {
@@ -612,16 +708,21 @@ function DiscussionTopicForm({
 
     if (
       // Not validate override dates for announcements or ungraded group discussions
-      !(isAnnouncement || (isGroupDiscussion && !isGraded) || ENV?.context_type === 'Group') &&
-      ENV.FEATURES.selective_release_ui_api &&
-      ENV.FEATURES.selective_release_edit_page
+      !(isAnnouncement || (isGroupDiscussion && !isGraded) || ENV?.context_type === 'Group')
     ) {
-      sectionViewRef = document.getElementById('manage-assign-to-container')?.reactComponentInstance
       const aDueDateMissing = assignedInfoList.some(assignee => !assignee.dueDate)
       const postToSisEnabled = isGraded && postToSis && ENV.DUE_DATE_REQUIRED_FOR_ACCOUNT
-      // Runs custom validation for all cards with the current post to sis selection without re-renders
-      formIsValid =
-        formIsValid && sectionViewRef?.allCardsValidCustom({dueDateRequired: postToSisEnabled})
+
+      const isPacedDiscussion = ENV.IN_PACED_COURSE
+      if (!isPacedDiscussion) {
+        sectionViewRef = document.getElementById(
+          'manage-assign-to-container',
+        )?.reactComponentInstance
+        // Runs custom validation for all cards with the current post to sis selection without re-renders
+        formIsValid =
+          formIsValid && sectionViewRef?.allCardsValidCustom({dueDateRequired: postToSisEnabled})
+      }
+
       // If hasAfterRenderIssue is true, a useEffect hook will be responsible to run the focus logic
       hasAfterRenderIssue = postToSisEnabled && aDueDateMissing
     }
@@ -633,15 +734,13 @@ function DiscussionTopicForm({
     }
 
     setTimeout(() => {
-      if (ENV.FEATURES.selective_release_ui_api && ENV.FEATURES.selective_release_edit_page) {
-        if (!formIsValid) {
-          // If there are errors visible already don't force the focus
-          if (hasAfterRenderIssue) {
-            shouldForceFocusAfterRenderRef.current = true
-          } else {
-            // Focus errors that are already visible
-            sectionViewRef?.focusErrors()
-          }
+      if (!formIsValid) {
+        // If there are errors visible already don't force the focus
+        if (hasAfterRenderIssue) {
+          shouldForceFocusAfterRenderRef.current = true
+        } else {
+          // Focus errors that are already visible
+          sectionViewRef?.focusErrors()
         }
       }
       setIsSubmitting(false)
@@ -657,16 +756,22 @@ function DiscussionTopicForm({
         assignedTo =>
           assignedTo === defaultEveryoneOption.assetCode ||
           assignedTo === defaultEveryoneElseOption.assetCode ||
-          assignedTo == `course_${ENV.context_id}`
+          assignedTo == `course_${ENV.context_id}`,
       )
 
-      if (!isEveryoneOrEveryoneElseSelected) {
+      const sectionViewRef = document.getElementById(
+        'manage-assign-to-container',
+      )?.reactComponentInstance
+      sectionViewRef?.focusErrors()
+      if (sectionViewRef?.mustConvertTags()) return false
+
+      if (!isEveryoneOrEveryoneElseSelected && !masteryPathsWithCoursePaces) {
         const selectedSectionIds = selectedAssignedTo
           .filter(assignedTo => String(assignedTo).startsWith('course_section_'))
           .map(assignedTo => assignedTo.split('_')[2])
 
         const missingSectionObjs = sections.filter(
-          section => !selectedSectionIds.includes(section.id)
+          section => !selectedSectionIds.includes(section.id),
         )
 
         if (missingSectionObjs.length > 0 && isGraded) {
@@ -682,14 +787,21 @@ function DiscussionTopicForm({
   }
 
   const getPublishStatus = () => {
-    return published ? (
-      <Text color="success" weight="normal">
-        <IconPublishSolid /> {I18n.t('Published')}
-      </Text>
-    ) : (
-      <Text color="secondary" weight="normal">
-        <IconUnpublishedLine /> {I18n.t('Not Published')}
-      </Text>
+    return (
+      <div
+        aria-label={published ? I18n.t('Published') : I18n.t('Not Published')}
+        style={{display: 'inline-flex', alignItems: 'center'}}
+      >
+        {published ? (
+          <Text color="success" weight="normal">
+            <IconPublishSolid aria-hidden="true" /> {I18n.t('Published')}
+          </Text>
+        ) : (
+          <Text color="secondary" weight="normal">
+            <IconUnpublishedLine aria-hidden="true" /> {I18n.t('Not Published')}
+          </Text>
+        )}
+      </div>
     )
   }
 
@@ -697,7 +809,11 @@ function DiscussionTopicForm({
     return (
       <Flex justifyItems="space-between">
         <Flex.Item>{I18n.t('Topic Title')}</Flex.Item>
-        {!isAnnouncement && !instUINavEnabled() && <Flex.Item>{getPublishStatus()}</Flex.Item>}
+        {!isAnnouncement && !instUINavEnabled() && (
+          <Flex.Item style={{marginLeft: '1rem', whiteSpace: 'nowrap'}}>
+            {getPublishStatus()}
+          </Flex.Item>
+        )}
       </Flex>
     )
   }
@@ -736,7 +852,7 @@ function DiscussionTopicForm({
   const renderAvailabilityOptions = useCallback(() => {
     if (isGraded && !isAnnouncement) {
       return (
-        <View as="div" data-testid="assignment-settings-section">
+        <View as="div" data-testid="assignment-assign-to-section">
           <DiscussionDueDatesContext.Provider value={assignmentDueDateContext}>
             <GradedDiscussionOptions
               assignmentGroups={assignmentGroups}
@@ -760,14 +876,18 @@ function DiscussionTopicForm({
               setIntraGroupPeerReviews={setIntraGroupPeerReviews}
               isCheckpoints={isCheckpoints && ENV.DISCUSSION_CHECKPOINTS_ENABLED}
               canManageAssignTo={ENV.DISCUSSION_TOPIC?.PERMISSIONS?.CAN_MANAGE_ASSIGN_TO_GRADED}
+              // assetProcessors are managed in Zustand store used here and by
+              // AssetProcessors component, no need to pass them down
             />
           </DiscussionDueDatesContext.Provider>
         </View>
       )
-    } else if (!isGroupDiscussion && !isAnnouncement && ENV.FEATURES?.selective_release_ui_api) {
+    } else if (!isGroupDiscussion && !isAnnouncement) {
       return (
-        <View as="div" data-testid="assignment-settings-section">
-          <Text weight="bold">{I18n.t('Assign Access')}</Text>
+        <View as="div" data-testid="discussion-assign-to-section">
+          <Text size="large" as="h2">
+            {I18n.t('Assign Access')}
+          </Text>
           <DiscussionDueDatesContext.Provider value={assignmentDueDateContext}>
             <ItemAssignToTrayWrapper />
           </DiscussionDueDatesContext.Provider>
@@ -795,6 +915,7 @@ function DiscussionTopicForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    assetProcessors,
     assignmentDueDateContext,
     assignmentGroup,
     assignmentGroups,
@@ -815,15 +936,73 @@ function DiscussionTopicForm({
     shouldShowAssignToForUngradedDiscussions,
   ])
 
-  return (
-    <>
+  const renderDiscussionTopicFormViewSelector = () => {
+    return (
       <DiscussionTopicFormViewSelector
         selectedView={selectedView}
         setSelectedView={setSelectedView}
         breakpoints={breakpoints}
-        shouldMasteryPathsBeVisible={ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED && !isAnnouncement}
+        shouldMasteryPathsBeVisible={shouldMasteryPathsBeVisible}
         shouldMasteryPathsBeEnabled={isGraded}
       />
+    )
+  }
+
+  const renderAllowParticipantsToComment = useCallback(() => {
+    if (!isAnnouncement) return
+    if (!shouldShowAllowParticipantsToCommentOption) {
+      const tooltipText =
+        groupContextType === 'Account'
+          ? I18n.t('This option is locked in account settings')
+          : I18n.t('This option is locked in course settings')
+
+      return (
+        <Tooltip renderTip={tooltipText}>
+          <Checkbox
+            label={I18n.t('Allow Participants to Comment')}
+            value="enable-participants-commenting"
+            inline={true}
+            checked={false}
+            disabled={true}
+          />
+        </Tooltip>
+      )
+    } else {
+      return (
+        <Checkbox
+          label={I18n.t('Allow Participants to Comment')}
+          value="enable-participants-commenting"
+          inline={true}
+          checked={!locked}
+          onChange={e => {
+            setLocked(!locked)
+            setRequireInitialPost(false)
+            e.target.checked === false && setIsThreaded(true)
+          }}
+        />
+      )
+    }
+  }, [isAnnouncement, locked, shouldShowAllowParticipantsToCommentOption])
+
+  const handleGradedCheckboxChange = () => {
+    setIsGraded(!isGraded)
+    if (!isGraded) {
+      // When switching to ungraded, clear assignment-related fields
+      setPointsPossible(0)
+      setDisplayGradeAs('points')
+      setAssignmentGroup(null)
+      setAddToTodo(false)
+      setTodoDate(null)
+    } else {
+      setIsCheckpoints(false)
+      setSuppressedAssignment(false)
+    }
+  }
+
+  return (
+    <>
+      {((shouldMasteryPathsBeVisible && instUINavEnabled()) || !instUINavEnabled()) &&
+        renderDiscussionTopicFormViewSelector()}
       <View
         margin={breakpoints.mobileOnly ? 'mediumSmall 0 0 0' : '0'}
         display={selectedView === Views.Details ? 'block' : 'none'}
@@ -837,8 +1016,9 @@ function DiscussionTopicForm({
           <TextInput
             data-testid="discussion-topic-title"
             renderLabel={renderLabelWithPublishStatus()}
-            type={I18n.t('text')}
+            aria-label={I18n.t('Topic Title')}
             placeholder={I18n.t('Topic Title')}
+            type="text"
             value={title}
             ref={textInputRef}
             onChange={(_event, value) => {
@@ -849,27 +1029,43 @@ function DiscussionTopicForm({
             messages={titleValidationMessages}
             autoFocus={true}
             width={inputWidth}
+            disabled={ENV?.DISCUSSION_CONTENT_LOCKED}
           />
           <View>
-            <span className="discussions-editor">
-              <CanvasRce
-                textareaId="discussion-topic-message-body"
-                onFocus={() => {}}
-                onBlur={() => {}}
-                onInit={() => {}}
-                ref={rceRef}
-                onContentChange={setRceContent}
-                editorOptions={{
-                  focus: false,
-                  plugins: [],
-                }}
-                height={300}
-                defaultContent={isEditing ? currentDiscussionTopic?.message : ''}
-                autosave={false}
-                resourceType={isAnnouncement ? 'announcement.body' : 'discussion_topic.body'}
-                resourceId={currentDiscussionTopic?._id}
-              />
-            </span>
+            {!ENV?.DISCUSSION_CONTENT_LOCKED ? (
+              <span className="discussions-editor" data-testid="discussion-topic-message-editor">
+                <FormField label={I18n.t('Topic content')} id="discussion-topic-message-body">
+                  <CanvasRce
+                    textareaId="discussion-topic-message-body"
+                    onFocus={() => {}}
+                    onBlur={() => {}}
+                    onInit={() => {}}
+                    ref={rceRef}
+                    onContentChange={setRceContent}
+                    editorOptions={{
+                      focus: false,
+                      plugins: [],
+                    }}
+                    height={300}
+                    defaultContent={isEditing ? currentDiscussionTopic?.message : ''}
+                    autosave={false}
+                    resourceType={isAnnouncement ? 'announcement.body' : 'discussion_topic.body'}
+                    resourceId={currentDiscussionTopic?._id}
+                  />
+                </FormField>
+              </span>
+            ) : (
+              <View
+                className="user_content discussion-post-content"
+                data-testid="discussion-topic-message-locked"
+              >
+                <Text
+                  dangerouslySetInnerHTML={{
+                    __html: currentDiscussionTopic?.message || '',
+                  }}
+                />
+              </View>
+            )}
           </View>
           {ENV.DISCUSSION_TOPIC.PERMISSIONS.CAN_ATTACH && (
             <AttachmentDisplay
@@ -889,7 +1085,7 @@ function DiscussionTopicForm({
                 label={I18n.t('Post to')}
                 messages={postToValidationMessages}
                 assistiveText={I18n.t(
-                  'Select sections to post to. Type or use arrow keys to navigate. Multiple selections are allowed.'
+                  'Select sections to post to. Type or use arrow keys to navigate. Multiple selections are allowed.',
                 )}
                 selectedOptionIds={sectionIdsToPostTo}
                 onChange={handlePostToSelect}
@@ -898,7 +1094,7 @@ function DiscussionTopicForm({
                   sectionInputRef.current = ref
                 }}
               >
-                {[allSectionsOption, ...sections].map(({id, name: label}) => (
+                {getSectionList().map(({id, name: label}) => (
                   <CanvasMultiSelect.Option
                     id={id}
                     value={`opt-${id}`}
@@ -925,13 +1121,17 @@ function DiscussionTopicForm({
               </Flex.Item>
             </Flex>
           )}
-          <Text size="large">{I18n.t('Options')}</Text>
+          <Text size="large" as="h2">
+            {I18n.t('Options')}
+          </Text>
           {shouldShowAnonymousOptions && (
             <AnonymousSelector
               discussionAnonymousState={discussionAnonymousState}
               setDiscussionAnonymousState={setDiscussionAnonymousState}
               isSelectDisabled={
-                (isEditing && currentDiscussionTopic?.entryCounts?.repliesCount > 0) || isGraded
+                (isEditing && currentDiscussionTopic?.entryCounts?.repliesCount > 0) ||
+                isGraded ||
+                isGroupDiscussion
               }
               setIsGraded={setIsGraded}
               setIsGroupDiscussion={setIsGroupDiscussion}
@@ -941,48 +1141,53 @@ function DiscussionTopicForm({
             />
           )}
           <FormFieldGroup description="" rowSpacing="small">
-            {shouldShowAllowParticipantsToCommentOption && (
-              <Checkbox
-                label={I18n.t('Allow Participants to Comment')}
-                value="enable-participants-commenting"
-                inline={true}
-                checked={!locked}
-                onChange={() => {
-                  setLocked(!locked)
-                  setRequireInitialPost(false)
-                }}
-              />
+            {renderAllowParticipantsToComment()}
+            {!isStudent && (!isAnnouncement || (isAnnouncement && !locked)) && (
+              <View display="inline-block" padding={isAnnouncement ? '0 0 0 medium' : '0'}>
+                <Checkbox
+                  data-testid="disallow_threaded_replies"
+                  data-action-state={isThreaded ? 'disallowThreads' : 'allowThreads'}
+                  label={I18n.t('Disallow threaded replies')}
+                  value="disallow-threaded-replies"
+                  inline={true}
+                  checked={!locked && !isThreaded}
+                  onChange={() => {
+                    setIsThreaded(!isThreaded)
+                  }}
+                  disabled={
+                    isCheckpoints ||
+                    ENV?.DISCUSSION_TOPIC?.ATTRIBUTES?.has_threaded_replies ||
+                    (!shouldShowAllowParticipantsToCommentOption && isAnnouncement) ||
+                    locked
+                  }
+                />
+              </View>
             )}
 
-            {!isStudent && (
-              <Checkbox
-                data-testid="disallow_threaded_replies"
-                label={I18n.t('Disallow threaded replies')}
-                value="disallow-threaded-replies"
-                inline={true}
-                checked={!isThreaded}
-                onChange={() => {
-                  setIsThreaded(!isThreaded)
-                }}
-                disabled={isCheckpoints || ENV?.DISCUSSION_TOPIC?.ATTRIBUTES?.has_threaded_replies}
-              />
-            )}
-
-            {!isGroupContext && !isAnnouncement && (
-              <Checkbox
-                data-testid="require-initial-post-checkbox"
-                label={I18n.t(
-                  'Participants must respond to the topic before viewing other replies'
-                )}
-                value="must-respond-before-viewing-replies"
-                inline={true}
-                checked={requireInitialPost}
-                onChange={() => setRequireInitialPost(!requireInitialPost)}
-              />
+            {((!isGroupContext && !isAnnouncement) || (isAnnouncement && !locked)) && (
+              <View display="inline-block" padding={isAnnouncement ? '0 0 0 medium' : '0'}>
+                <Checkbox
+                  data-testid="require-initial-post-checkbox"
+                  data-action-state={
+                    requireInitialPost
+                      ? 'disableInitiatorRequirement'
+                      : 'enableInitiatorRequirement'
+                  }
+                  label={I18n.t(
+                    'Participants must respond to the topic before viewing other replies',
+                  )}
+                  value="must-respond-before-viewing-replies"
+                  inline={true}
+                  checked={requireInitialPost}
+                  onChange={() => setRequireInitialPost(!requireInitialPost)}
+                />
+              </View>
             )}
 
             {shouldShowPodcastFeedOption && (
               <Checkbox
+                data-testid="enable-podcast-checkbox"
+                data-action-state={enablePodcastFeed ? 'disablePodcast' : 'enablePodcast'}
                 label={I18n.t('Enable podcast feed')}
                 value="enable-podcast-feed"
                 inline={true}
@@ -996,6 +1201,10 @@ function DiscussionTopicForm({
             {enablePodcastFeed && !isGroupContext && (
               <View display="block" padding="none none none medium">
                 <Checkbox
+                  data-testid="include-replies-in-podcast-checkbox"
+                  data-action-state={
+                    includeRepliesInFeed ? 'disableRepliesInFeed' : 'includeRepliesInFeed'
+                  }
                   label={I18n.t('Include student replies in podcast feed')}
                   value="include-student-replies-in-podcast-feed"
                   inline={true}
@@ -1007,16 +1216,14 @@ function DiscussionTopicForm({
             {shouldShowGradedDiscussionOptions && (
               <Checkbox
                 data-testid="graded-checkbox"
+                data-pendo="graded-checkbox"
+                data-action-state={isGraded ? 'disableGrades' : 'enableGrades'}
                 label={I18n.t('Graded')}
                 value="graded"
                 inline={true}
                 checked={isGraded}
-                onChange={() => {
-                  if (isGraded) {
-                    setIsCheckpoints(false)
-                  }
-                  setIsGraded(!isGraded)
-                }}
+                onChange={handleGradedCheckboxChange}
+                disabled={discussionAnonymousState !== 'off'}
                 // disabled={sectionIdsToPostTo === [allSectionsOption._id]}
               />
             )}
@@ -1025,31 +1232,54 @@ function DiscussionTopicForm({
                 <View display="inline-block" padding="0 0 0 medium">
                   <Checkbox
                     data-testid="checkpoints-checkbox"
+                    data-pendo="checkpoints-checkbox"
+                    data-action-state={isCheckpoints ? 'disableCheckpoints' : 'enableCheckpoints'}
                     label={I18n.t('Assign graded checkpoints')}
                     value="checkpoints"
                     inline={true}
                     checked={isCheckpoints}
+                    disabled={isCheckpointsForbidden}
                     onChange={() => {
                       setIsCheckpoints(!isCheckpoints)
                       setIsThreaded(true)
                     }}
                   />
                 </View>
-                <Tooltip renderTip={checkpointsToolTipText} on={['hover', 'focus']} color="primary">
+                <Tooltip renderTip={checkPointsToolTipText} on={['hover', 'focus']} color="primary">
                   <div
                     style={{display: 'inline-block', marginLeft: theme.spacing.xxSmall}}
                     // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
                     tabIndex="0"
                   >
                     <IconInfoLine color="primary" />
-                    <ScreenReaderContent>{checkpointsToolTipText}</ScreenReaderContent>
+                    <ScreenReaderContent>{checkPointsToolTipText}</ScreenReaderContent>
                   </div>
                 </Tooltip>
               </>
             )}
+            {shouldShowSuppressAssignmentOption && (
+              <View display="inline-block" padding="0 0 0 medium">
+                <Checkbox
+                  data-testid="suppressed-assignment-checkbox"
+                  data-pendo="suppressed-assignment-checkbox"
+                  data-action-state={
+                    suppressedAssignment ? 'suppressFromGradebook' : 'shownInGradebook'
+                  }
+                  label={I18n.t('Hide from gradebook view and student grades view')}
+                  value="suppress_from_gradebook"
+                  inline={true}
+                  checked={suppressedAssignment}
+                  onChange={() => {
+                    setSuppressedAssignment(!suppressedAssignment)
+                  }}
+                />
+              </View>
+            )}
             {shouldShowLikingOption && (
               <>
                 <Checkbox
+                  data-testid="like-checkbox"
+                  data-action-state={allowLiking ? 'disallowLiking' : 'allowLiking'}
                   label={I18n.t('Allow liking')}
                   value="allow-liking"
                   inline={true}
@@ -1063,6 +1293,10 @@ function DiscussionTopicForm({
                   <View display="block" padding="small none none medium">
                     <FormFieldGroup description="" rowSpacing="small">
                       <Checkbox
+                        data-testid="exclude-non-graders-checkbox"
+                        data-action-state={
+                          onlyGradersCanLike ? 'allowNonGradersLiking' : 'excludeNonGradersLiking'
+                        }
                         label={I18n.t('Only graders can like')}
                         value="only-graders-can-like"
                         inline={true}
@@ -1077,6 +1311,8 @@ function DiscussionTopicForm({
             {shouldShowTodoSettings && (
               <>
                 <Checkbox
+                  data-testid="add-todo-checkbox"
+                  data-action-state={addToTodo ? 'dontAddToTodo' : 'addToTodo'}
                   label={I18n.t('Add to student to-do')}
                   value="add-to-student-to-do"
                   inline={true}
@@ -1120,18 +1356,21 @@ function DiscussionTopicForm({
               <Checkbox
                 id="has_group_category"
                 data-testid="group-discussion-checkbox"
+                data-action-state={
+                  isGroupDiscussion ? 'removeGroupDiscussion' : 'addGroupDiscussion'
+                }
                 label={I18n.t('This is a Group Discussion')}
                 value="group-discussion"
                 inline={true}
                 checked={isGroupDiscussion}
                 messages={groupDiscussionErrors}
                 onChange={() => {
-                  if (ENV.FEATURES.selective_release_edit_page && hasGroupOverrides()) {
+                  if (hasGroupOverrides()) {
                     setGroupDiscussionErrors([
                       {
                         type: 'error',
                         text: I18n.t(
-                          'You must remove any groups from the Assign Access section to change this setting.'
+                          'You must remove any groups from the Assign Access section to change this setting.',
                         ),
                       },
                     ])
@@ -1140,7 +1379,7 @@ function DiscussionTopicForm({
                   setGroupCategoryId(!isGroupDiscussion ? '' : groupCategoryId)
                   setIsGroupDiscussion(!isGroupDiscussion)
                 }}
-                disabled={!canGroupDiscussion}
+                disabled={!canGroupDiscussion || discussionAnonymousState !== 'off'}
               />
             )}
             {shouldShowGroupOptions && isGroupDiscussion && (
@@ -1152,7 +1391,7 @@ function DiscussionTopicForm({
                   defaultValue=""
                   value={groupCategoryId}
                   onChange={(_event, newChoice) => {
-                    if (ENV.FEATURES.selective_release_edit_page && hasGroupOverrides()) {
+                    if (hasGroupOverrides()) {
                       setGroupCategorySelectError([
                         {
                           type: 'error',
@@ -1160,9 +1399,9 @@ function DiscussionTopicForm({
                             'You must remove any groups belonging to %{groupCategory} from the Assign Access section before you can change to another Group Set.',
                             {
                               groupCategory: groupCategories.find(
-                                groupCategory => groupCategory._id === groupCategoryId
+                                groupCategory => groupCategory._id === groupCategoryId,
                               )?.name,
-                            }
+                            },
                           ),
                         },
                       ])
@@ -1213,7 +1452,9 @@ function DiscussionTopicForm({
                       setShowGroupCategoryModal(false)
                       if (!newGroupCategory) return
                       addNewGroupCategoryToCache(apolloClient.cache, newGroupCategory)
-                      setGroupCategoryId(newGroupCategory.id)
+                      setTimeout(() => {
+                        setGroupCategoryId(newGroupCategory.id)
+                      })
                     }}
                     studentSectionCount={sections.length}
                     context={ENV.context_type.toLocaleLowerCase()}
@@ -1230,18 +1471,23 @@ function DiscussionTopicForm({
                 <View display="block" data-testid="group-category-not-editable">
                   <Alert variant="warning" margin="small none small none">
                     {I18n.t(
-                      'Students have already submitted to this discussion, so group settings cannot be changed.'
+                      'Students have already submitted to this discussion, so group settings cannot be changed.',
                     )}
                   </Alert>
                 </View>
               )}
           </FormFieldGroup>
-          {discussionAnonymousState.includes('anonymity') && !isEditing && (
-            <View width="580px" display="block" data-testid="groups_grading_not_allowed">
-              <Alert variant="info" margin="small">
-                {I18n.t('Grading and Groups are not supported in Anonymous Discussions.')}
-              </Alert>
-            </View>
+          {shouldShowViewSettings && (
+            <ViewSettings
+              expanded={expanded}
+              expandedLocked={expandedLocked}
+              sortOrder={sortOrder}
+              sortOrderLocked={sortOrderLocked}
+              setExpanded={setExpanded}
+              setExpandedLocked={setExpandedLocked}
+              setSortOrder={setSortOrder}
+              setSortOrderLocked={setSortOrderLocked}
+            />
           )}
           {shouldShowAvailabilityOptions && renderAvailabilityOptions()}
           {(!isAnnouncement || !ENV.ASSIGNMENT_EDIT_PLACEMENT_NOT_ON_ANNOUNCEMENTS) &&

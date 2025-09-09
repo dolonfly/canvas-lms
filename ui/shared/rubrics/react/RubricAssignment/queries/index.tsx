@@ -17,6 +17,7 @@
  */
 
 import getCookie from '@instructure/get-cookie'
+import {gql} from '@apollo/client'
 import qs from 'qs'
 import type {GradingRubricContext} from '../types/rubricAssignment'
 import type {Rubric, RubricAssociation} from '../../types/rubric'
@@ -25,6 +26,7 @@ import {
   mapRubricAssociationUnderscoredKeysToCamelCase,
 } from '../../utils'
 import type {QueryOptions} from '@tanstack/react-query'
+import {executeQuery} from '@canvas/graphql'
 
 export const removeRubricFromAssignment = async (courseId: string, rubricAssociationId: string) => {
   return fetch(`/courses/${courseId}/rubric_associations/${rubricAssociationId}`, {
@@ -39,12 +41,12 @@ export const removeRubricFromAssignment = async (courseId: string, rubricAssocia
   })
 }
 
-export type AssignmentRubric = Rubric & {can_update?: boolean}
+export type AssignmentRubric = Rubric & {can_update?: boolean; association_count?: number}
 export const addRubricToAssignment = async (
   courseId: string,
   assignmentId: string,
   rubricId: string,
-  updatedAssociation: RubricAssociation
+  updatedAssociation: RubricAssociation,
 ) => {
   const {hidePoints, hideOutcomeResults, hideScoreTotal, useForGrading} = updatedAssociation
 
@@ -76,10 +78,17 @@ export const addRubricToAssignment = async (
   const result = await response.json()
 
   const mappedRubric = mapRubricUnderscoredKeysToCamelCase(result.rubric)
+  const mappedRubricAssociation = mapRubricAssociationUnderscoredKeysToCamelCase(
+    result.rubric_association,
+  )
 
   return {
-    rubricAssociation: result.rubric_association,
-    rubric: {...mappedRubric, can_update: result.rubric.permissions?.update} as AssignmentRubric,
+    rubricAssociation: mappedRubricAssociation,
+    rubric: {
+      ...mappedRubric,
+      canUpdateRubric: result.rubric.permissions?.update,
+      association_count: result.rubric.association_count,
+    } as AssignmentRubric,
   }
 }
 
@@ -140,4 +149,80 @@ export const getGradingRubricsForContext = async ({
       rubric: mapRubricUnderscoredKeysToCamelCase(result.rubric_association?.rubric),
     }
   })
+}
+
+const SET_RUBRIC_SELF_ASSESSMENT = gql`
+  mutation SetRubricSelfAssessment($assignmentId: ID!, $enabled: Boolean!) {
+    setRubricSelfAssessment(
+      input: {assignmentId: $assignmentId, rubricSelfAssessmentEnabled: $enabled}
+    ) {
+      errors {
+        attribute
+        message
+      }
+    }
+  }
+`
+
+type SelfAssessmentResponse = {
+  setRubricSelfAssessment: {
+    errors: {
+      attribute: string
+      message: string
+    }[]
+  }
+}
+export const setRubricSelfAssessment = async ({
+  assignmentId,
+  enabled,
+}: {
+  assignmentId: string
+  enabled: boolean
+}) => {
+  const {
+    setRubricSelfAssessment: {errors},
+  } = await executeQuery<SelfAssessmentResponse>(SET_RUBRIC_SELF_ASSESSMENT, {
+    assignmentId,
+    enabled,
+  })
+
+  if (errors) {
+    throw new Error('Failed to set rubric self assessment on assignment')
+  }
+}
+
+export const ASSIGNMENT_RUBRIC_SELF_ASSESSMENTS_QUERY = gql`
+  query GetAssignmentRubricSelfAssessmentSettings($assignmentId: ID!) {
+    assignment(id: $assignmentId) {
+      canUpdateRubricSelfAssessment
+      rubricSelfAssessmentEnabled
+    }
+  }
+`
+type RubricSelfAssessmentSettingsParams = {
+  queryKey: (string | number)[]
+}
+type RubricSelfAssessmentSettingsResponse = {
+  assignment: {
+    canUpdateRubricSelfAssessment: boolean
+    rubricSelfAssessmentEnabled: boolean
+  }
+}
+export const getRubricSelfAssessmentSettings = async ({
+  queryKey,
+}: RubricSelfAssessmentSettingsParams) => {
+  const [_, assignmentId] = queryKey
+  const {
+    assignment: {canUpdateRubricSelfAssessment, rubricSelfAssessmentEnabled},
+  } = await executeQuery<RubricSelfAssessmentSettingsResponse>(
+    ASSIGNMENT_RUBRIC_SELF_ASSESSMENTS_QUERY,
+    {
+      assignmentId,
+    },
+  )
+
+  return {
+    canUpdateRubricSelfAssessment,
+    rubricSelfAssessmentEnabled,
+  }
 }

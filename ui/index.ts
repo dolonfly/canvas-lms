@@ -86,9 +86,8 @@ up({
   },
   requires: [C.I18n],
 }).catch((e: Error) => {
-  // eslint-disable-next-line no-console
   console.error(
-    `Canvas front-end did not successfully start! Did you add any new bundles to ui/featureBundles.ts? (${e.message})`
+    `Canvas front-end did not successfully start! Did you add any new bundles to ui/featureBundles.ts? (${e.message})`,
   )
   captureException(e)
 })
@@ -117,7 +116,6 @@ const advanceReadiness = (target: string) => {
 }
 
 function afterDocumentReady() {
-  // eslint-disable-next-line promise/catch-or-return
   Promise.all((window.deferredBundles || []).map(loadBundle)).then(() => {
     advanceReadiness('deferredBundles')
   })
@@ -133,12 +131,23 @@ function afterDocumentReady() {
   }
 }
 
+const RCE_HTML_EDITOR_CLASS = 'RceHtmlEditor'
 function setupMathML() {
   const features = {
     new_math_equation_handling: !!ENV?.FEATURES?.new_math_equation_handling,
     explicit_latex_typesetting: !!ENV?.FEATURES?.explicit_latex_typesetting,
   }
   const config = {locale: ENV?.LOCALE || 'en'}
+
+  function isRceHtmlEditor(node: Node): boolean {
+    const element = node as Element
+    if (
+      element.closest(`.${RCE_HTML_EDITOR_CLASS}`) !== null ||
+      element.firstElementChild?.classList.contains(RCE_HTML_EDITOR_CLASS)
+    )
+      return true
+    return false
+  }
 
   // LS-1662: there are math equations on the page that
   // we don't see, so remain invisible and aren't
@@ -172,7 +181,7 @@ function setupMathML() {
     window.dispatchEvent(
       new CustomEvent(Mathml.processNewMathEventName, {
         detail: {target: document.body, features, config},
-      })
+      }),
     )
   }, 0)
 
@@ -184,6 +193,7 @@ function setupMathML() {
         for (let n = 0; n < addedNodes.length; ++n) {
           const node = addedNodes[n]
           if (node.nodeType !== Node.ELEMENT_NODE) continue
+          if (isRceHtmlEditor(node)) continue
           const processNewMathEvent = new CustomEvent(Mathml.processNewMathEventName, {
             detail: {target: node, features, config},
           })
@@ -200,7 +210,6 @@ function setupMathML() {
 }
 
 if (ENV.csp) {
-  // eslint-disable-next-line promise/catch-or-return
   import('./boot/initializers/setupCSP').then(({default: setupCSP}) => setupCSP(window.document))
 }
 
@@ -224,11 +233,9 @@ async function openHelpDialog(event: Event): Promise<void> {
     const {renderLoginHelp} = await import('@canvas/help-dialog')
     renderLoginHelp(helpLink)
   } catch (e) {
-    /* eslint-disable no-console */
     console.error('Help dialog could not be displayed')
     console.error(e)
     captureException(e)
-    /* eslint-enable no-console */
   }
 }
 
@@ -246,7 +253,6 @@ async function loadNewUserTutorials() {
     document.getElementsByClassName('TutorialToggleHolder')[0]?.remove() // inherited margin from parent leaves a gap
   }
 }
-
 ;(window.requestIdleCallback || window.setTimeout)(async () => {
   await import('./boot/initializers/runOnEveryPageButDontBlockAnythingElse')
   advanceReadiness('asyncInitializers')
@@ -256,5 +262,7 @@ async function loadNewUserTutorials() {
 // each module with this line. Once we switch pages to using react-router
 // we can remove this, as the setup for HMR is taken care of for us.
 if (typeof module !== 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
   module?.hot?.accept()
 }

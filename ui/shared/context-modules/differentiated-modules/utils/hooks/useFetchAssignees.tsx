@@ -19,14 +19,14 @@
 import {useEffect, useState, useRef, useMemo} from 'react'
 
 import {useGetAssigneeOptions} from './useGetAssigneeOptions'
-import {getCourseSettings} from './queryFn'
+import {getCourseSettings, CourseSettings} from './queryFn'
 import {showFlashError} from '@canvas/alerts/react/FlashAlert'
 import {uniqBy} from 'lodash'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {type AssigneeOption} from '../../react/Item/types'
-import {useQuery} from '@canvas/query'
+import {useQuery} from '@tanstack/react-query'
 
-const I18n = useI18nScope('differentiated_modules')
+const I18n = createI18nScope('differentiated_modules')
 
 interface Props {
   courseId: string
@@ -57,18 +57,18 @@ const useFetchAssignees = ({
   const [hasErrors, setHasErrors] = useState(false)
   const groupCategoryRef = useRef<string | null>(null)
 
-  // @ts-expect-error ts-migrate(2531) FIXME: Object is possibly 'null'.
   const shouldFetch = !ENV?.IN_PACED_COURSE
 
   const params: Record<string, string | number> = useMemo(() => {
     return {per_page: 100}
   }, [])
 
-  const {data: fetchedCourseSettings, isSuccess: courseSettingsIsSuccess} = useQuery({
-    queryKey: ['courseSettings', courseId],
-    queryFn: getCourseSettings,
-    enabled: shouldFetch && checkMasteryPaths,
-  })
+  const {data: fetchedCourseSettings, isSuccess: courseSettingsIsSuccess} =
+    useQuery<CourseSettings>({
+      queryKey: ['courseSettings', courseId],
+      queryFn: getCourseSettings,
+      enabled: shouldFetch && checkMasteryPaths,
+    })
 
   const {baseFetchedOptions, isLoading} = useGetAssigneeOptions({
     allOptions,
@@ -83,8 +83,8 @@ const useFetchAssignees = ({
   const baseDefaultOptions = useMemo(() => {
     const defaultOptions = everyoneOption ? [everyoneOption] : []
     if (courseSettingsIsSuccess) {
-      const courseSettings = fetchedCourseSettings?.json as {conditional_release: boolean}
-      if (courseSettings.conditional_release) {
+      const courseSettings = fetchedCourseSettings
+      if (courseSettings?.conditional_release) {
         defaultOptions.push({id: 'mastery_paths', value: I18n.t('Mastery Paths')})
       }
     } else if (fetchedCourseSettings) {

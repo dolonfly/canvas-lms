@@ -104,22 +104,6 @@ describe AuthenticationMethods do
     context "when there is a current_user but they are not authorized" do
       before { @controller.instance_variable_set(:@current_user, user_with_pseudonym) }
 
-      ### REMOVE THIS CODE WHEN REMOVING FEATURE FLAG ###
-      before { Account.site_admin.enable_feature! :api_auth_error_updates }
-
-      context "when the api_auth_error_updates flag is disabled" do
-        before { Account.site_admin.disable_feature! :api_auth_error_updates }
-
-        it "returns an unauthorized error response (401)" do
-          expect(render_hash).to eq(
-            status: :unauthorized,
-            json: { errors: [{ message: "user not authorized to perform that action" }],
-                    status: "unauthorized" }
-          )
-        end
-      end
-      ### END REMOVE THIS CODE WHEN REMOVING FEATURE FLAG ###
-
       it "returns an unauthorized error response (403)" do
         expect(render_hash).to eq(
           status: :forbidden,
@@ -132,32 +116,6 @@ describe AuthenticationMethods do
     context "when the account language is non-English" do
       let(:locale) { :es }
       let(:status_string) { render_hash[:json][:status] }
-
-      ### REMOVE THIS CODE WHEN REMOVING FEATURE FLAG ###
-      before { Account.site_admin.enable_feature! :api_auth_error_updates }
-
-      context "when the api_auth_error_updates flag is disabled" do
-        before { Account.site_admin.disable_feature! :api_auth_error_updates }
-
-        context "when there is no current_user" do
-          it 'localizes the "unauthenticated" status string' do
-            spanish = I18n.with_locale(:es) { I18n.t("lib.auth.status_unauthenticated", "unauthenticated") }
-            expect(status_string).to eq(spanish)
-            expect(status_string).not_to eq("unauthenticated")
-          end
-        end
-
-        context "when there is a current_user but they are not authorized" do
-          before { @controller.instance_variable_set(:@current_user, user_with_pseudonym) }
-
-          it 'localizes the "unauthorized" status string' do
-            spanish = I18n.with_locale(:es) { I18n.t("lib.auth.status_unauthorized", "unauthorized") }
-            expect(status_string).to eq(spanish)
-            expect(status_string).not_to eq("unauthorized")
-          end
-        end
-      end
-      ### END REMOVE THIS CODE WHEN REMOVING FEATURE FLAG ###
 
       context "when there is no current_user" do
         it 'does not localize the "unauthorized" status string (always gives it in English)' do
@@ -320,7 +278,7 @@ describe AuthenticationMethods do
       end
 
       it "finds a user by access token" do
-        token = AccessToken.create!(user: @user)
+        token = AccessToken.create!(user: @user, purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect(controller.send(:load_user)).to eq @user
@@ -328,7 +286,7 @@ describe AuthenticationMethods do
       end
 
       it "sets {real_,}current_user from token" do
-        token = AccessToken.create!(user: @user, real_user: @real_user)
+        token = AccessToken.create!(user: @user, real_user: @real_user, purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect(controller.send(:load_user)).to eq @user
@@ -337,7 +295,7 @@ describe AuthenticationMethods do
       end
 
       it "sets current_pseudonym" do
-        token = AccessToken.create!(user: @user)
+        token = AccessToken.create!(user: @user, purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect(controller.send(:load_user)).to eq @user
@@ -346,7 +304,7 @@ describe AuthenticationMethods do
       end
 
       it "sets real current_pseudonym" do
-        token = AccessToken.create!(user: @user, real_user: @real_user)
+        token = AccessToken.create!(user: @user, real_user: @real_user, purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect(controller.send(:load_user)).to eq @user
@@ -355,7 +313,7 @@ describe AuthenticationMethods do
       end
 
       it "marks the access token as used" do
-        token = AccessToken.create!(user: @user)
+        token = AccessToken.create!(user: @user, purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect(controller.send(:load_user)).to eq @user
@@ -363,14 +321,14 @@ describe AuthenticationMethods do
       end
 
       it "raises RevokedAccessTokenError if the access token is revoked" do
-        token = AccessToken.create!(user: @user, workflow_state: "deleted")
+        token = AccessToken.create!(user: @user, workflow_state: "deleted", purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect { controller.send(:load_user) }.to raise_error(AuthenticationMethods::RevokedAccessTokenError)
       end
 
       it "raises ExpiredAccessTokenError if the access token is expired" do
-        token = AccessToken.create!(user: @user, permanent_expires_at: 1.day.ago)
+        token = AccessToken.create!(user: @user, permanent_expires_at: 1.day.ago, purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect { controller.send(:load_user) }.to raise_error(AuthenticationMethods::ExpiredAccessTokenError)
@@ -378,14 +336,14 @@ describe AuthenticationMethods do
 
       it "raises AccessTokenError if current_user and current_pseudonym are not set" do
         allow(SisPseudonym).to receive(:for).and_return(nil)
-        token = AccessToken.create!(user: @user)
+        token = AccessToken.create!(user: @user, purpose: "Test Access Token")
         controller = setup_with_token(token)
 
         expect { controller.send(:load_user) }.to raise_error(AuthenticationMethods::AccessTokenError)
       end
 
       it "accepts as_user_id on a masquerading token if masquerade matches" do
-        token = AccessToken.create!(user: @user, real_user: @real_user)
+        token = AccessToken.create!(user: @user, real_user: @real_user, purpose: "Test Access Token")
         controller = setup_with_token(token)
         controller.params[:as_user_id] = @user.id
 
@@ -397,7 +355,7 @@ describe AuthenticationMethods do
       it "rejects as_user_id on a masquerading token if masquerade does not match" do
         @other_user = @user
         user_with_pseudonym
-        token = AccessToken.create!(user: @user, real_user: @real_user)
+        token = AccessToken.create!(user: @user, real_user: @real_user, purpose: "Test Access Token")
         controller = setup_with_token(token)
         controller.params[:as_user_id] = @other_user.id
 
@@ -451,7 +409,7 @@ describe AuthenticationMethods do
 
   describe "#access_token_account" do
     let(:account) { Account.create! }
-    let(:dev_key) { DeveloperKey.create!(account:) }
+    let(:dev_key) { DeveloperKey.create!(account:, name: "Test Developer Key") }
     let(:access_token) { AccessToken.create!(developer_key: dev_key) }
     let(:request) { double(format: double(json?: false), host_with_port: "") }
     let(:controller) { mock_controller_class.new(request:, root_account: account) }

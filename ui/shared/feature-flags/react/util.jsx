@@ -16,10 +16,10 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import React from 'react'
 
-const I18n = useI18nScope('feature_flags')
+const I18n = createI18nScope('feature_flags')
 
 export function buildTransitions(flag, allowsDefaults) {
   const ret = {}
@@ -148,29 +148,6 @@ export function transitionLocked(flag, name) {
   }
 
   return null
-}
-
-export function transitionMessage(flag, name) {
-  let message = null
-  if (flag.transitions[name]) {
-    message = flag.transitions[name].message
-  }
-
-  if (ENV.ACCOUNT?.site_admin && ENV.RAILS_ENVIRONMENT !== 'development') {
-    message = (
-      <div>
-        <p>
-          {I18n.t(
-            `You are currently in the %{environment} environment. This will affect every customer. Are you sure?`,
-            {environment: ENV.RAILS_ENVIRONMENT}
-          )}
-        </p>
-        <p>{message}</p>
-      </div>
-    )
-  }
-
-  return message
 }
 
 export function isEnabled(flag) {

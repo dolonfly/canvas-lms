@@ -19,11 +19,11 @@
 import moment from 'moment'
 import type React from 'react'
 import {useState, useCallback, useEffect} from 'react'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import type {FormMessage} from '@instructure/ui-form-field'
 import {showFlashAlert} from '@canvas/alerts/react/FlashAlert'
 
-const I18n = useI18nScope('differentiated_modules')
+const I18n = createI18nScope('differentiated_modules')
 
 const fancyMidnightDueTime = '23:59:00'
 
@@ -67,31 +67,31 @@ type UseDatesHookResult = [
   // setRequiredRepliesDueDate
   (requiredRepliesDueDate: string | null) => void,
   // handleRequiredRepliesDueDateChange
-  (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => void,
+  (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => void,
   // replyToTopicDueDate
   string | null,
   // setReplyToTopicDueDate
   (replyToTopicDueDate: string | null) => void,
   // handleReplyToTopicDueDateChange
-  (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => void,
+  (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => void,
   // dueDate
   string | null,
   // setDueDate
   (dueDate: string | null) => void,
   // handleDueDateChange
-  (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => void,
+  (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => void,
   // availableFromDate
   string | null,
   // setAvailableFromDate
   (availableFromDate: string | null) => void,
   // handleAvailableFromDateChange
-  (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => void,
+  (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => void,
   // availableToDate
   string | null,
   // setAvailableToDate
   (availableToDate: string | null) => void,
   // handleAvailableToDateChange
-  (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => void
+  (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => void,
 ]
 
 function setTimeToStringDate(time: string, date: string | undefined): string | undefined {
@@ -101,18 +101,27 @@ function setTimeToStringDate(time: string, date: string | undefined): string | u
   return chosenDate.isValid() ? chosenDate.utc().toISOString() : date
 }
 
+export function setSeconds(date: string | undefined): string | undefined {
+  if (!date) return date
+  const chosenDate = moment.tz(date, ENV.TIMEZONE || 'UTC')
+  const minute = chosenDate.minute()
+  chosenDate.set({second: minute === 59 ? 59 : 0})
+  return chosenDate.isValid() ? chosenDate.utc().toISOString() : date
+}
+
 function isFancyMidnightNeeded(value: string | undefined) {
   const chosenDueTime = moment
     .utc(value)
     .tz(ENV.TIMEZONE || 'UTC')
     .format('HH:mm:00')
+  // @ts-expect-error
   return chosenDueTime === '00:00:00' && chosenDueTime !== fancyMidnightDueTime
 }
 
 export function generateMessages(
   value: string | null,
   error: string | null,
-  unparsed: boolean
+  unparsed: boolean,
 ): FormMessage[] {
   if (unparsed) return [{type: 'error', text: I18n.t('Invalid date')}]
   if (error) return [{type: 'error', text: error}]
@@ -141,7 +150,7 @@ export function generateMessages(
 }
 
 export function generateWrapperStyleProps(
-  highlightCard: boolean | undefined
+  highlightCard: boolean | undefined,
 ): Record<string, string> {
   return highlightCard
     ? {
@@ -167,10 +176,10 @@ export function useDates({
   onCardDatesChange,
 }: UseDatesHookArgs): UseDatesHookResult {
   const [requiredRepliesDueDate, setRequiredRepliesDueDate] = useState<string | null>(
-    required_replies_due_at
+    required_replies_due_at,
   )
   const [replyToTopicDueDate, setReplyToTopicDueDate] = useState<string | null>(
-    reply_to_topic_due_at
+    reply_to_topic_due_at,
   )
   const [dueDate, setDueDate] = useState<string | null>(due_at)
   const [availableFromDate, setAvailableFromDate] = useState<string | null>(unlock_at)
@@ -202,13 +211,14 @@ export function useDates({
   }, [availableToDate])
 
   const handleRequiredRepliesDueDateChange = useCallback(
-    (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => {
+    (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => {
       const defaultRequiredRepliesDueDate = ENV.DEFAULT_DUE_TIME ?? '23:59:00'
-      const newRequiredRepliesDueDate = requiredRepliesDueDate
+      const chosenRequiredRepliesDueDate = requiredRepliesDueDate
         ? value
         : timeValue === ''
-        ? setTimeToStringDate(defaultRequiredRepliesDueDate, value)
-        : value
+          ? setTimeToStringDate(defaultRequiredRepliesDueDate, value)
+          : value
+      const newRequiredRepliesDueDate = setSeconds(chosenRequiredRepliesDueDate)
       // When user uses calendar pop-up type is "click", but for KB is "blur"
       if (_event.type !== 'blur') {
         setRequiredRepliesDueDate(newRequiredRepliesDueDate || null)
@@ -216,17 +226,19 @@ export function useDates({
         setTimeout(() => setRequiredRepliesDueDate(newRequiredRepliesDueDate || null), 0)
       }
     },
-    [requiredRepliesDueDate]
+    [requiredRepliesDueDate],
   )
 
   const handleReplyToTopicDueDateChange = useCallback(
-    (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => {
+    (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => {
       const defaultReplyToTopicDueDate = ENV.DEFAULT_DUE_TIME ?? '23:59:00'
-      const newReplyToTopicDueDate = replyToTopicDueDate
+      const chosenReplyToTopicDueDate = replyToTopicDueDate
         ? value
         : timeValue === ''
-        ? setTimeToStringDate(defaultReplyToTopicDueDate, value)
-        : value
+          ? setTimeToStringDate(defaultReplyToTopicDueDate, value)
+          : value
+
+      const newReplyToTopicDueDate = setSeconds(chosenReplyToTopicDueDate)
       // When user uses calendar pop-up type is "click", but for KB is "blur"
       if (_event.type !== 'blur') {
         setReplyToTopicDueDate(newReplyToTopicDueDate || null)
@@ -234,17 +246,19 @@ export function useDates({
         setTimeout(() => setReplyToTopicDueDate(newReplyToTopicDueDate || null), 0)
       }
     },
-    [replyToTopicDueDate]
+    [replyToTopicDueDate],
   )
 
   const handleDueDateChange = useCallback(
-    (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => {
+    (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => {
       const defaultDueTime = ENV.DEFAULT_DUE_TIME ?? '23:59:00'
-      const newDueDate = dueDate
+      const chosenDueDate = dueDate
         ? value
         : timeValue === ''
-        ? setTimeToStringDate(defaultDueTime, value)
-        : value
+          ? setTimeToStringDate(defaultDueTime, value)
+          : value
+
+      const newDueDate = setSeconds(chosenDueDate)
       // When user uses calendar pop-up type is "click", but for KB is "blur"
       if (_event.type !== 'blur') {
         setDueDate(newDueDate || null)
@@ -264,16 +278,16 @@ export function useDates({
         }, 200)
       }
     },
-    [dueDate]
+    [dueDate],
   )
 
   const handleAvailableFromDateChange = useCallback(
-    (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => {
+    (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => {
       const newAvailableFromDate = availableFromDate
         ? value
         : timeValue === ''
-        ? setTimeToStringDate('00:00:00', value)
-        : value
+          ? setTimeToStringDate('00:00:00', value)
+          : value
       // When user uses calendar pop-up type is "click", but for KB is "blur"
       if (_event.type !== 'blur') {
         setAvailableFromDate(newAvailableFromDate || null)
@@ -281,16 +295,17 @@ export function useDates({
         setTimeout(() => setAvailableFromDate(newAvailableFromDate || null), 0)
       }
     },
-    [availableFromDate]
+    [availableFromDate],
   )
 
   const handleAvailableToDateChange = useCallback(
-    (timeValue: String) => (_event: React.SyntheticEvent, value: string | undefined) => {
-      const newAvailableToDate = availableToDate
+    (timeValue: string) => (_event: React.SyntheticEvent, value: string | undefined) => {
+      const chosenAvailableToDate = availableToDate
         ? value
         : timeValue === ''
-        ? setTimeToStringDate('23:59:00', value)
-        : value
+          ? setTimeToStringDate('23:59:00', value)
+          : value
+      const newAvailableToDate = setSeconds(chosenAvailableToDate)
       // When user uses calendar pop-up type is "click", but for KB is "blur"
       if (_event.type !== 'blur') {
         setAvailableToDate(newAvailableToDate || null)
@@ -298,7 +313,7 @@ export function useDates({
         setTimeout(() => setAvailableToDate(newAvailableToDate || null), 0)
       }
     },
-    [availableToDate]
+    [availableToDate],
   )
 
   return [
@@ -370,14 +385,14 @@ export const generateCardActionLabels = (selected: string[]) => {
           {
             pillA: selected[0],
             pillB: selected[1],
-          }
+          },
         ),
         clearRequiredRepliesDueAt: I18n.t(
           'Clear required replies due date/time for %{pillA} and %{pillB}',
           {
             pillA: selected[0],
             pillB: selected[1],
-          }
+          },
         ),
         clearAvailableFrom: I18n.t('Clear available from date/time for %{pillA} and %{pillB}', {
           pillA: selected[0],
@@ -406,7 +421,7 @@ export const generateCardActionLabels = (selected: string[]) => {
             pillA: selected[0],
             pillB: selected[1],
             pillC: selected[2],
-          }
+          },
         ),
         clearRequiredRepliesDueAt: I18n.t(
           'Clear required replies due date/time for %{pillA}, %{pillB}, and %{pillC}',
@@ -414,11 +429,11 @@ export const generateCardActionLabels = (selected: string[]) => {
             pillA: selected[0],
             pillB: selected[1],
             pillC: selected[2],
-          }
+          },
         ),
         clearAvailableFrom: I18n.t(
           'Clear available from date/time for %{pillA}, %{pillB}, and %{pillC}',
-          {pillA: selected[0], pillB: selected[1], pillC: selected[2]}
+          {pillA: selected[0], pillB: selected[1], pillC: selected[2]},
         ),
         clearAvailableTo: I18n.t('Clear until date/time for %{pillA}, %{pillB}, and %{pillC}', {
           pillA: selected[0],
@@ -444,7 +459,7 @@ export const generateCardActionLabels = (selected: string[]) => {
             pillA: selected[0],
             pillB: selected[1],
             n: selected.length - 2,
-          }
+          },
         ),
         clearRequiredRepliesDueAt: I18n.t(
           'Clear required replies due date/time for %{pillA}, %{pillB}, and %{n} others',
@@ -452,11 +467,11 @@ export const generateCardActionLabels = (selected: string[]) => {
             pillA: selected[0],
             pillB: selected[1],
             n: selected.length - 2,
-          }
+          },
         ),
         clearAvailableFrom: I18n.t(
           'Clear available from date/time for %{pillA}, %{pillB}, and %{n} others',
-          {pillA: selected[0], pillB: selected[1], n: selected.length - 2}
+          {pillA: selected[0], pillB: selected[1], n: selected.length - 2},
         ),
         clearAvailableTo: I18n.t('Clear until date/time for %{pillA}, %{pillB}, and %{n} others', {
           pillA: selected[0],
@@ -467,7 +482,7 @@ export const generateCardActionLabels = (selected: string[]) => {
   }
 }
 
-export const getDueAtForCheckpointTag = (override: Override, checkpointTag: String) => {
+export const getDueAtForCheckpointTag = (override: Override, checkpointTag: string) => {
   return override.sub_assignment_due_dates
     ? override.sub_assignment_due_dates.find(item => item.sub_assignment_tag === checkpointTag)
         ?.due_at || null

@@ -18,10 +18,13 @@
 
 import './jquery/index'
 import React from 'react'
-import ReactDOM from 'react-dom'
+import {createRoot} from 'react-dom/client'
 import GeneratePairingCode from '@canvas/generate-pairing-code'
 import ready from '@instructure/ready'
 import ManageTempEnrollButton from '@canvas/temporary-enrollment/react/ManageTempEnrollButton'
+import {CreateDSRModal} from '@canvas/dsr'
+import {Button} from '@instructure/ui-buttons'
+import {IconExportLine} from '@instructure/ui-icons'
 
 ready(() => {
   const pairing_container = document.getElementById('pairing-code')
@@ -46,25 +49,48 @@ ready(() => {
   const roles = Array.prototype.slice.call(ENV.COURSE_ROLES)
 
   if (pairing_container) {
-    ReactDOM.render(
+    const pairingRoot = createRoot(pairing_container)
+    pairingRoot.render(
       <GeneratePairingCode userId={ENV.USER_ID} name={ENV.CONTEXT_USER_DISPLAY_NAME} />,
-      pairing_container
     )
   }
 
   if (modifyPermissions.canView !== undefined) {
-    const temp_enrollments_container = document.getElementById('manage-temp-enrollments-mount-point')
+    const temp_enrollments_container = document.getElementById(
+      'manage-temp-enrollments-mount-point',
+    )
 
     if (temp_enrollments_container) {
-      ReactDOM.render(
+      const tempEnrollRoot = createRoot(temp_enrollments_container)
+      tempEnrollRoot.render(
         <ManageTempEnrollButton
-         user={{id: ENV.USER_ID, name: ENV.CONTEXT_USER_DISPLAY_NAME}}
-         modifyPermissions={modifyPermissions}
-         roles={roles}
-         rolePermissions={rolePermissions}
-         can_read_sis={permissions.can_read_sis}
+          user={{id: ENV.USER_ID, name: ENV.CONTEXT_USER_DISPLAY_NAME}}
+          modifyPermissions={modifyPermissions}
+          roles={roles}
+          rolePermissions={rolePermissions}
+          can_read_sis={permissions.can_read_sis}
         />,
-        temp_enrollments_container
+      )
+    }
+  }
+
+  if (permissions.can_manage_dsr_requests) {
+    const dsrModalContainer = document.getElementById('dsr-modal-mount-point')
+
+    if (dsrModalContainer) {
+      createRoot(dsrModalContainer).render(
+        <CreateDSRModal
+          accountId={ENV.ACCOUNT_ID}
+          user={{
+            id: ENV.USER_ID,
+            name: ENV.CONTEXT_USER_DISPLAY_NAME,
+          }}
+          afterSave={() => {}}
+        >
+          <Button renderIcon={<IconExportLine />} display="block" textAlign="start">
+            Export DSR Report
+          </Button>
+        </CreateDSRModal>,
       )
     }
   }

@@ -109,6 +109,17 @@ describe Group do
     end
   end
 
+  it "does not create new group if Horizon course" do
+    context = course_model
+    group_category = context.group_categories.create(name: "worldCup")
+    @course.account.enable_feature!(:horizon_course_setting)
+    @course.update!(horizon_course: true)
+    @course.save!
+    expect do
+      Group.create!(name: "group1", group_category:, context:)
+    end.to raise_error(ActiveRecord::RecordInvalid)
+  end
+
   describe "#grading_standard_or_default" do
     context "when the Group belongs to a Course" do
       it "returns the grading scheme being used by the course, if one exists" do
@@ -249,10 +260,11 @@ describe Group do
   it "grants manage permissions for associated objects to group managers" do
     e = course_with_teacher(active_course: true)
     course = e.context
-    course.root_account.disable_feature!(:granular_permissions_manage_groups)
     teacher = e.user
     group = course.groups.create
-    expect(course.grants_right?(teacher, :manage_groups)).to be_truthy
+    expect(course.grants_right?(teacher, :manage_groups_add)).to be_truthy
+    expect(course.grants_right?(teacher, :manage_groups_manage)).to be_truthy
+    expect(course.grants_right?(teacher, :manage_groups_delete)).to be_truthy
     expect(group.grants_right?(teacher, :manage_wiki_create)).to be_truthy
     expect(group.grants_right?(teacher, :manage_wiki_update)).to be_truthy
     expect(group.grants_right?(teacher, :manage_wiki_delete)).to be_truthy
@@ -262,31 +274,6 @@ describe Group do
     expect(group.wiki.grants_right?(teacher, :update_page)).to be_truthy
     attachment = group.attachments.build
     expect(attachment.grants_right?(teacher, :create)).to be_truthy
-  end
-
-  context "with granular permissions enabled" do
-    before do
-      @course.root_account.enable_feature!(:granular_permissions_manage_groups)
-    end
-
-    it "grants manage permissions for associated objects to group managers" do
-      e = course_with_teacher(active_course: true)
-      course = e.context
-      teacher = e.user
-      group = course.groups.create
-      expect(course.grants_right?(teacher, :manage_groups_add)).to be_truthy
-      expect(course.grants_right?(teacher, :manage_groups_manage)).to be_truthy
-      expect(course.grants_right?(teacher, :manage_groups_delete)).to be_truthy
-      expect(group.grants_right?(teacher, :manage_wiki_create)).to be_truthy
-      expect(group.grants_right?(teacher, :manage_wiki_update)).to be_truthy
-      expect(group.grants_right?(teacher, :manage_wiki_delete)).to be_truthy
-      expect(group.grants_right?(teacher, :manage_files_add)).to be_truthy
-      expect(group.grants_right?(teacher, :manage_files_edit)).to be_truthy
-      expect(group.grants_right?(teacher, :manage_files_delete)).to be_truthy
-      expect(group.wiki.grants_right?(teacher, :update_page)).to be_truthy
-      attachment = group.attachments.build
-      expect(attachment.grants_right?(teacher, :create)).to be_truthy
-    end
   end
 
   it "does not allow a concluded student to participate" do
@@ -1024,7 +1011,10 @@ describe Group do
     context "permissions" do
       before do
         @group = Group.create!(context: @course, group_category: @non_collaborative_category, name: "Test Group", non_collaborative: true)
-        @course.account.enable_feature!(:differentiation_tags)
+        @course.account.enable_feature! :assign_to_differentiation_tags
+        @course.account.settings[:allow_assign_to_differentiation_tags] = { value: true }
+        @course.account.save!
+        @course.account.reload
         allow(@course).to receive(:grants_any_right?).with(@teacher, anything, *RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS).and_return(true)
       end
 
@@ -1036,7 +1026,6 @@ describe Group do
           :send_messages,
           :send_messages_all,
           :manage,
-          :manage_admin_users,
           :allow_course_admin_actions,
           :manage_students,
           :update,
@@ -1065,7 +1054,7 @@ describe Group do
         allow(@course).to receive(:grants_right?).and_return(true)
         allow(@course).to receive(:grants_right?).with(anything, anything, :manage_tags_manage).and_return(false)
 
-        expect(@group.check_policy(@teacher)).not_to include(:manage, :update, :manage_admin_users, :allow_course_admin_actions, :manage_students)
+        expect(@group.check_policy(@teacher)).not_to include(:manage, :update, :allow_course_admin_actions, :manage_students)
       end
 
       it "checks delete permission correctly" do
@@ -1092,6 +1081,55 @@ describe Group do
       it "does not grant permissions to a student who is a group member" do
         @group.add_user(@student)
         expect(@group.reload.check_policy(@student)).to be_empty
+      end
+    end
+
+    context "differentiation tag validations" do
+      before do
+        @c1 = GroupCategory.where(non_collaborative: true).last
+        @c2 = GroupCategory.create!(context: @course, name: "Category 2", non_collaborative: true)
+        @c3 = GroupCategory.create!(context: @course, name: "Category 3", non_collaborative: true)
+        @c4 = GroupCategory.create!(context: @course, name: "Category 4", non_collaborative: true)
+        10.times do |i|
+          Group.create!(context: @course, group_category: @c1, name: "Group #{i}", non_collaborative: true)
+          Group.create!(context: @course, group_category: @c2, name: "Group #{i + 10}", non_collaborative: true)
+          Group.create!(context: @course, group_category: @c3, name: "Group #{i + 20}", non_collaborative: true)
+          Group.create!(context: @course, group_category: @c4, name: "Group #{i + 30}", non_collaborative: true)
+        end
+        @course.account.settings[:allow_assign_to_differentiation_tags] = { value: true }
+        @course.account.save!
+        @course.account.reload
+      end
+
+      it "reaching the tag limit and removing a tag allows to create another" do
+        expect(@c4.max_diff_tag_validation_count).to eq GroupCategory.MAX_DIFFERENTIATION_TAG_PER_COURSE
+
+        Group.where(group_category: @c4).last.delete
+        group = Group.create!(context: @course, group_category: @c4, name: "Group 40", non_collaborative: true)
+
+        expect(group).to be_valid
+        expect(group.errors).to be_empty
+      end
+
+      it "does not allow to create a tag variant after the limit" do
+        expect(@c4.max_diff_tag_validation_count).to eq GroupCategory.MAX_DIFFERENTIATION_TAG_PER_COURSE
+
+        Group.where(group_category: @c3).last.delete
+        group = Group.create(context: @course, group_category: @c4, name: "Group 40", non_collaborative: true)
+
+        expect(group).not_to be_valid
+        expect(group.errors[:base]).to include("Variant limit reached for tag")
+      end
+
+      it "leaves out soft deleted tags" do
+        expect(@c4.max_diff_tag_validation_count).to eq GroupCategory.MAX_DIFFERENTIATION_TAG_PER_COURSE
+        GroupCategory.last.update(deleted_at: Time.zone.now)
+        # Each group category has 10 groups so setting a category as deleted will reduce the count by 10
+        expect(@c4.max_diff_tag_validation_count).to eq 30
+
+        tag = GroupCategory.create(context: @course, name: "Category 5", non_collaborative: true)
+        expect(tag).to be_valid
+        expect(tag.errors).to be_empty
       end
     end
   end

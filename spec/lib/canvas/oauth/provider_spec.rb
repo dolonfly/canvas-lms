@@ -92,6 +92,26 @@ module Canvas::OAuth
       it "is true for an integer" do
         expect(Provider.new("123", "456").client_id_is_valid?).to be_truthy
       end
+
+      it "is true for minimum 64-bit integer value" do
+        min_64bit = -(2**63)
+        expect(Provider.new(min_64bit.to_s, "456").client_id_is_valid?).to be_truthy
+      end
+
+      it "is true for maximum 64-bit integer value" do
+        max_64bit = (2**63) - 1
+        expect(Provider.new(max_64bit.to_s, "456").client_id_is_valid?).to be_truthy
+      end
+
+      it "is false for values below minimum 64-bit integer" do
+        below_min = -(2**63) - 1
+        expect(Provider.new(below_min.to_s, "456").client_id_is_valid?).to be_falsey
+      end
+
+      it "is false for values above maximum 64-bit integer" do
+        above_max = (2**63)
+        expect(Provider.new(above_max.to_s, "456").client_id_is_valid?).to be_falsey
+      end
     end
 
     describe "#has_valid_redirect?" do
@@ -131,22 +151,22 @@ module Canvas::OAuth
     end
 
     describe "authorized_token?" do
-      let(:developer_key) { DeveloperKey.create! }
+      let(:developer_key) { DeveloperKey.create!(name: "test_key") }
       let(:user) { User.create! }
 
       it "finds a pre existing token with the same scope" do
         user.access_tokens.create!(developer_key:, scopes: ["#{TokenScopes::OAUTH2_SCOPE_NAMESPACE}userinfo"], remember_access: true)
-        expect(Provider.new(developer_key.id, "", ["userinfo"]).authorized_token?(user)).to be true
+        expect(Provider.new(developer_key.id, "", ["userinfo"], developer_key.name).authorized_token?(user)).to be true
       end
 
       it "ignores tokens unless access is remembered" do
         user.access_tokens.create!(developer_key:, scopes: ["#{TokenScopes::OAUTH2_SCOPE_NAMESPACE}userinfo"])
-        expect(Provider.new(developer_key.id, "", ["userinfo"]).authorized_token?(user)).to be false
+        expect(Provider.new(developer_key.id, "", ["userinfo"], developer_key.name).authorized_token?(user)).to be false
       end
 
       it "ignores tokens for out of band requests" do
         user.access_tokens.create!(developer_key:, scopes: ["#{TokenScopes::OAUTH2_SCOPE_NAMESPACE}userinfo"], remember_access: true)
-        expect(Provider.new(developer_key.id, Canvas::OAuth::Provider::OAUTH2_OOB_URI, ["userinfo"]).authorized_token?(user)).to be false
+        expect(Provider.new(developer_key.id, Canvas::OAuth::Provider::OAUTH2_OOB_URI, ["userinfo"], developer_key.name).authorized_token?(user)).to be false
       end
     end
 
@@ -185,7 +205,7 @@ module Canvas::OAuth
       before { stub_dev_key(double(id: 123)) }
 
       it "uses the key id for a client id" do
-        expect(provider.session_hash[:client_id]).to eq 123
+        expect(provider.session_hash[:client_id]).to eq "123"
       end
 
       it "passes the redirect_uri through" do

@@ -17,9 +17,11 @@
  */
 
 import React from 'react'
-import {render, fireEvent} from '@testing-library/react'
+import {render, fireEvent, waitFor} from '@testing-library/react'
 import ContentTypeExternalToolDrawer from '../ContentTypeExternalToolDrawer'
 import MutexManager from '@canvas/mutex-manager/MutexManager'
+import {fallbackIframeAllowances} from '../constants'
+import {monitorLtiMessages} from '@canvas/lti/jquery/messages'
 
 describe('ContentTypeExternalToolDrawer', () => {
   const tool = {
@@ -51,13 +53,12 @@ describe('ContentTypeExternalToolDrawer', () => {
         onExternalContentReady={onExternalContentReady}
         open={true}
         {...props}
-      />
+      />,
     )
   }
 
-  it('renders', () => {
-    const wrapper = renderTray()
-    expect(wrapper).toMatchSnapshot()
+  afterEach(() => {
+    jest.resetAllMocks()
   })
 
   it('labels page content with LTI title', () => {
@@ -68,7 +69,7 @@ describe('ContentTypeExternalToolDrawer', () => {
   it('calls onDismiss when close button is clicked', () => {
     const {getByText} = renderTray()
     fireEvent.click(getByText('Close'))
-    expect(onDismiss.mock.calls.length).toBe(1)
+    expect(onDismiss.mock.calls).toHaveLength(1)
   })
 
   it('includes page content', () => {
@@ -99,21 +100,43 @@ describe('ContentTypeExternalToolDrawer', () => {
     const origin = 'http://example.com'
     beforeAll(() => (window.ENV.DEEP_LINKING_POST_MESSAGE_ORIGIN = origin))
     afterAll(() => (window.ENV = origEnv))
-    const sendPostMessage = data => fireEvent(window, new MessageEvent('message', {data, origin}))
+    const sendPostMessage = (data, source = undefined) => {
+      fireEvent(window, new MessageEvent('message', {data, origin, source}))
+    }
 
     it('calls onExternalContentReady when it receives an externalContentReady postMessage', () => {
       renderTray()
       sendPostMessage({subject: 'externalContentReady'})
       expect(onExternalContentReady).toHaveBeenCalledTimes(1)
     })
+
+    it('calls onDismiss when it receives an lti.close message from the tool', async () => {
+      monitorLtiMessages()
+      const {findByTestId} = renderTray()
+      const {contentWindow} = await findByTestId('ltiIframe')
+      sendPostMessage({subject: 'lti.close'}, contentWindow)
+      await waitFor(() => {
+        expect(onDismiss).toHaveBeenCalledTimes(1)
+      })
+    })
   })
 
-  it('constructs iframe src url', () => {
-    expect(tool.base_url).not.toContain('?')
-    const {getByTestId} = renderTray()
-    const src = getByTestId('ltiIframe').src
-    expect(src).toContain(`${tool.base_url}?`)
-    expect(getByTestId('ltiIframe')).toBeInTheDocument()
+  describe('when constructing iframe src url', () => {
+    const origEnv = {...window.ENV}
+    beforeAll(() => {
+      window.ENV.LTI_LAUNCH_FRAME_ALLOWANCES = fallbackIframeAllowances
+    })
+    afterAll(() => (window.ENV = origEnv))
+
+    it('constructs src url and contains allowances', () => {
+      expect(tool.base_url).not.toContain('?')
+      const {getByTestId} = renderTray()
+      const iframe = getByTestId('ltiIframe')
+      expect(iframe).toBeInTheDocument()
+      const src = iframe.src
+      expect(src).toContain(`${tool.base_url}?`)
+      expect(iframe.getAttribute('allow')).toContain('clipboard-write')
+    })
   })
 
   it('does not render ToolLaunchIframe when there is no tool', () => {
@@ -127,7 +150,7 @@ describe('ContentTypeExternalToolDrawer', () => {
         onDismiss={onDismiss}
         onExternalContentReady={onExternalContentReady}
         open={true}
-      />
+      />,
     )
     expect(queryByTestId('ltiIframe')).toBeNull()
   })

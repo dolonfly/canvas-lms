@@ -311,7 +311,7 @@ class MasterCourses::MasterTemplatesController < ApplicationController
   #     -d 'course_ids_to_remove[]=2' \
   #
   def update_associations
-    if authorized_action(@course.account, @current_user, [:manage_courses, :manage_courses_admin])
+    if authorized_action(@course.account, @current_user, :manage_courses_admin)
       # NOTE: that I'm additionally requiring course management rights on the account
       # since (for now) we're only allowed to associate courses derived from it
       ids_to_add = api_find_all(Course, Array(params[:course_ids_to_add])).pluck(:id)
@@ -434,7 +434,7 @@ class MasterCourses::MasterTemplatesController < ApplicationController
   def restrict_item
     content_type = params[:content_type]
     unless %w[assignment attachment course_pace discussion_topic external_tool lti-quiz quiz wiki_page].include?(content_type)
-      return render json: { message: "Must be a valid content type (assignment,attachment,course_pace,discussion_topic,external_tool,lti-quiz,quiz,wiki_page)" }, status: :bad_request
+      return render json: { message: "Must be a valid content type (assignment,attachment,course_pace,discussion_topic,external_tool,lti-quiz,quiz,wiki_page). Got #{content_type}" }, status: :bad_request
     end
     unless params.key?(:restricted)
       return render json: { message: "Must set 'restricted'" }, status: :bad_request
@@ -443,7 +443,7 @@ class MasterCourses::MasterTemplatesController < ApplicationController
     scope =
       case content_type
       when "external_tool"
-        @course.context_external_tools.active
+        Lti::ContextToolFinder.only_for(@course).active
       when "attachment"
         @course.attachments.not_deleted
       when "lti-quiz"
@@ -492,8 +492,6 @@ class MasterCourses::MasterTemplatesController < ApplicationController
     items = []
     GuardRail.activate(:secondary) do
       MasterCourses::CONTENT_TYPES_FOR_UNSYNCED_CHANGES.each do |klass|
-        next if klass == "MediaTrack" && !Account.site_admin.feature_enabled?(:media_links_use_attachment_id)
-
         item_scope = case klass
                      when "Attachment"
                        @course.attachments

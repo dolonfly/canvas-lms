@@ -16,7 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import create from 'zustand'
+import {create} from 'zustand'
 import filters, {type FiltersState} from './filtersState'
 import modules, {type ModulesState} from './modulesState'
 import students, {type StudentsState} from './studentsState'
@@ -30,6 +30,9 @@ import type {FlashMessage} from '../gradebook.d'
 import rubricAssessmentImport, {
   type RubricAssessmentImportState,
 } from './rubricAssessmentImportState'
+import rubricAssessmentExport, {
+  type RubricAssessmentExportState,
+} from './rubricAssessmentExportState'
 
 const defaultPerformanceControls = new PerformanceControls()
 
@@ -52,7 +55,8 @@ export type GradebookStore = State &
   AssignmentsState &
   FinalGradeOverrideState &
   SisOverrideState &
-  RubricAssessmentImportState
+  RubricAssessmentImportState &
+  RubricAssessmentExportState
 
 const store = create<GradebookStore>((set, get) => ({
   performanceControls: defaultPerformanceControls,
@@ -78,6 +82,8 @@ const store = create<GradebookStore>((set, get) => ({
   ...sisOverrides(set, get),
 
   ...rubricAssessmentImport(set, get),
+
+  ...rubricAssessmentExport(set, get),
 }))
 
 export default store

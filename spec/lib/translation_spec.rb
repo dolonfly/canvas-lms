@@ -16,158 +16,197 @@
 #
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
-#
 
-NO_SRC_LANG = {
-  endpoint_name: "translation-endpoint",
-  body: { inputs: { src_lang: "es", tgt_lang: "en", text: "¿Dónde está el baño?" } }.to_json,
-  content_type: "application/json",
-  accept: "application/json"
-}.freeze
+require "aws-sdk-translate"
 
-USER_LOCALE_SET = {
-  endpoint_name: "translation-endpoint",
-  body: { inputs: { src_lang: "es", tgt_lang: "sv", text: "¿Dónde está el baño?" } }.to_json,
-  content_type: "application/json",
-  accept: "application/json"
-}.freeze
+TranslationResponse = Struct.new(:translation, :source_language, keyword_init: true)
 
-class MockResponse
-  def read
-    { translated_text: "translated" }.to_json
-  end
-end
+describe Translation do
+  let(:translation_flags) { { translation: true, ai_translation_improvements: true, cedar_translation: true } }
+  let(:current_user) { double("User") }
 
-class MockCredentials
-  def set?
-    true
-  end
-end
-
-require "aws-sdk-sagemakerruntime"
-
-describe "Translation" do
   before do
-    # Mock DynamicSettings to return our endpoint.
-    allow(DynamicSettings).to receive(:find).with(any_args).and_call_original
-    allow(DynamicSettings).to receive(:find).with(tree: :private).and_return({ "sagemaker.yml" => { "endpoint_name" => "translation-endpoint" }.to_yaml })
-
-    # Mock statsd to allow it to receive what we expect
-    allow(InstStatsd::Statsd).to receive(:increment)
-
-    # Mock the runtime and the credential provider
-    @runtime_mock = instance_double("Aws::SageMakerRuntime::Client")
-    allow(Canvas::AwsCredentialProvider).to receive(:new).and_return(MockCredentials.new)
-    allow(Aws::SageMakerRuntime::Client).to receive(:new).and_return(@runtime_mock)
-
-    # Mock the response that the runtime returns.
-    @mock_response = instance_double("Response")
-    allow(@mock_response).to receive(:body).and_return(MockResponse.new)
-    allow(@runtime_mock).to receive(:invoke_endpoint).and_return(@mock_response)
-
-    # Mock user
-    @user = user_factory(active_all: true)
+    # We're gonna focus on CedarClient, since other clients are deprecated
+    allow(CedarClient).to receive(:enabled?).and_return(true)
   end
 
-  describe ":create" do
-    it "detects src_lang if not present" do
-      Translation.create(tgt_lang: "en", text: "¿Dónde está el baño?")
-      expect(@runtime_mock).to have_received(:invoke_endpoint).with(NO_SRC_LANG)
+  # rubocop:disable Layout/MultilineArrayLineBreaks
+  describe "#languages" do
+    context "when improvements feature is enabled" do
+      subject { described_class.languages({ translation: true, ai_translation_improvements: true, cedar_translation: false }) }
+
+      let(:language_abbrs) do
+        %w[
+          af sq am ar hy az bn bs bg ca zh-TW zh hr cs da fa-AF nl en et
+          fa tl fi fr-CA fr ka de el gu ht ha he hi hu is id
+          ga it ja kn kk ko lv lt mk ms ml mt mr mn no ps pl pt pt-PT pa
+          ro ru sr si sk sl so es es-MX sw sv ta te th tr uk ur uz vi cy
+        ]
+      end
+
+      it "returns the proper list" do
+        expect(subject.pluck(:id)).to match_array(language_abbrs)
+      end
+
+      it "returns the list of languages in name asc" do
+        expect(subject.pluck(:name).sort).to eq(subject.pluck(:name))
+      end
     end
 
-    it "trims locale for src_lang" do
-      expect(CLD).to receive(:detect_language).and_return({ code: "es-ES" })
-      Translation.create(tgt_lang: "en", text: "¿Dónde está el baño?")
-      expect(@runtime_mock).to have_received(:invoke_endpoint).with(NO_SRC_LANG)
+    context "when improvements feature is disabled" do
+      subject { described_class.languages({ translation: true, ai_translation_improvements: false, cedar_translation: false }) }
+
+      let(:language_abbrs) do
+        %w[
+          af sq am ar hy az bn bs bg ca zh hr cs da nl en et
+          fa tl fi fr ka de el gu ht ha he hi hu is id
+          ga it ja kn kk ko lv lt mk ms ml mr mn no ps pl pt pa
+          ro ru sr si sk sl so es sw sv ta th tr uk ur uz vi cy
+          ast ba be br ceb ff fy gd gl ig ilo jv km lb lg ln lo
+          mg my ne ns oc or sd ss su tn wo xh yi yo zu
+        ]
+      end
+
+      it "returns the proper list" do
+        expect(subject.pluck(:id)).to match_array(language_abbrs)
+      end
+
+      it "returns the list of languages in name asc" do
+        expect(subject.pluck(:name).sort).to eq(subject.pluck(:name))
+      end
     end
 
-    it "requires user or tgt lang set" do
-      expect(Translation.create(text: "hello, world")).to be_nil
-    end
+    context "when language characters using unicode chars" do
+      subject { described_class.languages({ translation: true, ai_translation_improvements: true, cedar_translation: false }) }
 
-    it "uses trimmed user locale if tgt_lang not set" do
-      @user.locale = "sv-x-k12"
-      Translation.create(user: @user, src_lang: "es", text: "¿Dónde está el baño?")
-      expect(@runtime_mock).to have_received(:invoke_endpoint).with(USER_LOCALE_SET)
-    end
+      let(:improvements_feature_enabled) { true }
 
-    it "increments the translation metric" do
-      Translation.create(tgt_lang: "en", text: "¿Dónde está el baño?")
-      expect(InstStatsd::Statsd).to have_received(:increment).with("translation.create.es.en")
+      it "returns the proper list sorted by unicode characters" do
+        I18n.with_locale(:hu) do
+          result_names = subject.pluck(:name)
+          expect(result_names.find_index("Örmény") < result_names.find_index("Román")).to be true
+        end
+      end
     end
   end
+  # rubocop:enable Layout/MultilineArrayLineBreaks
 
-  describe ":translated_languages" do
-    it "does not translate controls if locale is english" do
-      @user.locale = "en"
-      allow(Translation).to receive(:create)
-      Translation.translated_languages(@user)
-      expect(Translation).not_to have_received(:create)
+  describe "available?" do
+    it "returns true if feature flag is enabled and translation client is present" do
+      expect(described_class.available?(translation_flags)).to be true
     end
 
-    it "does not translate if no locale" do
-      allow(Translation).to receive(:create)
-      Translation.translated_languages(@user)
-      expect(Translation).not_to have_received(:create)
+    it "returns false if feature flag is disabled" do
+      expect(described_class.available?({ translation: false })).to be false
     end
 
-    it "translates if non-english locale is set" do
-      @user.locale = "es"
-      allow(Translation).to receive(:create)
-      Translation.translated_languages(@user)
-      expect(Translation).to have_received(:create).exactly(Translation.languages.length).times
-    end
-
-    it "uses the cache if key is present" do
-      # Arrange
-      @user.locale = "es"
-      allow(Canvas.redis).to receive(:get).with(["translated_languages", @user.locale].cache_key).and_return({ language: "languages" }.to_json)
-
-      # Act
-      resp = Translation.translated_languages(@user)
-
-      # Assert
-      expect(resp).to eq({ "language" => "languages" })
-    end
-
-    it "caches the translation results" do
-      # Arrange
-      allow(Canvas.redis).to receive(:set)
-      @user.locale = "es"
-
-      # Act
-      Translation.translated_languages(@user)
-
-      # Assert
-      expect(Canvas.redis).to have_received(:set).exactly(1)
+    it "returns false if translation client is not present" do
+      allow(described_class).to receive(:translation_client).and_return(nil)
+      expect(described_class.available?(translation_flags)).to be false
     end
   end
 
-  describe ":language_matches_user_locale?" do
-    it "does match" do
-      @user.locale = "es"
-      expect(Translation.language_matches_user_locale?(@user, "¿Dónde está el baño?")).to be_truthy
+  describe "current_translation_provider_type" do
+    it "returns nil if translation flags are not enabled" do
+      flags = { translation: false, ai_translation_improvements: false, cedar_translation: false }
+      expect(described_class.current_translation_provider_type(flags)).to be_nil
     end
 
-    it "does not match" do
-      @user.locale = "en"
-      expect(Translation.language_matches_user_locale?(@user, "¿Dónde está el baño?")).to be_falsey
+    it "returns sagemaker as default translation provider" do
+      flags = { translation: true, ai_translation_improvements: false, cedar_translation: false }
+      expect(described_class.current_translation_provider_type(flags)).to eq(Translation::TranslationType::SAGEMAKER)
+    end
+
+    it "returns aws translate as improved translation provider" do
+      flags = { translation: true, ai_translation_improvements: true, cedar_translation: false }
+      expect(described_class.current_translation_provider_type(flags)).to eq(Translation::TranslationType::AWS_TRANSLATE)
+    end
+
+    it "returns cedar if cedar is on" do
+      flags = { translation: true, ai_translation_improvements: false, cedar_translation: true }
+      expect(described_class.current_translation_provider_type(flags)).to eq(Translation::TranslationType::CEDAR)
     end
   end
 
-  describe ":translate_html" do
-    it "translates HTML" do
-      allow(Translation).to receive(:create).and_return("fake")
-      text = "<p>Hello mom!</p><p>I am a person</p>"
-      expected = "<p>fake</p><p>fake</p>"
-      expect(Translation.translate_html(html_string: text)).to eq(expected)
+  describe "translate_text" do
+    let(:text) { "Hello, world!" }
+    let(:result) { "Hola, mundo!" }
+
+    before do
+      stub_const("CedarClient", Class.new do
+        def self.enabled?
+          true
+        end
+
+        def self.translate_text(*)
+          TranslationResponse.new(
+            translation: "Hola, mundo!",
+            source_language: "en"
+          )
+        end
+      end)
     end
 
-    it "translates HTML but leaves whitespace-only strings" do
-      allow(Translation).to receive(:create).and_return("fake")
-      text = "<p>Hello mom!</p><p>&nbsp;</p>"
-      not_expected = "<p>fake</p><p>fake</p>"
-      expect(Translation.translate_html(html_string: text)).to_not eq(not_expected)
+    it "returns nil if translation client is not present" do
+      allow(described_class).to receive(:translation_client).and_return(nil)
+      expect(described_class.translate_text(text:, tgt_lang: "es", flags: translation_flags)).to be_nil
+    end
+
+    it "returns nil if tgt_lang is nil" do
+      expect(described_class.translate_text(text:, tgt_lang: nil, flags: translation_flags)).to be_nil
+    end
+
+    it "translates text when tgt_lang is provided" do
+      expect(described_class.translate_text(text:, tgt_lang: "es", flags: translation_flags, options: { feature_slug: "inbox", current_user: })).to eq(result)
+    end
+
+    it "raises TextTooLongError if html_string is too long" do
+      text = "a" * Translation::CHARACTER_LIMIT
+      expect { described_class.translate_text(text:, tgt_lang: "es", flags: translation_flags) }.to raise_error(Translation::TextTooLongError)
+    end
+
+    context "when target language is identical to detected source language" do
+      it "raises SameLanguageTranslationError" do
+        expect { described_class.translate_text(text: "Hello world", tgt_lang: "en", flags: translation_flags, options: { feature_slug: "inbox", current_user: }) }.to raise_error(Translation::SameLanguageTranslationError)
+      end
+    end
+  end
+
+  describe "translate_html" do
+    let(:html) { "<p>Hello, world!</p>" }
+    let(:result) { "<p>Hola, mundo!</p>" }
+
+    before do
+      stub_const("CedarClient", Class.new do
+        def self.enabled?
+          true
+        end
+
+        def self.translate_html(*)
+          TranslationResponse.new(
+            translation: "<p>Hola, mundo!</p>",
+            source_language: "en"
+          )
+        end
+      end)
+    end
+
+    it "returns nil if translation client is not present" do
+      allow(described_class).to receive(:translation_client).and_return(nil)
+      expect(described_class.translate_html(html_string: html, tgt_lang: "es", flags: translation_flags)).to be_nil
+    end
+
+    it "returns nil if tgt_lang is nil" do
+      expect(described_class.translate_html(html_string: html, tgt_lang: nil, flags: translation_flags)).to be_nil
+    end
+
+    it "translates text when tgt_lang is provided" do
+      expect(described_class.translate_html(html_string: html, tgt_lang: "es", flags: translation_flags, options: { feature_slug: "discussion", current_user: })).to eq("<p>Hola, mundo!</p>")
+    end
+
+    it "raises TextTooLongError if html_string is too long" do
+      long_html = "<p>" + ("a" * Translation::CHARACTER_LIMIT) + "</p>"
+      expect { described_class.translate_html(html_string: long_html, tgt_lang: "es", flags: translation_flags) }.to raise_error(Translation::TextTooLongError)
     end
   end
 end

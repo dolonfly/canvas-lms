@@ -56,14 +56,23 @@ describe CC::TopicResources do
   let(:reply_to_entry_required_count) { "5" }
   let(:parent_assignment) { mock_course.assignments.create! }
   let(:discussion_type) { DiscussionTopic::DiscussionTypes::THREADED }
-  let(:topic) { mock_course.discussion_topics.create!(message: "hi", title: "discussion title", discussion_type:) }
+  let(:topic) { mock_course.discussion_topics.create!(message: "hi", title: "discussion title", discussion_type:, user: mock_user) }
   let(:discussion_checkpoints_enabled) do
     allow(mock_course.root_account).to receive(:feature_enabled?).with(:discussion_checkpoints)
   end
 
-  before { allow(mock_course).to receive_messages(root_account: Account.create!) }
+  before do
+    allow(mock_course).to receive_messages(root_account: Account.create!)
+    allow(mock_course.root_account).to receive(:feature_enabled?).with(:horizon_course_setting)
+    allow(mock_course.root_account).to receive(:feature_enabled?).with(:file_association_access)
+    allow(mock_course.root_account).to receive(:feature_enabled?).with(:allow_attachment_association_creation)
+  end
 
   describe "#create_canvas_topic" do
+    before do
+      allow(mock_course.account).to receive(:feature_enabled?).with(:assign_to_differentiation_tags).and_return(false)
+    end
+
     context "reply_to_entry_required_count" do
       context "when discussion_checkpoints is enabled" do
         before do
@@ -97,7 +106,7 @@ describe CC::TopicResources do
 
         context "when discussion is not checkpoint discussion" do
           before do
-            topic.update!(assignment: parent_assignment)
+            topic.update!(assignment: parent_assignment, user: mock_user)
             topic.assignment.update!(has_sub_assignments: false)
           end
 

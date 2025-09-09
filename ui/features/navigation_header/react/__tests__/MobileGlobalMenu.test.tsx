@@ -14,11 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License along
 // with this program. If not, see <http://www.gnu.org/licenses/>.
 
-import React from 'react'
-import {render, screen} from '@testing-library/react'
-import MobileGlobalMenu from '../MobileGlobalMenu'
-import {QueryClient} from '@tanstack/react-query'
+import fakeENV from '@canvas/test-utils/fakeENV'
 import {MockedQueryClientProvider} from '@canvas/test-utils/query'
+import {QueryClient} from '@tanstack/react-query'
+import {cleanup, render, screen, waitFor} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import MobileGlobalMenu from '../MobileGlobalMenu'
+import {useSwitchExperience} from '../mutations/useSwitchExperience'
 import {
   type ExternalTool,
   filterAndProcessTools,
@@ -31,20 +33,49 @@ jest.mock('../utils', () => ({
   filterAndProcessTools: jest.fn(),
 }))
 
+jest.mock('../mutations/useSwitchExperience', () => ({
+  useSwitchExperience: jest.fn(),
+}))
+
 const mockedFilterAndProcessTools = filterAndProcessTools as jest.MockedFunction<
   typeof filterAndProcessTools
 >
 const mockedGetExternalApps = getExternalApps as jest.MockedFunction<typeof getExternalApps>
+const mockedUseSwitchExperience = useSwitchExperience as jest.MockedFunction<
+  typeof useSwitchExperience
+>
 
 describe('MobileGlobalMenu', () => {
-  const setup = (processedTools: ProcessedTool[] = [], externalTools: ExternalTool[] = []) => {
+  beforeEach(() => {
+    mockedUseSwitchExperience.mockReturnValue({mutate: jest.fn()} as any)
+    fakeENV.setup({
+      FEATURES: {
+        horizon_learner_app: true,
+        horizon_learning_provider_app_on_contextless_routes: true,
+      },
+    })
+  })
+  afterEach(() => {
+    cleanup()
+    fakeENV.teardown()
+  })
+  const setup = (
+    processedTools: ProcessedTool[] = [],
+    externalTools: ExternalTool[] = [],
+    hasCareer: boolean = false,
+  ) => {
     mockedFilterAndProcessTools.mockReturnValue(processedTools)
     mockedGetExternalApps.mockResolvedValue(externalTools)
+
     const queryClient = new QueryClient()
+
+    queryClient.setQueryData(['experience_summary'], {
+      available_apps: hasCareer ? ['career_learner'] : [],
+    })
     return render(
       <MockedQueryClientProvider client={queryClient}>
         <MobileGlobalMenu onDismiss={() => {}} />
-      </MockedQueryClientProvider>
+      </MockedQueryClientProvider>,
     )
   }
 
@@ -71,7 +102,7 @@ describe('MobileGlobalMenu', () => {
     expect(screen.getByText('Tool 2').closest('a')).toHaveAttribute('href', 'http://tool2.com')
     expect(screen.getByText('Tool 1').closest('a')?.querySelector('img')).toHaveAttribute(
       'src',
-      'img/tool1.png'
+      'img/tool1.png',
     )
     const svg = screen.getByText('Tool 2').closest('a')?.querySelector('svg')
     expect(svg).toBeInTheDocument()
@@ -130,7 +161,7 @@ describe('MobileGlobalMenu', () => {
     expect(await screen.findByText('Custom URL Tool')).toBeInTheDocument()
     expect(screen.getByText('Custom URL Tool').closest('a')).toHaveAttribute(
       'href',
-      'https://custom.example.com'
+      'https://custom.example.com',
     )
   })
 
@@ -155,7 +186,7 @@ describe('MobileGlobalMenu', () => {
     expect(await screen.findByText('Global URL Tool')).toBeInTheDocument()
     expect(screen.getByText('Global URL Tool').closest('a')).toHaveAttribute(
       'href',
-      'https://global.example.com'
+      'https://global.example.com',
     )
   })
 
@@ -200,14 +231,44 @@ describe('MobileGlobalMenu', () => {
           svgPath: null,
         },
       ] as ProcessedTool[],
-      externalTools
+      externalTools,
     )
     expect(await screen.findByText('Tool with Null Image')).toBeInTheDocument()
     expect(screen.getByText('Tool with Null Image').closest('a')).toHaveAttribute(
       'href',
-      'http://tool-null-image.com'
+      'http://tool-null-image.com',
     )
     const fallbackIcon = screen.getByTestId('IconExternalLinkLine')
     expect(fallbackIcon).toBeInTheDocument()
+  })
+
+  it('renders Canvas Career link when career enrollment is available', async () => {
+    setup([], [], true)
+    expect(await screen.findByText('Canvas Career')).toBeInTheDocument()
+  })
+
+  it('calls switchExperience mutate when Canvas Career link clicked', async () => {
+    const mutateMock = jest.fn()
+    mockedUseSwitchExperience.mockReturnValue({mutate: mutateMock} as any)
+    setup([], [], true)
+    const link = await screen.findByText('Canvas Career')
+    await userEvent.click(link)
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalled()
+    })
+  })
+  describe('when career feature flags are not enabled', () => {
+    beforeEach(() => {
+      fakeENV.setup({
+        FEATURES: {
+          horizon_learner_app: false,
+          horizon_learning_provider_app_on_contextless_routes: false,
+        },
+      })
+    })
+    it('should not render Career menu item', async () => {
+      setup([], [], false)
+      expect(await screen.queryByText('Canvas Career')).not.toBeInTheDocument()
+    })
   })
 })

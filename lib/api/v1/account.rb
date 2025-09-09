@@ -52,7 +52,7 @@ module Api::V1::Account
       hash["sis_import_id"] = account.sis_batch_id if !account.root_account? && account.root_account.grants_right?(user, session, :manage_sis)
       hash["integration_id"] = account.integration_id if !account.root_account? && account.root_account.grants_any_right?(user, :read_sis, :manage_sis)
       hash["lti_guid"] = account.lti_guid if includes.include?("lti_guid")
-      hash["course_template_id"] = account.course_template_id if account.root_account.feature_enabled?(:course_templates)
+      hash["course_template_id"] = account.course_template_id
       if includes.include?("registration_settings")
         hash["registration_settings"] = {
           login_handle_name: account.login_handle_name_with_inference,
@@ -62,7 +62,7 @@ module Api::V1::Account
           hash["terms_required"] = account.terms_required?
           hash["terms_of_use_url"] = terms_of_use_url
           hash["privacy_policy_url"] = privacy_policy_url
-          hash["recaptcha_key"] = account.self_registration_captcha? && DynamicSettings.find(tree: :private)["recaptcha_client_key", failsafe: nil]
+          hash["recaptcha_key"] = account.recaptcha_key
         end
       end
       if includes.include?("services") && account.grants_right?(user, session, :manage_account_settings)

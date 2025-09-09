@@ -24,6 +24,9 @@ import userEvent from '@testing-library/user-event'
 import CalendarEvent from '../../models/CalendarEvent'
 import EditEventView from '../EditEventView'
 import * as UpdateCalendarEventDialogModule from '@canvas/calendar/react/RecurringEvents/UpdateCalendarEventDialog'
+import {http, HttpResponse} from 'msw'
+import {setupServer} from 'msw/node'
+import fakeENV from '@canvas/test-utils/fakeENV'
 
 jest.mock('@canvas/rce/RichContentEditor')
 jest.mock('@canvas/calendar/react/RecurringEvents/UpdateCalendarEventDialog', () => ({
@@ -31,19 +34,41 @@ jest.mock('@canvas/calendar/react/RecurringEvents/UpdateCalendarEventDialog', ()
 }))
 
 const defaultTZ = 'Asia/Tokyo'
+const server = setupServer(
+  // Add default handler for the course API endpoint to resolve MSW warnings
+  http.get('*/api/v1/courses/:courseId', ({params}) => {
+    return HttpResponse.json({
+      id: params.courseId,
+      name: `Course ${params.courseId}`,
+      course_code: `COURSE${params.courseId}`,
+      workflow_state: 'available',
+      term: {
+        id: '1',
+        name: 'Default Term',
+      },
+    })
+  }),
+)
 
 describe('EditEventView', () => {
   beforeAll(() => {
     moment.tz.setDefault(defaultTZ)
+    server.listen()
   })
+
+  afterAll(() => {
+    server.close()
+  })
+
   beforeEach(() => {
-    window.ENV = {FEATURES: {}, TIMEZONE: 'Asia/Tokyo'}
+    fakeENV.setup({FEATURES: {}, TIMEZONE: 'Asia/Tokyo'})
     document.body.innerHTML = '<div id="application"><form id="content"></form></div>'
   })
 
   afterEach(() => {
-    window.ENV = null
+    fakeENV.teardown()
     jest.clearAllMocks()
+    server.resetHandlers()
   })
 
   function render(overrides = {}) {
@@ -178,34 +203,34 @@ describe('EditEventView', () => {
     })
 
     it('is shown in a k5 subject', async () => {
-      window.ENV.K5_SUBJECT_COURSE = true
+      fakeENV.setup({FEATURES: {}, TIMEZONE: 'Asia/Tokyo', K5_SUBJECT_COURSE: true})
       render()
       await waitForRender()
       expect(
-        within(document.body).getByLabelText('Mark as Important Date', {exact: false})
+        within(document.body).getByLabelText('Mark as Important Date', {exact: false}),
       ).toBeInTheDocument()
     })
 
     it('is shown in a k5 homeroom', async () => {
-      window.ENV.K5_HOMEROOM_COURSE = true
+      fakeENV.setup({FEATURES: {}, TIMEZONE: 'Asia/Tokyo', K5_HOMEROOM_COURSE: true})
       render()
       await waitForRender()
       expect(
-        within(document.body).getByLabelText('Mark as Important Date', {exact: false})
+        within(document.body).getByLabelText('Mark as Important Date', {exact: false}),
       ).toBeInTheDocument()
     })
 
     it('is shown in a k5 account', async () => {
-      window.ENV.K5_ACCOUNT = true
+      fakeENV.setup({FEATURES: {}, TIMEZONE: 'Asia/Tokyo', K5_ACCOUNT: true})
       render()
       await waitForRender()
       expect(
-        within(document.body).getByLabelText('Mark as Important Date', {exact: false})
+        within(document.body).getByLabelText('Mark as Important Date', {exact: false}),
       ).toBeInTheDocument()
     })
 
     it('is shown and checked in a k5 subject with event already marked as important', async () => {
-      window.ENV.K5_SUBJECT_COURSE = true
+      fakeENV.setup({FEATURES: {}, TIMEZONE: 'Asia/Tokyo', K5_SUBJECT_COURSE: true})
       render({important_dates: true})
       await waitForRender()
       const checkbox = within(document.body).getByLabelText('Mark as Important Date', {
@@ -228,24 +253,24 @@ describe('EditEventView', () => {
     }
 
     it('is not shown when account level blackout dates are disabled', () => {
-      window.ENV.FEATURES = {account_level_blackout_dates: false}
+      fakeENV.setup({FEATURES: {account_level_blackout_dates: false}, TIMEZONE: 'Asia/Tokyo'})
       render()
       expect(within(document.body).queryByText('Add to Course Pacing blackout dates')).toBeNull()
     })
 
     it('is shown when account level blackout dates are enabled', async () => {
-      window.ENV.FEATURES = {account_level_blackout_dates: true}
+      fakeENV.setup({FEATURES: {account_level_blackout_dates: true}, TIMEZONE: 'Asia/Tokyo'})
       render({context_type: 'course', course_pacing_enabled: 'true'})
       await waitForRender()
       expect(
         within(document.body).getByLabelText('Add to Course Pacing blackout dates', {
           exact: false,
-        })
+        }),
       ).toBeInTheDocument()
     })
 
     it('erases and renders irrelevant fields when checked', async () => {
-      window.ENV.FEATURES = {account_level_blackout_dates: true}
+      fakeENV.setup({FEATURES: {account_level_blackout_dates: true}, TIMEZONE: 'Asia/Tokyo'})
       render({
         context_type: 'course',
         course_pacing_enabled: 'true',
@@ -291,7 +316,7 @@ describe('EditEventView', () => {
 
       expect(document.body.querySelector('#weekly-day')).toHaveTextContent('Weekly on Tuesday')
       expect(document.body.querySelector('#monthly-nth-day')).toHaveTextContent(
-        'Monthly on the second Tuesday'
+        'Monthly on the second Tuesday',
       )
       expect(document.body.querySelector('#annually')).toHaveTextContent('Annually on May 12')
 
@@ -302,18 +327,22 @@ describe('EditEventView', () => {
 
       expect(document.body.querySelector('#weekly-day')).toHaveTextContent('Weekly on Thursday')
       expect(document.body.querySelector('#monthly-nth-day')).toHaveTextContent(
-        'Monthly on the second Thursday'
+        'Monthly on the second Thursday',
       )
       expect(document.body.querySelector('#annually')).toHaveTextContent('Annually on April 12')
     })
 
     it('hides the frequency picker when section dates are enabled', async () => {
-      jest.spyOn($, 'ajaxJSON').mockImplementation((url, method, params, successCB) => {
-        const sections = [{id: 1}]
-        return Promise.resolve(sections).then(() => {
-          successCB(sections, {getResponseHeader: () => ''})
-        })
-      })
+      const sections = [{id: 1}]
+      server.use(
+        http.get('*/api/v1/courses/21/sections', () => {
+          return HttpResponse.json(sections, {
+            headers: {
+              'X-Response-Header': '',
+            },
+          })
+        }),
+      )
 
       // jquery supplies this in the real app
       document.head.appendChild(document.createElement('style')).textContent =
@@ -336,12 +365,8 @@ describe('EditEventView', () => {
     })
 
     it('shows the duplicates when section dates are enabled', async () => {
-      jest.spyOn($, 'ajaxJSON').mockImplementation((url, method, params, successCB) => {
-        const sections = [{id: 1}]
-        return Promise.resolve(sections).then(() => {
-          successCB(sections, {getResponseHeader: () => ''})
-        })
-      })
+      const sections = [{id: 1}]
+      server.use(http.get('/api/v1/courses/21/sections', () => HttpResponse.json(sections)))
 
       const event = new CalendarEvent({
         context_code: 'course_1',
@@ -369,8 +394,8 @@ describe('EditEventView', () => {
 
       await waitFor(() =>
         expect(
-          UpdateCalendarEventDialogModule.renderUpdateCalendarEventDialog
-        ).toHaveBeenCalledWith(expect.objectContaining(view.model.attributes))
+          UpdateCalendarEventDialogModule.renderUpdateCalendarEventDialog,
+        ).toHaveBeenCalledWith(expect.objectContaining(view.model.attributes)),
       )
     })
 
@@ -381,8 +406,8 @@ describe('EditEventView', () => {
 
       await waitFor(() =>
         expect(
-          UpdateCalendarEventDialogModule.renderUpdateCalendarEventDialog
-        ).not.toHaveBeenCalled()
+          UpdateCalendarEventDialogModule.renderUpdateCalendarEventDialog,
+        ).not.toHaveBeenCalled(),
       )
     })
 
@@ -395,8 +420,8 @@ describe('EditEventView', () => {
 
       await waitFor(() =>
         expect(
-          UpdateCalendarEventDialogModule.renderUpdateCalendarEventDialog
-        ).not.toHaveBeenCalled()
+          UpdateCalendarEventDialogModule.renderUpdateCalendarEventDialog,
+        ).not.toHaveBeenCalled(),
       )
     })
 

@@ -95,7 +95,7 @@ describe DiscussionEntry do
     end
 
     before do
-      allow(InstStatsd::Statsd).to receive(:increment)
+      allow(InstStatsd::Statsd).to receive(:distributed_increment)
     end
 
     let(:student) { student_in_course(active_all: true).user }
@@ -107,7 +107,7 @@ describe DiscussionEntry do
       expect { entry.save! }.to change { entry.mentions.count }.from(0).to(1)
       expect(entry.mentions.take.user_id).to eq mentioned_student.id
       expect(entry.mentioned_users.count).to eq 1
-      expect(InstStatsd::Statsd).to have_received(:increment).with("discussion_entry.created").at_least(:once)
+      expect(InstStatsd::Statsd).to have_received(:distributed_increment).with("discussion_entry.created").at_least(:once)
     end
 
     describe "edits to an entry" do
@@ -265,6 +265,19 @@ describe DiscussionEntry do
       expect(BroadcastPolicy.notifier).to receive(:send_notification).once
       entry.broadcast_report_notification("hello I have been reported")
     end
+
+    it "sends notification to teacher when a reply is reported in a group discussion" do
+      @course.root_account.enable_feature!(:discussions_reporting)
+      group(group_context: @course)
+      @group.participating_users << @student
+      @group.save!
+
+      topic = @group.discussion_topics.create!(user: @teacher, message: "This is an important announcement")
+      topic.subscribe(@student)
+      entry = topic.discussion_entries.create!(user: @teacher, message: "Oh, and another thing...")
+      expect(BroadcastPolicy.notifier).to receive(:send_notification).once
+      entry.broadcast_report_notification("hello I have been reported")
+    end
   end
 
   context "sub-topics" do
@@ -399,6 +412,52 @@ describe DiscussionEntry do
       # delete final 'read' entry
       @entry_2.destroy
       expect(@topic.unread_count(@reader)).to eq 0
+    end
+  end
+
+  context "discussion checkpoints" do
+    before do
+      Account.site_admin.enable_feature!(:react_discussions_post)
+      course_with_student(active_all: true)
+      @course.root_account.enable_feature!(:discussion_checkpoints)
+
+      @checkpointed_discussion = DiscussionTopic.create_graded_topic!(course: @course, title: "checkpointed discussion")
+      @replies_required = 3
+
+      @reply_to_topic_checkpoint = Checkpoints::DiscussionCheckpointCreatorService.call(
+        discussion_topic: @checkpointed_discussion,
+        checkpoint_label: CheckpointLabels::REPLY_TO_TOPIC,
+        dates: [{ type: "everyone", due_at: 2.days.from_now }],
+        points_possible: 3
+      )
+      @reply_to_entry_checkpint = Checkpoints::DiscussionCheckpointCreatorService.call(
+        discussion_topic: @checkpointed_discussion,
+        checkpoint_label: CheckpointLabels::REPLY_TO_ENTRY,
+        dates: [{ type: "everyone", due_at: 3.days.from_now }],
+        points_possible: 9,
+        replies_required: @replies_required
+      )
+    end
+
+    describe "#update_topic_submission" do
+      it "doesnt break if dt.assignment.has_sub_assignments && dt.assignment.sub_assignments.empty?" do
+        entry = @checkpointed_discussion.discussion_entries.create!(message: "hello", user: @user)
+        # create the error state where dt.assignment.has_sub_assignments == true, but dt.assignment.sub_assignments == []
+        # in this case it's through discussion_topic&.assignment&.checkpoints_parent?
+        dt_assignment = @checkpointed_discussion.assignment
+        dt_sub_assignments = @checkpointed_discussion.assignment.sub_assignments
+        sub1 = dt_sub_assignments.first
+        sub2 = dt_sub_assignments.last
+        sub1.workflow_state = "deleted"
+        sub1.save(validate: false)
+        sub2.workflow_state = "deleted"
+        sub2.save(validate: false)
+        dt_assignment.reload
+        dt_assignment.has_sub_assignments = true
+        dt_assignment.save(validate: false)
+
+        expect { entry.destroy }.to_not raise_error
+      end
     end
   end
 
@@ -862,15 +921,25 @@ describe DiscussionEntry do
           entry = @topic.discussion_entries.create!(message: "entry", user: @teacher)
           expect(entry.grants_right?(@teacher, :reply)).to be false
         end
-      end
 
-      context "when a user is no longer enrolled in the course" do
-        before do
-          create_enrollment(topic.course, user, { enrollment_state: "completed" })
-        end
+        context "group discussion" do
+          it "reply permission is true if the discussion is threaded" do
+            group(group_context: @course)
+            @group.save!
 
-        it "returns false for their own posts" do
-          expect(entry.grants_right?(user, :reply)).to be false
+            topic = @group.discussion_topics.create!(user: @teacher, message: "Hi there", discussion_type: "threaded")
+            entry = topic.discussion_entries.create!(message: "entry", user: @teacher)
+            expect(entry.grants_right?(@teacher, :reply)).to be true
+          end
+
+          it "reply permission is false if the discussion is not threaded" do
+            group(group_context: @course)
+            @group.save!
+
+            topic = @group.discussion_topics.create!(user: @teacher, message: "Hi there", discussion_type: "not_threaded")
+            entry = topic.discussion_entries.create!(message: "entry", user: @teacher)
+            expect(entry.grants_right?(@teacher, :reply)).to be false
+          end
         end
       end
 
@@ -1088,6 +1157,77 @@ describe DiscussionEntry do
       root.message = "Brand new shinny message"
       root.save!
       expect(root.edited_at).not_to be_nil
+    end
+  end
+
+  describe "validate_pin_type" do
+    let(:entry) do
+      topic.discussion_entries.build(
+        user: @teacher,
+        message: "Reply entry"
+      )
+    end
+    let(:topic) { @course.discussion_topics.create!(user: @teacher, message: "Test topic") }
+
+    before(:once) do
+      course_with_teacher(active_all: true)
+    end
+
+    it "allows 'reply' pin_type" do
+      entry.pin_type = DiscussionEntry::PinningTypes::REPLY
+      expect(entry).to be_valid
+    end
+
+    it "allows nil pin_type" do
+      entry.pin_type = nil
+      expect(entry).to be_valid
+    end
+
+    it "adds an error for invalid pin type" do
+      entry.pin_type = "invalid_type"
+      expect(entry).not_to be_valid
+      expect(entry.errors[:pin_type]).to include("Invalid pin type")
+    end
+
+    context "when pin_type is 'thread' on a non-top-level entry" do
+      it "adds an error when trying to pin a reply as thread" do
+        parent_entry = topic.discussion_entries.create!(user: @teacher, message: "Parent entry")
+        child_entry = topic.discussion_entries.build(
+          user: @teacher,
+          message: "Child entry",
+          parent_entry:,
+          pin_type: DiscussionEntry::PinningTypes::THREAD
+        )
+        expect(child_entry).not_to be_valid
+        expect(child_entry.errors[:pin_type]).to include("Pin type 'thread' can only be used for top-level entries")
+      end
+
+      it "allows 'thread' pin_type for top-level entries" do
+        entry.pin_type = DiscussionEntry::PinningTypes::THREAD
+        expect(entry).to be_valid
+      end
+    end
+
+    context "when maximum number of pinned entries is reached" do
+      before do
+        DiscussionTopic::MAX_ENTRIES_PINNED.times do |i|
+          topic.discussion_entries.create!(
+            user: @teacher,
+            message: "Pinned entry #{i}",
+            pin_type: DiscussionEntry::PinningTypes::REPLY
+          )
+        end
+      end
+
+      it "adds an error when trying to pin more than MAX_ENTRIES_PINNED entries" do
+        limit_entry = topic.discussion_entries.build(
+          user: @teacher,
+          message: "One too many",
+          pin_type: DiscussionEntry::PinningTypes::REPLY
+        )
+        expect(limit_entry).not_to be_valid
+        expect(limit_entry.errors[:base]).to include("Discussion topic has too many pinned entries")
+      end
     end
   end
 end

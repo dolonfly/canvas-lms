@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import React from 'react'
 import {fireEvent, render, screen, waitFor} from '@testing-library/react'
 import {RegistrationWizardModal} from '../RegistrationWizardModal'
 import {ZAccountId} from '../../model/AccountId'
@@ -25,7 +24,10 @@ import {
 } from '../RegistrationWizardModalState'
 import {apiError, genericError, success} from '../../../common/lib/apiResult/ApiResult'
 import {mockJsonUrlWizardService} from './helpers'
-import {mockDynamicRegistrationWizardService} from '../../dynamic_registration_wizard/__tests__/helpers'
+import {
+  mockDynamicRegistrationWizardService,
+  mockLti1p3RegistrationWizardService,
+} from '../../dynamic_registration_wizard/__tests__/helpers'
 import userEvent from '@testing-library/user-event'
 import {ZUnifiedToolId} from '../../model/UnifiedToolId'
 import {mockInternalConfiguration} from '../../lti_1p3_registration_form/__tests__/helpers'
@@ -38,21 +40,18 @@ describe('RegistrationWizardModal', () => {
     // instui logs an error when we render a component
     // immediately under Modal
 
-    // eslint-disable-next-line no-console
     error = console.error
-    // eslint-disable-next-line no-console
+
     warn = console.warn
 
-    // eslint-disable-next-line no-console
     console.error = jest.fn()
-    // eslint-disable-next-line no-console
+
     console.warn = jest.fn()
   })
 
   afterAll(() => {
-    // eslint-disable-next-line no-console
     console.error = error
-    // eslint-disable-next-line no-console
+
     console.warn = warn
   })
 
@@ -63,6 +62,7 @@ describe('RegistrationWizardModal', () => {
     dynamicRegistrationWizardService: mockDynamicRegistrationWizardService({
       fetchRegistrationToken,
     }),
+    lti1p3RegistrationWizardService: mockLti1p3RegistrationWizardService({}),
   }
 
   describe('When opened normally', () => {
@@ -71,9 +71,10 @@ describe('RegistrationWizardModal', () => {
         dynamicRegistrationUrl: '',
         unifiedToolId: undefined,
         lti_version: '1p3',
+        isInstructureTool: undefined,
+        showBlankConfigurationMessage: undefined,
         method: 'dynamic_registration',
         registering: false,
-        exitOnCancel: false,
         jsonUrl: '',
         onSuccessfulInstallation: jest.fn(),
         jsonFetch: {_tag: 'initial'},
@@ -134,9 +135,10 @@ describe('RegistrationWizardModal', () => {
         dynamicRegistrationUrl: '',
         unifiedToolId: undefined,
         lti_version: '1p3',
+        isInstructureTool: undefined,
+        showBlankConfigurationMessage: undefined,
         method: 'json_url',
         registering: false,
-        exitOnCancel: false,
         jsonUrl: '',
         jsonCode: '',
         onSuccessfulInstallation: jest.fn(),
@@ -161,7 +163,7 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={jsonUrlWizardService}
-        />
+        />,
       )
       screen.getByTestId('json-url-input').focus()
 
@@ -171,7 +173,7 @@ describe('RegistrationWizardModal', () => {
 
       expect(fetchThirdPartyToolConfiguration).toHaveBeenCalledWith(
         {url: 'https://example.com/json'},
-        accountId
+        accountId,
       )
     })
 
@@ -180,7 +182,7 @@ describe('RegistrationWizardModal', () => {
       const fetchThirdPartyToolConfiguration = jest
         .fn()
         .mockResolvedValue(
-          genericError('An error occurred while fetching the third party tool configuration.')
+          genericError('An error occurred while fetching the third party tool configuration.'),
         )
 
       const jsonUrlWizardService = mockJsonUrlWizardService({fetchThirdPartyToolConfiguration})
@@ -190,7 +192,7 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={jsonUrlWizardService}
-        />
+        />,
       )
       screen.getByTestId('json-url-input').focus()
 
@@ -200,13 +202,13 @@ describe('RegistrationWizardModal', () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText(/An error occurred. Please try again./i, {ignore: 'title'})
+          screen.getByText(/An error occurred. Please try again./i, {ignore: 'title'}),
         ).toBeInTheDocument()
       })
 
       expect(fetchThirdPartyToolConfiguration).toHaveBeenCalledWith(
         {url: 'https://example.com/json'},
-        accountId
+        accountId,
       )
     })
 
@@ -224,7 +226,7 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={jsonUrlWizardService}
-        />
+        />,
       )
       screen.getByTestId('json-url-input').focus()
 
@@ -236,14 +238,14 @@ describe('RegistrationWizardModal', () => {
         expect(
           screen.getByText(
             /The configuration is invalid. Please reach out to the app provider for assistance./i,
-            {ignore: 'title'}
-          )
+            {ignore: 'title'},
+          ),
         ).toBeInTheDocument()
       })
 
       expect(fetchThirdPartyToolConfiguration).toHaveBeenCalledWith(
         {url: 'https://example.com/json'},
-        accountId
+        accountId,
       )
     })
   })
@@ -254,9 +256,10 @@ describe('RegistrationWizardModal', () => {
         dynamicRegistrationUrl: '',
         unifiedToolId: undefined,
         lti_version: '1p3',
+        isInstructureTool: undefined,
+        showBlankConfigurationMessage: undefined,
         method: 'json',
         registering: false,
-        exitOnCancel: false,
         jsonUrl: '',
         jsonCode: '',
         onSuccessfulInstallation: jest.fn(),
@@ -277,7 +280,7 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={jsonUrlWizardService}
-        />
+        />,
       )
       screen.getByTestId('json-code-input').focus()
 
@@ -287,7 +290,7 @@ describe('RegistrationWizardModal', () => {
 
       expect(fetchThirdPartyToolConfiguration).toHaveBeenCalledWith(
         {lti_configuration: {}},
-        accountId
+        accountId,
       )
     })
 
@@ -296,7 +299,7 @@ describe('RegistrationWizardModal', () => {
       const fetchThirdPartyToolConfiguration = jest
         .fn()
         .mockResolvedValue(
-          genericError('An error occurred while fetching the third party tool configuration.')
+          genericError('An error occurred while fetching the third party tool configuration.'),
         )
 
       const jsonUrlWizardService = mockJsonUrlWizardService({fetchThirdPartyToolConfiguration})
@@ -306,7 +309,7 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={jsonUrlWizardService}
-        />
+        />,
       )
       screen.getByTestId('json-code-input').focus()
 
@@ -316,13 +319,13 @@ describe('RegistrationWizardModal', () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText(/An error occurred. Please try again./i, {ignore: 'title'})
+          screen.getByText(/An error occurred. Please try again./i, {ignore: 'title'}),
         ).toBeInTheDocument()
       })
 
       expect(fetchThirdPartyToolConfiguration).toHaveBeenCalledWith(
         {lti_configuration: {}},
-        accountId
+        accountId,
       )
     })
 
@@ -340,7 +343,7 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={jsonUrlWizardService}
-        />
+        />,
       )
       screen.getByTestId('json-code-input').focus()
 
@@ -352,14 +355,14 @@ describe('RegistrationWizardModal', () => {
         expect(
           screen.getByText(
             /The configuration is invalid. Please reach out to the app provider for assistance./i,
-            {ignore: 'title'}
-          )
+            {ignore: 'title'},
+          ),
         ).toBeInTheDocument()
       })
 
       expect(fetchThirdPartyToolConfiguration).toHaveBeenCalledWith(
         {lti_configuration: {}},
-        accountId
+        accountId,
       )
     })
   })
@@ -370,9 +373,10 @@ describe('RegistrationWizardModal', () => {
         dynamicRegistrationUrl: '',
         unifiedToolId: undefined,
         lti_version: '1p3',
+        isInstructureTool: undefined,
+        showBlankConfigurationMessage: undefined,
         method: 'manual',
         registering: false,
-        exitOnCancel: false,
         jsonUrl: '',
         jsonCode: '',
         onSuccessfulInstallation: jest.fn(),
@@ -388,15 +392,19 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={mockJsonUrlWizardService()}
-        />
+        />,
       )
-      screen.getByTestId('manual-name-input').focus()
+      const nameInput = screen.getByTestId('manual-name-input')
+      nameInput.focus()
 
-      await userEvent.paste('')
+      // Clear the input field
+      await userEvent.clear(nameInput)
 
       expect(screen.getByTestId('registration-wizard-next-button')).toBeDisabled()
 
-      await userEvent.paste('   ')
+      // Type spaces only
+      await userEvent.clear(nameInput)
+      await userEvent.type(nameInput, '   ')
 
       expect(screen.getByTestId('registration-wizard-next-button')).toBeDisabled()
     })
@@ -409,7 +417,7 @@ describe('RegistrationWizardModal', () => {
           accountId={accountId}
           {...emptyServices}
           jsonUrlWizardService={mockJsonUrlWizardService()}
-        />
+        />,
       )
       screen.getByTestId('manual-name-input').focus()
 
@@ -421,17 +429,98 @@ describe('RegistrationWizardModal', () => {
         expect(screen.getByText(/LTI 1.3 Registration/i)).toBeInTheDocument()
       })
     })
+
+    it('should not show the alert with info about contacting someone for install info', async () => {
+      const accountId = ZAccountId.parse('123')
+
+      const screen = render(
+        <RegistrationWizardModal
+          accountId={accountId}
+          {...emptyServices}
+          jsonUrlWizardService={mockJsonUrlWizardService()}
+        />,
+      )
+
+      const alert = screen.queryByText('A configuration is not available', {exact: false})
+      expect(alert).not.toBeInTheDocument()
+    })
+  })
+
+  describe('when opened without having configuration info available', () => {
+    it('shows an alert', async () => {
+      openRegistrationWizard({
+        dynamicRegistrationUrl: '',
+        unifiedToolId: undefined,
+        lti_version: '1p3',
+        isInstructureTool: true,
+        showBlankConfigurationMessage: true,
+        method: 'manual',
+        registering: false,
+        jsonUrl: '',
+        jsonCode: '',
+        onSuccessfulInstallation: jest.fn(),
+        jsonFetch: {_tag: 'initial'},
+      })
+
+      const accountId = ZAccountId.parse('123')
+      const screen = render(
+        <RegistrationWizardModal
+          accountId={accountId}
+          {...emptyServices}
+          jsonUrlWizardService={mockJsonUrlWizardService()}
+        />,
+      )
+      const alert = screen.getByText('reach out to your CSM', {exact: false})
+      expect(alert).toBeInTheDocument()
+    })
+
+    it('shows an alert saying to contact the tool provider', () => {
+      openRegistrationWizard({
+        dynamicRegistrationUrl: '',
+        unifiedToolId: undefined,
+        lti_version: '1p3',
+        isInstructureTool: false,
+        showBlankConfigurationMessage: true,
+        method: 'manual',
+        registering: false,
+        jsonUrl: '',
+        jsonCode: '',
+        onSuccessfulInstallation: jest.fn(),
+        jsonFetch: {_tag: 'initial'},
+      })
+
+      const accountId = ZAccountId.parse('123')
+      const screen = render(
+        <RegistrationWizardModal
+          accountId={accountId}
+          {...emptyServices}
+          jsonUrlWizardService={mockJsonUrlWizardService()}
+        />,
+      )
+
+      const alert = screen.getByText('reach out to the tool', {exact: false})
+      expect(alert).toBeInTheDocument()
+    })
   })
 
   describe('when pre-opened with dynamic registration', () => {
-    it('should exit the modal when the cancel button is clicked & exitOnCancel is true', async () => {
+    beforeEach(() => {
+      jest.spyOn(window, 'confirm').mockReturnValue(true)
+    })
+
+    afterEach(() => {
+      ;(window.confirm as unknown as jest.SpyInstance).mockReset()
+    })
+
+    it('should exit the modal when the cancel button is clicked', async () => {
       openRegistrationWizard({
         dynamicRegistrationUrl: 'http://example.com',
         unifiedToolId: ZUnifiedToolId.parse('asdf'),
         lti_version: '1p3',
+        isInstructureTool: undefined,
+        showBlankConfigurationMessage: undefined,
         method: 'dynamic_registration',
         registering: true,
-        exitOnCancel: true,
         jsonUrl: '',
         onSuccessfulInstallation: jest.fn(),
         jsonFetch: {_tag: 'initial'},
@@ -443,6 +532,7 @@ describe('RegistrationWizardModal', () => {
       })
       fireEvent.click(cancelButton)
       await waitFor(() => {
+        expect(window.confirm).toHaveBeenCalled()
         expect(screen.queryByText(/Install App/i)).not.toBeInTheDocument()
       })
     })

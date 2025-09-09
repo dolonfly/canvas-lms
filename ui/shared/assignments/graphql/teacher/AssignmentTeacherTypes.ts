@@ -127,6 +127,9 @@ export type TeacherAssignmentType = {
   unlockAt?: string
   description?: string
   state?: 'published' | 'unpublished' | 'deleted'
+  totalSubmissions?: number
+  totalGradedSubmissions?: number
+  totalUngradedSubmissions?: number
   needsGradingCount?: number
   onlyVisibleToOverrides?: boolean
   assignmentGroup?: AssignmentGroupType
@@ -142,4 +145,5 @@ export type TeacherAssignmentType = {
   hasSubmittedSubmissions?: boolean
   submissionsDownloads?: number
   submissions?: SubmissionsType
+  suppressAssignment?: boolean
 }

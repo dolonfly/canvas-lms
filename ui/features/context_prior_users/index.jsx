@@ -18,18 +18,18 @@
 
 import ready from '@instructure/ready'
 import {initializeTopNavPortalWithDefaults} from '@canvas/top-navigation/react/TopNavPortalWithDefaults'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 
-const I18n = useI18nScope('PriorUsers')
-
-const handleBreadCrumbSetter = ({getCrumbs, setCrumbs}) => {
-  const crumbs = getCrumbs()
-  crumbs.push({name: I18n.t('People'), url: document.referrer})
-  crumbs.push({name: I18n.t('Prior users'), url: ''})
-  setCrumbs(crumbs)
-}
+const I18n = createI18nScope('PriorUsers')
 
 ready(() => {
+  const handleBreadCrumbSetter = ({getCrumbs, setCrumbs}) => {
+    const crumbs = getCrumbs()
+    crumbs.push({name: I18n.t('People'), url: document.referrer})
+    crumbs.push({name: I18n.t('Prior users'), url: ''})
+    setCrumbs(crumbs)
+  }
+
   initializeTopNavPortalWithDefaults({
     getBreadCrumbSetter: handleBreadCrumbSetter,
     useStudentView: true,

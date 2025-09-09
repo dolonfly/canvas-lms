@@ -24,19 +24,16 @@ import ReactDOM from 'react-dom'
 import DueDateOverride from '@canvas/assignments/jst/DueDateOverride.handlebars'
 import DateValidator from '@canvas/grading/DateValidator'
 import ValidatedMixin from '@canvas/forms/backbone/views/ValidatedMixin'
-import {useScope as useI18nScope} from '@canvas/i18n'
-import DueDates from '../../react/DueDates'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import CoursePacingNotice from '../../react/CoursePacingNotice'
 import StudentGroupStore from '../../react/StudentGroupStore'
-import DifferentiatedModulesSection from '../../react/DifferentiatedModulesSection'
 import AssignToContent from '../../react/AssignToContent'
 import GradingPeriodsAPI from '@canvas/grading/jquery/gradingPeriodsApi'
-import * as tz from '@instructure/moment-utils'
 import '@canvas/jquery/jquery.instructure_forms'
 import sanitizeData from '../../../forms/sanitizeData'
 import {showPostToSisFlashAlert, combinedDates} from '../../util/differentiatedModulesUtil'
 
-const I18n = useI18nScope('DueDateOverrideView')
+const I18n = createI18nScope('DueDateOverrideView')
 
 const indexOf = [].indexOf
 const hasProp = {}.hasOwnProperty
@@ -51,8 +48,10 @@ function DueDateOverrideView() {
   this.overridesContainDefault = this.overridesContainDefault.bind(this)
   this.setOnlyVisibleToOverrides = this.setOnlyVisibleToOverrides.bind(this)
   this.containsSectionsWithoutOverrides = this.containsSectionsWithoutOverrides.bind(this)
+  this.containsDiffTagOverrides = this.containsDiffTagOverrides.bind(this)
   this.getDefaultDueDate = this.getDefaultDueDate.bind(this)
   this.setNewOverridesCollection = this.setNewOverridesCollection.bind(this)
+  this.resetOverrides = this.resetOverrides.bind(this)
   this.showError = this.showError.bind(this)
   this.validateGroupOverrides = this.validateGroupOverrides.bind(this)
   this.validateTokenInput = this.validateTokenInput.bind(this)
@@ -76,93 +75,75 @@ DueDateOverrideView.prototype.render = function () {
     return
   }
   if (this.options && this.options.inPacedCourse && this.options.isModuleItem) {
+    // eslint-disable-next-line react/no-render-return-value
     return ReactDOM.render(
       React.createElement(CoursePacingNotice, {
         courseId: this.options.courseId,
       }),
-      div
+      div,
     )
   }
-  const selective_release_section = ENV.FEATURES?.selective_release_edit_page
-    ? AssignToContent
-    : DifferentiatedModulesSection
-  const assignToSection = ENV.FEATURES?.selective_release_ui_api
-    ? React.createElement(selective_release_section, {
-        onSync: this.setNewOverridesCollection,
-        defaultSectionId: this.model.defaultDueDateSectionId,
-        overrides: this.model.overrides.models.map(model => model.toJSON().assignment_override),
-        assignmentId: this.model.assignment.get('id'),
-        getAssignmentName: () => {
-          const element =
-            document.getElementById('assignment_name') ?? document.getElementById('quiz_title')
-          return (
-            element?.value ??
-            this.model.assignment.get('name') ??
-            this.model.assignment.get('title')
-          )
-        },
-        isOnlyVisibleToOverrides: this.model.assignment.isOnlyVisibleToOverrides(),
-        getPointsPossible: () => {
-          const elementValue =
-            document.querySelector('#assignment_points_possible')?.value ??
-            document.querySelector('#quiz_display_points_possible > .points_possible')?.innerHTML
-          return elementValue ?? this.model.assignment.get('points_possible')
-        },
-        getGroupCategoryId: () => {
-          const groupCategory = document.getElementById('assignment_group_category_id')
-          if (groupCategory?.value === undefined) {
-            return ENV.ASSIGNMENT?.group_category_id
-          } else if (document.getElementById('has_group_category')?.checked) {
-            if (groupCategory.value === 'blank') {
-              return null
-            }
-            return groupCategory.value
-          }
-          return null
-        },
-        // eslint-disable-next-line no-dupe-keys
-        isOnlyVisibleToOverrides: this.model.assignment.isOnlyVisibleToOverrides(),
-        type: this.model.assignment.objectType().toLowerCase(),
-        importantDates: this.model.assignment.get('important_dates'),
-        postToSIS: this.model.assignment.get('post_to_sis'),
-        onTrayOpen: () => {
-          const isGroupAssignment = document.getElementById('has_group_category')?.checked
-          if (!isGroupAssignment) {
-            this.trigger('tray:open')
-            return true
-          }
 
-          const data = sanitizeData(this.$el.prevObject.toJSON())
-          const errors = this.options.groupCategorySelector.validateBeforeSave(data, {})
-          const selectors = this.options.groupCategorySelector.fieldSelectors
-          if (Object.keys(errors).length > 0) {
-            Object.keys(errors).forEach(errorKey => {
-              // show the first message associated to the input
-              this.showError($(selectors[errorKey]), errors[errorKey][0]?.message)
-            })
-            // block the tray opening
-            return false
-          }
-          this.trigger('tray:open')
-          return true
-        },
-        onTrayClose: () => this.trigger('tray:close'),
-      })
-    : React.createElement(DueDates, {
-        overrides: this.model.overrides.models,
-        syncWithBackbone: this.setNewOverridesCollection,
-        sections: this.model.sections.models,
-        defaultSectionId: this.model.defaultDueDateSectionId,
-        selectedGroupSetId: this.model.assignment.get('group_category_id'),
-        gradingPeriods: this.gradingPeriods,
-        hasGradingPeriods: this.hasGradingPeriods,
-        isOnlyVisibleToOverrides: this.model.assignment.isOnlyVisibleToOverrides(),
-        dueAt: tz.parse(this.model.assignment.get('due_at')),
-        dueDatesReadonly: this.options.dueDatesReadonly,
-        availabilityDatesReadonly: this.options.availabilityDatesReadonly,
-        importantDates: this.model.assignment.get('important_dates'),
-        defaultDueTime: ENV.DEFAULT_DUE_TIME,
-      })
+  const assignToSection = React.createElement(AssignToContent, {
+    onSync: this.setNewOverridesCollection,
+    defaultSectionId: this.model.defaultDueDateSectionId,
+    overrides: this.model.overrides.models.map(model => model.toJSON().assignment_override),
+    setOverrides: this.resetOverrides,
+    assignmentId: this.model.assignment.get('id'),
+    getAssignmentName: () => {
+      const element =
+        document.getElementById('assignment_name') ?? document.getElementById('quiz_title')
+      return (
+        element?.value ?? this.model.assignment.get('name') ?? this.model.assignment.get('title')
+      )
+    },
+    isOnlyVisibleToOverrides: this.model.assignment.isOnlyVisibleToOverrides(),
+    getPointsPossible: () => {
+      const elementValue =
+        document.querySelector('#assignment_points_possible')?.value ??
+        document.querySelector('#quiz_display_points_possible > .points_possible')?.innerHTML
+      return elementValue ?? this.model.assignment.get('points_possible')
+    },
+    getGroupCategoryId: () => {
+      const groupCategory = document.getElementById('assignment_group_category_id')
+      if (groupCategory?.value === undefined) {
+        return ENV.ASSIGNMENT?.group_category_id
+      } else if (document.getElementById('has_group_category')?.checked) {
+        if (groupCategory.value === 'blank') {
+          return null
+        }
+        return groupCategory.value
+      }
+      return null
+    },
+    // eslint-disable-next-line no-dupe-keys
+    isOnlyVisibleToOverrides: this.model.assignment.isOnlyVisibleToOverrides(),
+    type: this.model.assignment.objectType().toLowerCase(),
+    importantDates: this.model.assignment.get('important_dates'),
+    postToSIS: this.model.assignment.get('post_to_sis'),
+    onTrayOpen: () => {
+      const isGroupAssignment = document.getElementById('has_group_category')?.checked
+      if (!isGroupAssignment) {
+        this.trigger('tray:open')
+        return true
+      }
+
+      const data = sanitizeData(this.$el.prevObject.toJSON())
+      const errors = this.options.groupCategorySelector.validateBeforeSave(data, {})
+      const selectors = this.options.groupCategorySelector.fieldSelectors
+      if (Object.keys(errors).length > 0) {
+        Object.keys(errors).forEach(errorKey => {
+          // show the first message associated to the input
+          this.showError($(selectors[errorKey]), errors[errorKey][0]?.message)
+        })
+        // block the tray opening
+        return false
+      }
+      this.trigger('tray:open')
+      return true
+    },
+    onTrayClose: () => this.trigger('tray:close'),
+  })
 
   // eslint-disable-next-line react/no-render-return-value
   return ReactDOM.render(assignToSection, div, () => {
@@ -171,7 +152,7 @@ DueDateOverrideView.prototype.render = function () {
     // re-renders to apply all card validations
     const forceFocus = () => {
       const sectionViewRef = document.getElementById(
-        'manage-assign-to-container'
+        'manage-assign-to-container',
       )?.reactComponentInstance
       if (!sectionViewRef?.focusErrors()) {
         setTimeout(forceFocus, 500)
@@ -179,68 +160,59 @@ DueDateOverrideView.prototype.render = function () {
         this.shouldForceFocusAfterRender = false
       }
     }
-    if (this.shouldForceFocusAfterRender && ENV.FEATURES.selective_release_edit_page) {
+    if (this.shouldForceFocusAfterRender) {
       forceFocus()
     }
   })
 }
 
 DueDateOverrideView.prototype.gradingPeriods = GradingPeriodsAPI.deserializePeriods(
-  ENV.active_grading_periods
+  ENV.active_grading_periods,
 )
 
 DueDateOverrideView.prototype.hasGradingPeriods = !!ENV.HAS_GRADING_PERIODS
 
 DueDateOverrideView.prototype.validateBeforeSave = function (data, errors) {
-  if (!data) {
+  if (!data || (this.options && this.options.inPacedCourse && this.options.isModuleItem)) {
     return errors
   }
-  if (ENV.FEATURES?.selective_release_ui_api) {
-    data = {
-      ...data,
-      assignment_overrides: data.assignment_overrides.map(o => ({...o, rowKey: combinedDates(o)})),
-    }
+  data = {
+    ...data,
+    assignment_overrides: data.assignment_overrides.map(o => ({...o, rowKey: combinedDates(o)})),
   }
   errors = this.validateDatetimes(data, errors)
   errors = this.validateTokenInput(data, errors)
   errors = this.validateGroupOverrides(data, errors)
   const requiredDueDates = ENV.DUE_DATE_REQUIRED_FOR_ACCOUNT
-  if (ENV.FEATURES.selective_release_edit_page) {
-    const sectionViewRef = document.getElementById(
-      'manage-assign-to-container'
-    )?.reactComponentInstance
-    const postToSisEnabled = data.postToSIS && requiredDueDates
-    // Runs custom validation for all cards with the current post to sis selection without re-renders
-    const formIsValid = sectionViewRef?.allCardsValidCustom({dueDateRequired: postToSisEnabled})
 
-    if (!formIsValid) {
-      const aDueDateMissing = data.assignment_overrides.some(
-        o => o.due_at === null || o.due_at === ''
-      )
-      const hasAfterRenderIssue = postToSisEnabled && aDueDateMissing
-      // If there are errors visible already don't force the focus
-      if (hasAfterRenderIssue) {
-        showPostToSisFlashAlert('manage-assign-to')()
-        // Forces focus after the re-render process is made
-        this.shouldForceFocusAfterRender = true
-        this.render()
+  const sectionViewRef = document.getElementById(
+    'manage-assign-to-container',
+  )?.reactComponentInstance
+  const postToSisEnabled = data.postToSIS && requiredDueDates
+  // Runs custom validation for all cards with the current post to sis selection without re-renders
+  const formIsValid = sectionViewRef?.allCardsValidCustom({dueDateRequired: postToSisEnabled})
+
+  if (!formIsValid) {
+    const aDueDateMissing = data.assignment_overrides.some(
+      o => o.due_at === null || o.due_at === '',
+    )
+    const hasAfterRenderIssue = postToSisEnabled && aDueDateMissing
+    // If there are errors visible already don't force the focus
+    if (hasAfterRenderIssue) {
+      showPostToSisFlashAlert('manage-assign-to')()
+      // Forces focus after the re-render process is made
+      this.shouldForceFocusAfterRender = true
+      this.render()
+    } else {
+      // Focuses inmmediately the visible errors in the component
+      const invalidInput = sectionViewRef?.focusErrors()
+      if (invalidInput) {
+        errors.invalid_card = {$input: null, showError: this.showError}
       } else {
-        // Focuses inmmediately the visible errors in the component
-        const invalidInput = sectionViewRef?.focusErrors()
-        if (invalidInput) {
-          errors.invalid_card = {$input: null, showError: this.showError}
-        } else {
-          delete errors.invalid_card
-        }
+        delete errors.invalid_card
       }
     }
-  } else {
-    const hasEmptyDueDates = data.assignment_overrides.some(o => o.due_at === null)
-    if (hasEmptyDueDates && data.postToSIS && requiredDueDates) {
-      showPostToSisFlashAlert('manage-assign-to', true)()
-    }
   }
-
   return errors
 }
 
@@ -292,7 +264,7 @@ DueDateOverrideView.prototype.validateDatetimes = function (data, errors) {
       continue
     }
     rowErrors = dateValidator.validateDatetimes(override)
-    // eslint-disable-next-line no-loop-func
+
     Object.keys(rowErrors).forEach(function (key) {
       return (rowErrors[key] = {
         message: rowErrors[key],
@@ -367,7 +339,7 @@ DueDateOverrideView.prototype.validateGroupOverrides = function (data, errors) {
     return e.rowKey
   })
   const invalidGroupOverrideMessage = I18n.t(
-    "You cannot assign to a group outside of the assignment's group set"
+    "You cannot assign to a group outside of the assignment's group set",
   )
   const ref = $('.Container__DueDateRow-item')
   for (i = 0, len = ref.length; i < len; i++) {
@@ -403,12 +375,16 @@ DueDateOverrideView.prototype.showError = function (element, message) {
 // ==============================
 
 DueDateOverrideView.prototype.setNewOverridesCollection = function (newOverrides, importantDates) {
-  if (newOverrides !== undefined) {
-    this.model.overrides.reset(newOverrides)
+  this.resetOverrides(newOverrides)
+  return this.model.assignment.importantDates(importantDates)
+}
+
+DueDateOverrideView.prototype.resetOverrides = function (overrides) {
+  if (overrides !== undefined) {
+    this.model.overrides.reset(overrides)
     const onlyVisibleToOverrides = !this.model.overrides.containsDefaultDueDate()
     this.model.assignment.isOnlyVisibleToOverrides(onlyVisibleToOverrides)
   }
-  return this.model.assignment.importantDates(importantDates)
 }
 
 // =================
@@ -422,14 +398,18 @@ DueDateOverrideView.prototype.containsSectionsWithoutOverrides = function () {
   return this.model.containsSectionsWithoutOverrides()
 }
 
+DueDateOverrideView.prototype.containsDiffTagOverrides = function () {
+  return this.getOverrides().some(
+    override => override.non_collaborative === true && override.group_id !== undefined,
+  )
+}
+
 DueDateOverrideView.prototype.overridesContainDefault = function () {
   return this.model.overridesContainDefault()
 }
 
 DueDateOverrideView.prototype.setOnlyVisibleToOverrides = function () {
-  if (ENV.FEATURES?.selective_release_ui_api) {
-    return !(this.model.overridesContainDefault() || this.model.onlyContainsModuleOverrides())
-  } else return !this.model.overridesContainDefault()
+  return !(this.model.overridesContainDefault() || this.model.onlyContainsModuleOverrides())
 }
 
 DueDateOverrideView.prototype.sectionsWithoutOverrides = function () {

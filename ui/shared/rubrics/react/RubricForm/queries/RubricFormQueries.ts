@@ -16,10 +16,11 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import gql from 'graphql-tag'
+import {gql} from '@apollo/client'
 import qs from 'qs'
-import {executeQuery} from '@canvas/query/graphql'
-import type {RubricFormProps} from '../types/RubricForm'
+import {executeQuery} from '@canvas/graphql'
+import type {RubricFormProps, GenerateCriteriaFormProps} from '../types/RubricForm'
+import type {CanvasProgress} from '@canvas/progress/ProgressHelpers'
 import type {Rubric, RubricAssociation} from '@canvas/rubrics/react/types/rubric'
 import {
   mapRubricAssociationUnderscoredKeysToCamelCase,
@@ -28,12 +29,14 @@ import {
 import getCookie from '@instructure/get-cookie'
 
 const RUBRIC_QUERY = gql`
-  query RubricQuery($rubricId: ID!) {
+  query SharedRubricQuery($rubricId: ID!) {
     rubric(id: $rubricId) {
       id: _id
       title
       hasRubricAssociations
       rubricAssociationForContext {
+        associationId
+        associationType
         hidePoints
         hideScoreTotal
         hideOutcomeResults
@@ -46,6 +49,7 @@ const RUBRIC_QUERY = gql`
       workflowState
       pointsPossible
       unassessed
+      canUpdateRubric
       criteria {
         id: _id
         ratings {
@@ -71,6 +75,8 @@ const RUBRIC_QUERY = gql`
 `
 
 export type RubricAssociationQueryResponse = {
+  associationId: string
+  associationType: 'Assignment' | 'Account' | 'Course'
   hidePoints: boolean
   hideScoreTotal: boolean
   hideOutcomeResults: boolean
@@ -92,6 +98,7 @@ export type RubricQueryResponse = Pick<
   unassessed: boolean
   hasRubricAssociations: boolean
   rubricAssociationForContext?: RubricAssociationQueryResponse
+  canUpdateRubric: boolean
 }
 
 type FetchRubricResponse = {
@@ -114,12 +121,12 @@ export const fetchRubric = async ({
 }
 
 export type SaveRubricResponse = {
-  rubric: Rubric
-  rubricAssociation: RubricAssociation
+  rubric: Rubric & {canUpdate?: boolean; association_count?: number}
+  rubricAssociation?: RubricAssociation
 }
 export const saveRubric = async (
   rubric: RubricFormProps,
-  assignmentId?: string
+  assignmentId?: string,
 ): Promise<SaveRubricResponse> => {
   const {
     id,
@@ -137,21 +144,29 @@ export const saveRubric = async (
     rubricAssociationId,
   } = rubric
 
-  const associationType = assignmentId ? 'Assignment' : accountId ? 'Account' : 'Course'
-
   const urlPrefix = accountId ? `/accounts/${accountId}` : `/courses/${courseId}`
   let url = `${urlPrefix}/rubrics/${id ?? ''}`
 
-  if (associationType === 'Assignment') {
+  const isAssignment = rubric.associationType === 'Assignment'
+
+  if (isAssignment) {
     url = `${url}?rubric_association_id=${rubricAssociationId}`
   }
   const method = id ? 'PATCH' : 'POST'
 
   const criteria = rubric.criteria.map(criterion => {
+    /**
+     * remove all <br/> from the longDescription because the backend
+     * html sanitization will escape any <br/> tags
+     */
+    const longDescription = criterion.outcome
+      ? criterion.longDescription
+      : criterion.longDescription?.replace(/<br\/>/g, '')
+
     return {
       id: criterion.id,
       description: criterion.description,
-      long_description: criterion.longDescription,
+      long_description: longDescription,
       points: criterion.points,
       outcome: {
         display_name: criterion.outcome?.displayName,
@@ -190,8 +205,8 @@ export const saveRubric = async (
       rubric_association: {
         id: rubricAssociationId,
         association_id: assignmentId ?? accountId ?? courseId,
-        association_type: associationType,
-        purpose: assignmentId ? 'grading' : undefined,
+        association_type: rubric.associationType,
+        purpose: rubric.associationType === 'Assignment' ? 'grading' : 'bookmark',
         hide_points: hidePoints ? 1 : 0,
         hide_outcome_results: hideOutcomeResults ? 1 : 0,
         hide_score_total: hideScoreTotal ? 1 : 0,
@@ -211,7 +226,52 @@ export const saveRubric = async (
   }
 
   return {
-    rubric: mapRubricUnderscoredKeysToCamelCase(savedRubric),
-    rubricAssociation: mapRubricAssociationUnderscoredKeysToCamelCase(rubric_association),
+    rubric: {
+      ...mapRubricUnderscoredKeysToCamelCase(savedRubric),
+      canUpdate: savedRubric.permissions?.update,
+      association_count: savedRubric.association_count,
+    },
+    rubricAssociation: rubric_association
+      ? mapRubricAssociationUnderscoredKeysToCamelCase(rubric_association)
+      : undefined,
   }
+}
+
+export const generateCriteria = async (
+  courseId: string,
+  assignmentId: string,
+  generateCriteriaProps: GenerateCriteriaFormProps,
+): Promise<CanvasProgress> => {
+  const url = `/courses/${courseId}/rubrics/llm_criteria`
+  const method = 'POST'
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      'X-CSRF-Token': getCookie('_csrf_token'),
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    },
+    body: qs.stringify({
+      _method: method,
+      rubric_association: {
+        association_id: assignmentId,
+        association_type: 'Assignment',
+      },
+      generate_options: {
+        criteria_count: generateCriteriaProps.criteriaCount,
+        rating_count: generateCriteriaProps.ratingCount,
+        points_per_criterion: generateCriteriaProps.pointsPerCriterion,
+        use_range: generateCriteriaProps.useRange,
+        additional_prompt_info: generateCriteriaProps.additionalPromptInfo,
+        grade_level: generateCriteriaProps.gradeLevel,
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to generate criteria: ${response.statusText}`)
+  }
+
+  const progress: CanvasProgress = await response.json()
+  return progress
 }

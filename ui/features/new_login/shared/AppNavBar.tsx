@@ -16,22 +16,21 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {Img} from '@instructure/ui-img'
 import {Responsive} from '@instructure/ui-responsive'
+import {canvas} from '@instructure/ui-themes'
 import {TopNavBar} from '@instructure/ui-top-nav-bar'
-import {useNewLogin} from '../context/NewLoginContext'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import React from 'react'
+import {useNewLoginData} from '../context'
 
-// @ts-expect-error
-import CanvasLmsLogoIcon from '../assets/images/canvas-logo-small.svg'
-// @ts-expect-error
-import CanvasLmsLogo from '../assets/images/canvas-logo.svg'
+import CanvasLmsLogoIcon from '../assets/images/canvas-small.svg'
+import CanvasLmsLogo from '../assets/images/canvas.svg'
 
-const I18n = useI18nScope('new_login')
+const I18n = createI18nScope('new_login')
 
 const AppNavBar = () => {
-  const {enableCourseCatalog} = useNewLogin()
+  const {enableCourseCatalog} = useNewLoginData()
 
   return (
     <TopNavBar breakpoint={10} inverseColor={true}>
@@ -49,28 +48,28 @@ const AppNavBar = () => {
                   <Responsive
                     match="media"
                     query={{
-                      small: {minWidth: '48rem'},
+                      tablet: {minWidth: canvas.breakpoints.tablet},
                     }}
                   >
                     {(_props, matches) => {
-                      if (matches?.includes('small')) {
+                      if (matches?.includes('tablet')) {
                         return (
                           <Img
-                            src={CanvasLmsLogo}
-                            alt={I18n.t('Canvas LMS Logo')}
-                            width="8rem"
-                            height="2.375rem"
                             constrain="contain"
+                            display="block"
+                            height="2.375rem"
+                            src={CanvasLmsLogo}
+                            width="8rem"
                           />
                         )
                       } else {
                         return (
                           <Img
-                            src={CanvasLmsLogoIcon}
-                            alt={I18n.t('Canvas LMS Logo')}
-                            width="2.375rem"
-                            height="2.375rem"
                             constrain="contain"
+                            display="block"
+                            height="2.375rem"
+                            src={CanvasLmsLogoIcon}
+                            width="2.375rem"
                           />
                         )
                       }
@@ -88,7 +87,7 @@ const AppNavBar = () => {
                   }
                 >
                   <TopNavBar.Item id="browseCourses" href="/search/all_courses">
-                    {I18n.t('Browse courses')}
+                    {I18n.t('Browse Courses')}
                   </TopNavBar.Item>
                 </TopNavBar.ActionItems>
               ) : undefined

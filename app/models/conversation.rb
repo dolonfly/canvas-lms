@@ -36,6 +36,33 @@ class Conversation < ActiveRecord::Base
 
   attr_accessor :latest_messages_from_stream_item
 
+  def self.caller_tag
+    immediate_caller = caller_locations(3..3).first
+    file_name = File.basename(immediate_caller.path)
+
+    "#{file_name}:#{immediate_caller.label}"
+  end
+
+  module DeleteAllLogger
+    def delete_all(*args)
+      InstStatsd::Statsd.distributed_increment(
+        "conversation.delete_all",
+        tags: { caller: klass.caller_tag }
+      )
+      super
+    end
+  end
+
+  # rubocop:disable Rails/DefaultScope
+  default_scope { extending(DeleteAllLogger) }
+  # rubocop:enable Rails/DefaultScope
+
+  def delete
+    InstStatsd::Statsd.distributed_increment("conversation.delete", tags: { caller: self.class.send(:caller_tag) })
+
+    super
+  end
+
   def participants(reload = false)
     if !@participants || reload
       Conversation.preload_participants([self])
@@ -480,7 +507,7 @@ class Conversation < ActiveRecord::Base
     updated = false
     conversation_participants.shard(self).activate do |conversation_participants|
       if options[:only_users]
-        conversation_participants = conversation_participants.where(user_id:           (options[:only_users]).map(&:id))
+        conversation_participants = conversation_participants.where(user_id:           options[:only_users].map(&:id))
       end
 
       skip_ids = options[:skip_users].try(:map, &:id) || [message.author_id]
@@ -540,7 +567,7 @@ class Conversation < ActiveRecord::Base
     if message.length < 64.kilobytes - 1
       message
     else
-      message[0..64.kilobytes - 100] + I18n.t("... This message was truncated.")
+      message[0..(64.kilobytes - 100)] + I18n.t("... This message was truncated.")
     end
   end
 
@@ -805,7 +832,7 @@ class Conversation < ActiveRecord::Base
 
   def maybe_update_timestamp(col, val, additional_conditions = [])
     scope = self.class.where(["(#{col} IS NULL OR #{col} < ?)", val]).where(additional_conditions)
-    condition = scope.where_clause.send(:predicates).join(" AND ")
+    condition = /WHERE (.+)$/.match(scope.to_sql)[1]
     sanitize_sql ["#{col} = CASE WHEN #{condition} THEN ? ELSE #{col} END", val]
   end
 end

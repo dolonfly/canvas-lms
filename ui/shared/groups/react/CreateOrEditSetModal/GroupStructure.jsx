@@ -17,7 +17,7 @@
  */
 
 import React, {useContext, useEffect, useState} from 'react'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {Text} from '@instructure/ui-text'
 import {Flex} from '@instructure/ui-flex'
 import {View} from '@instructure/ui-view'
@@ -29,8 +29,9 @@ import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {func, string} from 'prop-types'
 import {GroupContext, formatMessages, SPLIT} from './context'
 import {handleKeyPress} from './utils'
+import SameSectionInfoAlert from './SameSectionInfoAlert'
 
-const I18n = useI18nScope('groups')
+const I18n = createI18nScope('groups')
 
 const options = [
   {id: '0', label: I18n.t('Create groups later'), dataTestid: 'group-structure-create-later'},
@@ -71,6 +72,7 @@ const GroupStructureSelfSignup = ({onChange, errormsg}) => {
       <View as="span">
         <View as="div" padding="small">
           <NumberInput
+            allowStringValue={true}
             data-testid="initial-group-count"
             renderLabel={I18n.t('Create groups now')}
             min={0}
@@ -90,6 +92,7 @@ const GroupStructureSelfSignup = ({onChange, errormsg}) => {
         </View>
         <View as="div" padding="small">
           <NumberInput
+            allowStringValue={true}
             data-testid="group-member-limit"
             renderLabel={I18n.t('Limit group members to (leave blank for no limit)')}
             min={0}
@@ -157,6 +160,7 @@ const GroupStructureNoSelfSignup = ({onChange, errormsg}) => {
     if (inputId === '1') {
       return (
         <NumberInput
+          allowStringValue={true}
           data-testid="split-groups"
           min={0}
           value={groupNumber}
@@ -175,6 +179,7 @@ const GroupStructureNoSelfSignup = ({onChange, errormsg}) => {
     } else if (inputId === '2') {
       return (
         <NumberInput
+          allowStringValue={true}
           data-testid="num-students-per-group"
           min={0}
           value={studentNumber}
@@ -229,14 +234,17 @@ const GroupStructureNoSelfSignup = ({onChange, errormsg}) => {
       </Select>
       {showSupplementalSelect()}
       {splitGroups !== SPLIT.off && (
-        <Checkbox
-          checked={bySection}
-          data-testid="require-same-section-auto-assign"
-          label={I18n.t('Require group members to be in the same section')}
-          onChange={e => {
-            onChange('bySection', e.target.checked)
-          }}
-        />
+        <>
+          <Checkbox
+            checked={bySection}
+            data-testid="require-same-section-auto-assign"
+            label={I18n.t('Require group members to be in the same section')}
+            onChange={e => {
+              onChange('bySection', e.target.checked)
+            }}
+          />
+          {bySection && <SameSectionInfoAlert />}
+        </>
       )}
     </FormFieldGroup>
   )
@@ -263,7 +271,7 @@ export const GroupStructure = ({onChange, errormsg, direction}) => {
       <Flex.Item padding="none medium none none">
         <Text>{I18n.t('Group Structure')}</Text>
       </Flex.Item>
-      <Flex.Item shouldGrow={true} overflowY='hidden'>
+      <Flex.Item shouldGrow={true} overflowY="hidden">
         {selfSignup ? (
           <GroupStructureSelfSignup onChange={handleChange} errormsg={errormsg} />
         ) : (

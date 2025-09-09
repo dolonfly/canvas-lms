@@ -21,14 +21,14 @@
 require_relative "../../lti_1_3_tool_configuration_spec_helper"
 
 describe Schemas::InternalLtiConfiguration do
-  # introduces `settings` (hard-coded JSON LtiConfiguration)
-  # and `internal_configuration` (hard-coded JSON InternalLtiConfiguration)
+  # introduces `canvas_lti_configuration` (hard-coded JSON LtiConfiguration)
+  # and `internal_lti_configuration` (hard-coded JSON InternalLtiConfiguration)
   include_context "lti_1_3_tool_configuration_spec_helper"
 
   describe "#validate" do
-    subject { Schemas::InternalLtiConfiguration.new.validate(json).to_a }
+    subject { Schemas::InternalLtiConfiguration.validate(json).to_a }
 
-    let(:json) { internal_configuration }
+    let(:json) { internal_lti_configuration }
     let(:error_details) { subject.first["details"] }
     let(:error_message) { subject.first["error"] }
 
@@ -55,7 +55,7 @@ describe Schemas::InternalLtiConfiguration do
     context "public_jwk" do
       let(:jwk) { nil }
       let(:json) do
-        internal_configuration.tap do |c|
+        internal_lti_configuration.tap do |c|
           c[:public_jwk] = jwk
         end
       end
@@ -90,7 +90,7 @@ describe Schemas::InternalLtiConfiguration do
     context "windowTarget" do
       let(:window_target) { nil }
       let(:json) do
-        internal_configuration.tap do |c|
+        internal_lti_configuration.tap do |c|
           c[:launch_settings][:windowTarget] = window_target
         end
       end
@@ -133,7 +133,7 @@ describe Schemas::InternalLtiConfiguration do
     context "default" do
       let(:default) { nil }
       let(:json) do
-        internal_configuration.tap do |c|
+        internal_lti_configuration.tap do |c|
           c[:launch_settings][:default] = default
         end
       end
@@ -170,7 +170,7 @@ describe Schemas::InternalLtiConfiguration do
     context "visibility" do
       let(:visibility) { nil }
       let(:json) do
-        internal_configuration.tap do |c|
+        internal_lti_configuration.tap do |c|
           c[:launch_settings][:visibility] = visibility
         end
       end
@@ -207,7 +207,7 @@ describe Schemas::InternalLtiConfiguration do
     context "privacy_level" do
       let(:privacy_level) { nil }
       let(:json) do
-        internal_configuration.tap do |c|
+        internal_lti_configuration.tap do |c|
           c[:privacy_level] = privacy_level
         end
       end
@@ -244,7 +244,7 @@ describe Schemas::InternalLtiConfiguration do
     context "selection_height" do
       let(:selection_height) { nil }
       let(:json) do
-        internal_configuration.tap do |c|
+        internal_lti_configuration.tap do |c|
           c[:launch_settings][:selection_height] = selection_height
         end
       end
@@ -279,7 +279,7 @@ describe Schemas::InternalLtiConfiguration do
     context "placements" do
       context "when invalid" do
         let(:json) do
-          internal_configuration.tap do |c|
+          internal_lti_configuration.tap do |c|
             c[:placements] << { placement: "invalid" }
           end
         end
@@ -292,7 +292,7 @@ describe Schemas::InternalLtiConfiguration do
       context "enabled" do
         let(:enabled) { nil }
         let(:json) do
-          internal_configuration.tap do |c|
+          internal_lti_configuration.tap do |c|
             c[:placements] << { placement: "course_navigation", enabled: }
           end
         end
@@ -328,7 +328,7 @@ describe Schemas::InternalLtiConfiguration do
     context "scopes" do
       context "when invalid" do
         let(:json) do
-          internal_configuration.tap do |c|
+          internal_lti_configuration.tap do |c|
             c[:scopes] << "invalid"
           end
         end
@@ -340,7 +340,7 @@ describe Schemas::InternalLtiConfiguration do
 
       context "when empty" do
         let(:json) do
-          internal_configuration.tap do |c|
+          internal_lti_configuration.tap do |c|
             c[:scopes] = []
           end
         end
@@ -352,7 +352,7 @@ describe Schemas::InternalLtiConfiguration do
 
       context "when not present" do
         let(:json) do
-          internal_configuration.tap do |c|
+          internal_lti_configuration.tap do |c|
             c.delete(:scopes)
           end
         end
@@ -363,10 +363,48 @@ describe Schemas::InternalLtiConfiguration do
       end
     end
 
+    describe "eula subsettings" do
+      let(:eula_settings) do
+        {
+          enabled: true,
+          target_link_uri: "https://example.com/eula",
+          custom_fields: { "foo" => "$Canvas.user.id" }
+        }
+      end
+
+      context "in ActivityAssetProcessor" do
+        let(:json) do
+          super().merge(
+            {
+              placements: [
+                { placement: "ActivityAssetProcessor", eula: eula_settings }
+              ]
+            }
+          )
+        end
+
+        it "returns no errors" do
+          expect(subject).to be_empty
+        end
+
+        context "with invalid eula custom_fields" do
+          let(:eula_settings) { { enabled: true, custom_fields: { "abc" => false } } }
+
+          it { expect(error_message).to include "eula" }
+        end
+
+        context "with eula missing enabled field" do
+          let(:eula_settings) { { custom_fields: { "abc" => "def" } } }
+
+          it { expect(error_message).to include "eula" }
+        end
+      end
+    end
+
     context "root_account_only" do
       context "in launch_settings" do
         let(:json) do
-          internal_configuration.tap do |c|
+          internal_lti_configuration.tap do |c|
             c[:launch_settings][:root_account_only] = true
           end
         end
@@ -411,7 +449,7 @@ describe Schemas::InternalLtiConfiguration do
   end
 
   describe ".from_lti_configuration" do
-    subject { Schemas::InternalLtiConfiguration.from_lti_configuration(settings) }
+    subject { Schemas::InternalLtiConfiguration.from_lti_configuration(canvas_lti_configuration) }
 
     # make tweaks to transformed config to match validations
     let(:internal_lti_config) do
@@ -422,15 +460,15 @@ describe Schemas::InternalLtiConfiguration do
     end
 
     it "returns a valid InternalLtiConfiguration" do
-      expect(Schemas::InternalLtiConfiguration.new.validate(internal_lti_config).to_a).to be_empty
+      expect(Schemas::InternalLtiConfiguration.validate(internal_lti_config).to_a).to be_empty
     end
 
     it "returns an InternalLtiConfiguration with the same values as the LtiConfiguration" do
-      expect(internal_lti_config).to eq(internal_configuration)
+      expect(internal_lti_config).to eq(internal_lti_configuration)
     end
 
     context "with no scopes" do
-      let(:settings) do
+      let(:canvas_lti_configuration) do
         super().except("scopes", :scopes)
       end
 
@@ -441,12 +479,76 @@ describe Schemas::InternalLtiConfiguration do
 
     context "with no canvas extension" do
       before do
-        settings[:extensions] = []
+        canvas_lti_configuration[:extensions] = []
       end
 
       it "does not error" do
         expect { subject }.not_to raise_error
       end
+    end
+  end
+
+  describe ".to_deployment_configuration" do
+    subject { Schemas::InternalLtiConfiguration.to_deployment_configuration(internal_lti_configuration, unified_tool_id: "foo") }
+
+    # Taken from a previous test run where importable_configuration was already valid
+    # and then modified to remove fields that aren't actually used by ContextExternalToolImporter
+    let(:expected) do
+      { "title" => "LTI 1.3 Tool",
+        "description" => "1.3 Tool",
+        "target_link_uri" => "http://lti13testtool.docker/blti_launch",
+        "custom_fields" => { "has_expansion" => "$Canvas.user.id", "no_expansion" => "foo" },
+        "public_jwk" => internal_lti_configuration[:public_jwk].deep_stringify_keys,
+        "public_jwk_url" => "http://example.com/jwks",
+        "oidc_initiation_url" => "http://lti13testtool.docker/blti_launch",
+        "scopes" => [],
+        "oidc_initiation_urls" => { "us-east-1" => "http://example.com" },
+        "privacy_level" => "public",
+        "tool_id" => "LTI 1.3 Test Tool",
+        "domain" => "lti13testtool.docker",
+        "unified_tool_id" => "foo",
+        "lti_version" => "1.3",
+        "url" => "http://lti13testtool.docker/blti_launch",
+        "settings" =>
+        { "icon_url" => "https://static.thenounproject.com/png/131630-200.png",
+          "selection_height" => 500,
+          "selection_width" => 500,
+          "text" => "LTI 1.3 Test Tool Extension text",
+          "placements" =>
+          [{ "placement" => "course_navigation",
+             "message_type" => "LtiResourceLinkRequest",
+             "canvas_icon_class" => "icon-pdf",
+             "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
+             "text" => "LTI 1.3 Test Tool Course Navigation",
+             "target_link_uri" => "http://lti13testtool.docker/launch?placement=course_navigation",
+             "enabled" => true },
+           { "placement" => "account_navigation",
+             "message_type" => "LtiResourceLinkRequest",
+             "canvas_icon_class" => "icon-lti",
+             "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
+             "target_link_uri" => "http://lti13testtool.docker/launch?placement=account_navigation",
+             "text" => "LTI 1.3 Test Tool Course Navigation",
+             "enabled" => true }],
+          "course_navigation" =>
+          { "placement" => "course_navigation",
+            "message_type" => "LtiResourceLinkRequest",
+            "canvas_icon_class" => "icon-pdf",
+            "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
+            "text" => "LTI 1.3 Test Tool Course Navigation",
+            "target_link_uri" => "http://lti13testtool.docker/launch?placement=course_navigation",
+            "enabled" => true },
+          "account_navigation" =>
+          { "placement" => "account_navigation",
+            "message_type" => "LtiResourceLinkRequest",
+            "canvas_icon_class" => "icon-lti",
+            "icon_url" => "https://static.thenounproject.com/png/131630-211.png",
+            "target_link_uri" => "http://lti13testtool.docker/launch?placement=account_navigation",
+            "text" => "LTI 1.3 Test Tool Course Navigation",
+            "enabled" => true } } }
+    end
+
+    it "transforms as expected" do
+      expect(subject).to eq(expected)
     end
   end
 end

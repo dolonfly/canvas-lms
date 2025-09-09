@@ -18,7 +18,7 @@
 
 import React from 'react'
 import PropTypes from 'prop-types'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import Avatar from './Avatar'
 import LastActivity from './LastActivity'
 import MetricsList from './MetricsList'
@@ -32,10 +32,12 @@ import {Spinner} from '@instructure/ui-spinner'
 import {Button, CloseButton} from '@instructure/ui-buttons'
 import {ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {Tray} from '@instructure/ui-tray'
-
 import {Link} from '@instructure/ui-link'
+import {View} from '@instructure/ui-view'
+import {Flex} from '@instructure/ui-flex'
+import {Tag} from '@instructure/ui-tag'
 
-const I18n = useI18nScope('student_context_trayStudentContextTray')
+const I18n = createI18nScope('student_context_trayStudentContextTray')
 
 const courseShape = PropTypes.shape({
   permissions: PropTypes.shape({}).isRequired,
@@ -50,6 +52,7 @@ const dataShape = PropTypes.shape({
   loading: PropTypes.bool.isRequired,
   course: courseShape,
   user: userShape,
+  refetch: PropTypes.func,
 })
 
 export default class StudentContextTray extends React.Component {
@@ -62,7 +65,7 @@ export default class StudentContextTray extends React.Component {
       PropTypes.shape({
         base_url: PropTypes.string.isRequired,
         title: PropTypes.string.isRequired,
-      })
+      }),
     ),
   }
 
@@ -98,7 +101,16 @@ export default class StudentContextTray extends React.Component {
 
   UNSAFE_componentWillReceiveProps(_nextProps) {
     if (!this.state.isOpen) {
-      this.setState({isOpen: true})
+      this.setState({isOpen: true}, () => {
+        // Refetch to update tags
+        if (
+          window.ENV?.permissions?.can_manage_differentiation_tags &&
+          this.props.data.refetch &&
+          typeof this.props.data.refetch === 'function'
+        ) {
+          this.props.data.refetch()
+        }
+      })
     }
   }
 
@@ -139,7 +151,7 @@ export default class StudentContextTray extends React.Component {
       },
       () => {
         this.messageStudentsButton.focus()
-      }
+      },
     )
   }
 
@@ -159,19 +171,24 @@ export default class StudentContextTray extends React.Component {
           I18n.t('View grades for %{name}', {name: user.short_name}),
           `/courses/${this.props.courseId}/grades/${this.props.studentId}`,
 
-          () => course.permissions.manage_grades || course.permissions.view_all_grades
+          () => course.permissions.manage_grades || course.permissions.view_all_grades,
         )}
         {
-          // only include analytics 1 link if analytics 2 is not among the external tool links
-          this.props.externalTools &&
-          this.props.externalTools.some(t => t.tool_id === 'fd75124a-140e-470f-944c-114d2d93bb40')
+          // only include analytics 1 link if analytics 2 is not among the external tool links and hide_legacy_course_analytics is not enabled
+          (this.props.externalTools &&
+            this.props.externalTools.some(
+              t =>
+                t.tool_id === 'fd75124a-140e-470f-944c-114d2d93bb40' ||
+                t.tool_id === 'admin-analytics',
+            )) ||
+          window.ENV.FEATURES.hide_legacy_course_analytics
             ? null
             : StudentContextTray.renderQuickLink(
                 'analytics',
                 I18n.t('Analytics'),
                 I18n.t('View analytics for %{name}', {name: user.short_name}),
                 `/courses/${this.props.courseId}/analytics/users/${this.props.studentId}`,
-                () => course.permissions.view_analytics && user.analytics
+                () => course.permissions.view_analytics && user.analytics,
               )
         }
         {this.props.externalTools
@@ -181,7 +198,7 @@ export default class StudentContextTray extends React.Component {
                 tool.title,
                 tool.title,
                 `${tool.base_url}&student_id=${this.props.studentId}`,
-                () => true
+                () => true,
               )
             })
           : null}
@@ -189,10 +206,48 @@ export default class StudentContextTray extends React.Component {
     ) : null
   }
 
+  renderTags(user) {
+    const tags = user.differentiationTagsConnection?.edges || []
+    // Display max 4 lines of tags (tags can have long names)
+    const overThreshold = tags.length > 4
+
+    return (
+      <View
+        as="div"
+        maxHeight={overThreshold ? '8rem' : undefined}
+        overflowY={overThreshold ? 'auto' : undefined}
+        position="relative"
+        margin="none none small none"
+        data-testid="tags-container"
+      >
+        <Flex as="div" wrap="wrap" width="100%">
+          {tags.map(({node: {group}}) => {
+            const singleTag = group?.groupCategory?.singleTag
+            const groupCategoryName = group?.groupCategory?.name || ''
+            const groupName = group?.name || ''
+            const tagName = singleTag ? groupCategoryName : `${groupCategoryName} | ${groupName}`
+
+            return (
+              <Flex.Item key={group._id} overflowY="hidden" overflowX="hidden">
+                <div style={{padding: '0.1875rem 0.75rem 0.1875rem 0'}}>
+                  <Tag data-testid={`tag-${group._id}`} text={tagName} size="small" />
+                </div>
+              </Flex.Item>
+            )
+          })}
+        </Flex>
+      </View>
+    )
+  }
+
   render() {
     const {
       data: {loading, course, user},
     } = this.props
+
+    const shouldRenderTags =
+      window.ENV?.permissions?.can_manage_differentiation_tags &&
+      user?.differentiationTagsConnection?.edges?.length > 0
 
     return (
       <div>
@@ -235,7 +290,10 @@ export default class StudentContextTray extends React.Component {
               </div>
             ) : (
               <div>
-                <header className="StudentContextTray-Header">
+                <header
+                  className="StudentContextTray-Header"
+                  style={shouldRenderTags ? {marginBottom: '0.25rem'} : {}}
+                >
                   <Avatar
                     name={user.short_name}
                     user={user}
@@ -249,6 +307,7 @@ export default class StudentContextTray extends React.Component {
                         <div className="StudentContextTray-Header__Name">
                           <Heading level="h3" as="h2">
                             <Link
+                              data-testid="student-name-link"
                               size="large"
                               href={`/courses/${this.props.courseId}/users/${this.props.studentId}`}
                               isWithinText={false}
@@ -272,12 +331,16 @@ export default class StudentContextTray extends React.Component {
                           {course.name}
                         </Text>
                       </div>
-                      <Text size="x-small" color="secondary" as="div">
-                        <SectionInfo user={user} />
-                      </Text>
-                      <Text size="x-small" color="secondary" as="div">
-                        <LastActivity user={user} />
-                      </Text>
+                      {!shouldRenderTags && (
+                        <>
+                          <Text size="x-small" color="secondary" as="div">
+                            <SectionInfo user={user} />
+                          </Text>
+                          <Text size="x-small" color="secondary" as="div">
+                            <LastActivity user={user} />
+                          </Text>
+                        </>
+                      )}
                     </div>
                     {course.permissions.send_messages &&
                     user.enrollments.some(e => e.state === 'active') ? (
@@ -298,6 +361,17 @@ export default class StudentContextTray extends React.Component {
                     ) : null}
                   </div>
                 </header>
+                {shouldRenderTags && this.renderTags(user)}
+                {shouldRenderTags && (
+                  <section className="StudentContextTray__Section">
+                    <Text size="x-small" color="secondary" as="div">
+                      <SectionInfo user={user} />
+                    </Text>
+                    <Text size="x-small" color="secondary" as="div">
+                      <LastActivity user={user} />
+                    </Text>
+                  </section>
+                )}
                 {this.renderQuickLinks(user, course)}
                 <MetricsList
                   user={user}

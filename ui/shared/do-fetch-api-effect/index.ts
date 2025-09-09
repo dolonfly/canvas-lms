@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /*
  * Copyright (C) 2019 - present Instructure, Inc.
  *
@@ -24,7 +23,7 @@ import {toQueryString} from '@instructure/query-string-encoding'
 import type {QueryParameterRecord} from '@instructure/query-string-encoding/index.d'
 import z from 'zod'
 
-const jsonRegEx = new RegExp('^application/json', 'i')
+const jsonRegEx = /^application\/json/i
 
 function constructRelativeUrl({
   path,
@@ -41,6 +40,7 @@ function constructRelativeUrl({
 // https://fetch.spec.whatwg.org/#requestinit
 interface RequestInit {
   signal?: AbortSignal
+  cache?: RequestCache
 }
 
 export type DoFetchApiOpts = {
@@ -51,6 +51,7 @@ export type DoFetchApiOpts = {
   body?: string | FormData | object
   fetchOpts?: RequestInit
   signal?: AbortSignal
+  includeCSRFToken?: boolean
 }
 
 export type DoFetchApiResults<T> = {
@@ -58,6 +59,15 @@ export type DoFetchApiResults<T> = {
   json?: T
   response: Response
   link?: Links
+}
+
+export class FetchApiError extends Error {
+  response: Response
+
+  constructor(message: string, response: Response) {
+    super(message)
+    this.response = response
+  }
 }
 
 export default async function doFetchApi<T = unknown>({
@@ -68,13 +78,20 @@ export default async function doFetchApi<T = unknown>({
   body,
   signal,
   fetchOpts = {}, // do not specify headers in fetchOpts.headers ... use headers instead
+  includeCSRFToken = true,
 }: DoFetchApiOpts): Promise<DoFetchApiResults<T>> {
   const {credentials, headers: defaultHeaders} = defaultFetchOptions()
   const suppliedHeaders = new Headers(headers)
   const fetchHeaders = new Headers(defaultHeaders)
 
   suppliedHeaders.forEach((v, k) => fetchHeaders.set(k, v))
-  fetchHeaders.set('X-CSRF-Token', getCookie('_csrf_token'))
+
+  if (!includeCSRFToken) {
+    // If we are not including the CSRF token, we need to remove it from the headers
+    // and also remove the X-Requested-With header because it forces an OPTIONS request
+    fetchHeaders.delete('X-Requested-With')
+    fetchHeaders.delete('X-CSRF-Token')
+  }
 
   // properly encode and set the content type if a body was given
   if (body) {
@@ -96,11 +113,10 @@ export default async function doFetchApi<T = unknown>({
     credentials,
   })
   if (!response.ok) {
-    const err = new Error(
-      `doFetchApi received a bad response: ${response.status} ${response.statusText}`
+    throw new FetchApiError(
+      `doFetchApi received a bad response: ${response.status} ${response.statusText}`,
+      response,
     )
-    Object.assign(err, {response}) // in case anyone wants to check it for something
-    throw err
   }
   const linkHeader = response.headers.get('Link')
   const contentType = response.headers.get('Content-Type') ?? ''
@@ -119,9 +135,18 @@ export type SafelyFetchResults<T> = {
   link?: Links
 }
 
+/**
+ * Fetch data from a API endpoint (that returns JSON!) and validate the response against a schema, but only in non-production environments.
+ *
+ * @deprecated Please use `doFetchWithSchema` instead. This function only validates the response in non-production environments,
+ * leading to subtle issues in production where the schema validation or transformation is not applied.
+ * @param param0 Arguments to pass along to doFetchApi
+ * @param schema The Zod schema to validate the response against, but only in non-production environments.
+ * @returns
+ */
 export async function safelyFetch<T = unknown>(
   {path, method = 'GET', headers = {}, params = {}, signal, body}: DoFetchApiOpts,
-  schema: z.Schema<T>
+  schema: z.Schema<T>,
 ): Promise<SafelyFetchResults<T>> {
   if (!schema) {
     throw new Error('safelyFetch requires a schema')
@@ -146,4 +171,36 @@ export async function safelyFetch<T = unknown>(
   }
 
   return {json, response, link}
+}
+
+export type DoFetchWithSchemaResults<T = unknown> = {
+  json: T
+} & DoFetchApiResults<T>
+
+/**
+ * Fetch data from a API endpoint (that returns JSON!) and validate the response against a schema.
+ * If the response is not valid according to the schema, an error will be thrown.
+ * Especially useful when used together with TanStack Query to automatically handle errors for you.
+ *
+ * This function will always validate the response against the schema, regardless of the environment. `safelyFetch`
+ * only does schema validation in non-production environments and should thus not be used in new code.
+ *
+ * @param opts The arguments to pass to doFetchApi
+ * @param schema The schema to validate the response against
+ * @returns A promise that resolves to the fetched results. If the response is not valid according to the schema, an error will be thrown.
+ * @throws {ZodError} If the response is not valid according to the schema
+ * @throws {SyntaxError} If the response is not valid JSON
+ * @throws {FetchApiError} If the fetch request fails (e.g., network error, non-2xx status code)
+ * @throws {Error} For all other possible errors.
+ */
+export async function doFetchWithSchema<Output, Def extends z.ZodTypeDef, Input>(
+  opts: DoFetchApiOpts,
+  schema: z.Schema<Output, Def, Input>,
+): Promise<DoFetchWithSchemaResults<Output>> {
+  const result = await doFetchApi(opts)
+  const parsed = schema.parse(result.json)
+  return {
+    ...result,
+    json: parsed,
+  }
 }

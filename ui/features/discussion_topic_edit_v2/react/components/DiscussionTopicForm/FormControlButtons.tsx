@@ -16,15 +16,16 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+import {useScope as createI18nScope} from '@canvas/i18n'
 import React from 'react'
-import {useScope as useI18nScope} from '@canvas/i18n'
 
-import {View} from '@instructure/ui-view'
+import {assignLocation} from '@canvas/util/globalUtils'
+import type {Breakpoints} from '@canvas/with-breakpoints'
 import {Button} from '@instructure/ui-buttons'
 import {Flex} from '@instructure/ui-flex'
-import type {Breakpoints} from '@canvas/with-breakpoints'
+import {View} from '@instructure/ui-view'
 
-const I18n = useI18nScope('discussion_create')
+const I18n = createI18nScope('discussion_create')
 
 export const FormControlButtons = ({
   isAnnouncement,
@@ -50,7 +51,7 @@ export const FormControlButtons = ({
       display="block"
       textAlign="end"
       borderWidth="small none none none"
-      margin="none none"
+      margin="small none none none"
       padding="large none"
     >
       <Button
@@ -58,9 +59,10 @@ export const FormControlButtons = ({
         display={breakpoints.mobileOnly ? 'block' : 'inline-block'}
         color="secondary"
         margin={breakpoints.mobileOnly ? 'none none small none' : 'none xx-small none xx-small'}
+        data-testid="announcement-cancel-button"
         onClick={() => {
           // @ts-expect-error
-          window.location.assign(ENV?.CANCEL_TO)
+          assignLocation(ENV?.CANCEL_TO)
         }}
         disabled={isSubmitting}
       >

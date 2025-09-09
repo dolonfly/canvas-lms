@@ -40,12 +40,12 @@ describe "ToDoListPresenter" do
     end
 
     it "returns moderated assignments that user is the final grader for" do
-      presenter = ToDoListPresenter.new(nil, final_grader, nil, course.root_account)
+      presenter = ToDoListPresenter.new(nil, final_grader, nil)
       expect(presenter.needs_moderation.first.title).to eq "report"
     end
 
     it "does not return moderated assignments that user is not the final grader for" do
-      presenter = ToDoListPresenter.new(nil, grader, nil, course.root_account)
+      presenter = ToDoListPresenter.new(nil, grader, nil)
       expect(presenter.needs_moderation).to be_empty
     end
   end
@@ -83,13 +83,13 @@ describe "ToDoListPresenter" do
     end
 
     it "returns for assignments that need grading for a teacher that is a grader" do
-      presenter = ToDoListPresenter.new(nil, grader, nil, course1.root_account)
+      presenter = ToDoListPresenter.new(nil, grader, nil)
       expect(presenter.needs_grading.map(&:title)).to contain_exactly("assignment1", "assignment2")
     end
 
     it "does not explode if the teacher is also a cross-shard site admin" do
       expect_any_instantiation_of(grader).to receive(:roles).and_return(["consortium_admin"])
-      presenter = ToDoListPresenter.new(nil, grader, nil, course1.root_account)
+      presenter = ToDoListPresenter.new(nil, grader, nil)
       expect(presenter.needs_grading.map(&:title)).to contain_exactly("assignment1", "assignment2")
     end
 
@@ -99,7 +99,7 @@ describe "ToDoListPresenter" do
                            role: teacher_role,
                            enabled: false)
 
-      presenter = ToDoListPresenter.new(nil, grader, nil, course1.root_account)
+      presenter = ToDoListPresenter.new(nil, grader, nil)
       expect(presenter.needs_grading.size).to eq(0)
     end
 
@@ -107,22 +107,25 @@ describe "ToDoListPresenter" do
       grading = Assignment.where(title: "assignment1").first
       grading.grade_student(student, grade: "1", grader:, provisional: true)
 
-      presenter = ToDoListPresenter.new(nil, grader, nil, grading.context.root_account)
+      presenter = ToDoListPresenter.new(nil, grader, nil)
       expect(presenter.needs_grading.map(&:title)).to contain_exactly("assignment2")
 
-      presenter = ToDoListPresenter.new(nil, final_grader, nil, grading.context.root_account)
+      presenter = ToDoListPresenter.new(nil, final_grader, nil)
       expect(presenter.needs_moderation.map(&:title)).to contain_exactly("assignment1")
     end
 
     context "discussion checkpoints" do
       before do
-        course1.root_account.enable_feature!(:discussion_checkpoints)
+        sub_account = Account.default.sub_accounts.create!
+        course1.account = sub_account
+        course1.save!
+        course1.account.enable_feature!(:discussion_checkpoints)
         @reply_to_topic, _reply_to_entry = graded_discussion_topic_with_checkpoints(context: course1)
         @reply_to_topic.submit_homework student, body: "checkpoint submission for #{student.name}"
       end
 
       it "returns discussion checkpoint assignments that need grading" do
-        presenter = ToDoListPresenter.new(nil, grader, nil, course1.root_account)
+        presenter = ToDoListPresenter.new(nil, grader, nil)
         expect(presenter.needs_grading.map(&:title)).to include(@reply_to_topic.title)
       end
     end
@@ -132,12 +135,15 @@ describe "ToDoListPresenter" do
     context "discussion checkpoints" do
       before do
         course_with_student(active_all: true)
-        @course.root_account.enable_feature!(:discussion_checkpoints)
+        sub_account = Account.default.sub_accounts.create!
+        @course.account = sub_account
+        @course.save!
+        @course.account.enable_feature!(:discussion_checkpoints)
         @reply_to_topic, @reply_to_entry = graded_discussion_topic_with_checkpoints(context: @course)
       end
 
       it "returns discussion checkpoints that need submitting" do
-        presenter = ToDoListPresenter.new(self, @user, nil, @course.root_account)
+        presenter = ToDoListPresenter.new(self, @user, nil)
         expect(presenter.needs_submitting.map(&:title)).to include(@reply_to_topic.title)
         expect(presenter.needs_submitting.map(&:sub_assignment_tag)).to match_array([
                                                                                       @reply_to_topic.sub_assignment_tag,
@@ -148,7 +154,7 @@ describe "ToDoListPresenter" do
       it "returns the correct assignment_path for discussion checkpoints that need submitting" do
         view_stub = double("view")
         allow(view_stub).to receive(:course_assignment_path).and_return("path/to/assignment")
-        presenter = ToDoListPresenter.new(view_stub, @user, nil, @course.root_account)
+        presenter = ToDoListPresenter.new(view_stub, @user, nil)
         expect(presenter.needs_submitting.last.assignment_path).to eq "path/to/assignment"
       end
     end
@@ -161,39 +167,72 @@ describe "ToDoListPresenter" do
 
     before do
       course1.offer!
-      assignment = Assignment.create({
-                                       context: course1,
-                                       title: "assignment3",
-                                       submission_types: "online_text_entry",
-                                       due_at: 1.day.from_now,
-                                       peer_reviews: true
-                                     })
-      assignment.publish
-      assignment.assign_peer_review(reviewer, reviewee)
-      assignment.submit_homework(reviewee, body: "you say potato...")
+      @assignment = Assignment.create({
+                                        context: course1,
+                                        title: "assignment3",
+                                        submission_types: "online_text_entry",
+                                        due_at: 1.day.from_now,
+                                        peer_reviews: true
+                                      })
+      @assignment.publish
+      @assignment.assign_peer_review(reviewer, reviewee)
+      @assignment.submit_homework(reviewee, body: "you say potato...")
     end
 
     it "does not blow up" do
-      presenter = ToDoListPresenter.new(nil, reviewer, [course1], course1.root_account)
+      presenter = ToDoListPresenter.new(nil, reviewer, [course1])
       # basically checking that ToDoListPresenter.initialize didn't raise and error
       expect(presenter).not_to be_nil
     end
 
-    it "returns the correct submission_path for peer reviews" do
+    it "returns the assignment path when the assessor has not submitted their assignment" do
       view_stub = double("view")
-      allow(view_stub).to receive(:course_assignment_submission_path).and_return("path/to/submission")
-
-      course1.assignments.last.update({ anonymous_peer_reviews: false })
-      presenter = ToDoListPresenter.new(view_stub, reviewer, [course1], course1.root_account)
-
-      expect(presenter.needs_reviewing.last.submission_path).to eq "path/to/submission"
+      @assignment.update({ anonymous_peer_reviews: false })
+      presenter = ToDoListPresenter.new(view_stub, reviewer, [course1])
+      expect(presenter.needs_reviewing.last.submission_path).to eq "/courses/#{course1.id}/assignments/#{@assignment.id}?reviewee_id=#{reviewee.id}"
     end
 
-    it "returns the correct submission_path for anonymous peer reviews" do
-      course1.assignments.last.update({ anonymous_peer_reviews: true })
-      presenter = ToDoListPresenter.new(nil, reviewer, [course1], course1.root_account)
+    it "returns the submission path when the assessor has submitted their assignment" do
+      @assignment.submit_homework(reviewer, body: "you say tomato...")
+      view_stub = double("view")
+      @assignment.update({ anonymous_peer_reviews: false })
+      presenter = ToDoListPresenter.new(view_stub, reviewer, [course1])
+      expect(presenter.needs_reviewing.last.submission_path).to eq "/courses/#{course1.id}/assignments/#{@assignment.id}/submissions/#{reviewee.id}"
+    end
+
+    it "returns the correct assignment path for anonymous peer reviews when the assessor has not submitted their assignment" do
+      @assignment.update({ anonymous_peer_reviews: true })
+      presenter = ToDoListPresenter.new(nil, reviewer, [course1])
+
+      expect(presenter.needs_reviewing.last.submission_path).to include("anonymous_asset_id")
+    end
+
+    it "returns the correct submission path for anonymous peer reviews when the assessor has submitted their assignment" do
+      @assignment.submit_homework(reviewer, body: "you say tomato...")
+      @assignment.update({ anonymous_peer_reviews: true })
+      presenter = ToDoListPresenter.new(nil, reviewer, [course1])
 
       expect(presenter.needs_reviewing.last.submission_path).to include("anonymous_submissions")
+    end
+
+    context "Assignment Enhancements FF enabled" do
+      before do
+        course1.enable_feature!(:assignments_2_student)
+      end
+
+      it "returns the correct assignment path with reviewee_id for peer reviews" do
+        view_stub = double("view")
+        course1.assignments.last.update({ anonymous_peer_reviews: false })
+        presenter = ToDoListPresenter.new(view_stub, reviewer, [course1])
+        expect(presenter.needs_reviewing.last.submission_path).to eq "/courses/#{course1.id}/assignments/#{course1.assignments.last.id}?reviewee_id=#{reviewee.id}"
+      end
+
+      it "returns the correct assignment path with anonymous_asset_id for anonymous peer reviews" do
+        course1.assignments.last.update({ anonymous_peer_reviews: true })
+        presenter = ToDoListPresenter.new(nil, reviewer, [course1])
+
+        expect(presenter.needs_reviewing.last.submission_path).to include("anonymous_asset_id")
+      end
     end
   end
 end

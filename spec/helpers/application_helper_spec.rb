@@ -70,23 +70,7 @@ describe ApplicationHelper do
   context "show_user_create_course_button" do
     before(:once) { @domain_root_account = Account.default }
 
-    it "works (non-granular)" do
-      @domain_root_account.disable_feature!(:granular_permissions_manage_courses)
-      @domain_root_account.update_attribute(
-        :settings,
-        { teachers_can_create_courses: true, students_can_create_courses: true }
-      )
-      expect(show_user_create_course_button(nil)).to be_falsey
-      user_factory
-      expect(show_user_create_course_button(@user)).to be_falsey
-      course_with_teacher
-      expect(show_user_create_course_button(@teacher)).to be_truthy
-      account_admin_user
-      expect(show_user_create_course_button(@admin)).to be_truthy
-    end
-
-    it "works for no enrollments setting (granular permissions)" do
-      @domain_root_account.enable_feature!(:granular_permissions_manage_courses)
+    it "works for no enrollments setting" do
       @domain_root_account.update(settings: { no_enrollments_can_create_courses: true })
       expect(show_user_create_course_button(nil)).to be_falsey
       user_factory
@@ -122,28 +106,28 @@ describe ApplicationHelper do
     describe "#context_sensitive_datetime_title" do
       it "produces a string showing the local time and the course time" do
         context = double(time_zone: ActiveSupport::TimeZone["America/Denver"])
-        expect(context_sensitive_datetime_title(Time.now, context)).to eq "data-tooltip data-html-tooltip-title=\"Local: Mar 13 at 1:12am<br>Course: Mar 13 at 3:12am\""
+        expect(context_sensitive_datetime_title(Time.zone.now, context)).to eq "data-tooltip data-html-tooltip-title=\"Local: Mar 13 at 1:12am<br>Course: Mar 13 at 3:12am\""
       end
 
       it "only prints the text if just_text option passed" do
         context = double(time_zone: ActiveSupport::TimeZone["America/Denver"])
-        expect(context_sensitive_datetime_title(Time.now, context, just_text: true)).to eq "Local: Mar 13 at 1:12am<br>Course: Mar 13 at 3:12am"
+        expect(context_sensitive_datetime_title(Time.zone.now, context, just_text: true)).to eq "Local: Mar 13 at 1:12am<br>Course: Mar 13 at 3:12am"
       end
 
       it "uses the simple title if theres no timezone difference" do
         context = double(time_zone: ActiveSupport::TimeZone["America/Anchorage"])
-        expect(context_sensitive_datetime_title(Time.now, context, just_text: true)).to eq "Mar 13 at 1:12am"
-        expect(context_sensitive_datetime_title(Time.now, context)).to eq "data-tooltip data-html-tooltip-title=\"Mar 13 at 1:12am\""
+        expect(context_sensitive_datetime_title(Time.zone.now, context, just_text: true)).to eq "Mar 13 at 1:12am"
+        expect(context_sensitive_datetime_title(Time.zone.now, context)).to eq "data-tooltip data-html-tooltip-title=\"Mar 13 at 1:12am\""
       end
 
       it "uses the simple title for nil context" do
-        expect(context_sensitive_datetime_title(Time.now, nil, just_text: true)).to eq "Mar 13 at 1:12am"
+        expect(context_sensitive_datetime_title(Time.zone.now, nil, just_text: true)).to eq "Mar 13 at 1:12am"
       end
 
       it "crosses date boundaries appropriately" do
         Timecop.freeze(Time.utc(2013, 3, 13, 7, 12)) do
           context = double(time_zone: ActiveSupport::TimeZone["America/Denver"])
-          expect(context_sensitive_datetime_title(Time.now, context)).to eq "data-tooltip data-html-tooltip-title=\"Local: Mar 12 at 11:12pm<br>Course: Mar 13 at 1:12am\""
+          expect(context_sensitive_datetime_title(Time.zone.now, context)).to eq "data-tooltip data-html-tooltip-title=\"Local: Mar 12 at 11:12pm<br>Course: Mar 13 at 1:12am\""
         end
       end
     end
@@ -152,12 +136,12 @@ describe ApplicationHelper do
       let(:context) { double(time_zone: ActiveSupport::TimeZone["America/Denver"]) }
 
       it "spits out a friendly time tag" do
-        tag = friendly_datetime(Time.now)
+        tag = friendly_datetime(Time.zone.now)
         expect(tag).to eq "<time data-html-tooltip-title=\"Mar 13 at 1:12am\" data-tooltip=\"top\">Mar 13 at 1:12am</time>"
       end
 
       it "builds a whole time tag with a useful title showing the timezone offset if theres a context" do
-        tag = friendly_datetime(Time.now, context:)
+        tag = friendly_datetime(Time.zone.now, context:)
         expect(tag).to match(%r{^<time.*</time>$})
         expect(tag).to match(/data-html-tooltip-title=/)
         expect(tag).to match(/Local: Mar 13 at 1:12am/)
@@ -165,7 +149,7 @@ describe ApplicationHelper do
       end
 
       it "can produce an alternate tag type" do
-        tag = friendly_datetime(Time.now, context:, tag_type: :span)
+        tag = friendly_datetime(Time.zone.now, context:, tag_type: :span)
         expect(tag).to match(%r{^<span.*</span>$})
         expect(tag).to match(/data-html-tooltip-title=/)
         expect(tag).to match(/Local: Mar 13 at 1:12am/)
@@ -935,7 +919,7 @@ describe ApplicationHelper do
 
       it "returns token's developer_key with @access_token set" do
         user = user_model
-        developer_key = DeveloperKey.create!
+        developer_key = DeveloperKey.create!(name: "Test Developer Key")
         @access_token = user.access_tokens.where(developer_key_id: developer_key).create!
         expect(file_access_developer_key).to eql developer_key
       end
@@ -1052,7 +1036,7 @@ describe ApplicationHelper do
       end
 
       it "creates an authenticator aware of the access token if present" do
-        @access_token = logged_in_user.access_tokens.create!
+        @access_token = logged_in_user.access_tokens.create!(purpose: "Test Access Token")
         expect(file_authenticator.access_token).to eql @access_token
       end
 
@@ -1518,6 +1502,34 @@ describe ApplicationHelper do
           expect(readable_size_mib).to eq(readable_size)
         end
       end
+    end
+  end
+
+  describe "#thumbnail_image_url" do
+    let(:root_account) { double("Account") }
+    let(:attachment) { double("Attachment", root_account:, uuid: "abc123") }
+
+    context "when :file_association_access feature is enabled" do
+      before do
+        allow(root_account).to receive(:feature_enabled?).with(:file_association_access).and_return(true)
+      end
+
+      it "calls thumbnail_image_plain_url with the correct arguments" do
+        expect(helper).to receive(:thumbnail_image_plain_url).with(attachment, {}).and_return("plain_url")
+        expect(helper.thumbnail_image_url(attachment)).to eq("plain_url")
+      end
+
+      it "passes url_options to thumbnail_image_plain_url" do
+        expect(helper).to receive(:thumbnail_image_plain_url).with(attachment, { foo: "bar" }).and_return("plain_url")
+        expect(helper.thumbnail_image_url(attachment, nil, { foo: "bar" })).to eq("plain_url")
+      end
+    end
+  end
+
+  describe "include_masquerade_stylesheets" do
+    it "returns a stylesheet link tag for user_masquerade" do
+      expect(include_masquerade_stylesheets).to include("user_masquerade")
+      expect(include_masquerade_stylesheets).to include("stylesheet")
     end
   end
 end

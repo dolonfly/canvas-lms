@@ -19,11 +19,12 @@
 #
 
 class Group < ActiveRecord::Base
-  self.ignored_columns += ["category"]
-
   include Context
   include Workflow
   include CustomValidations
+
+  cattr_accessor :MAX_VARIANTS_PER_TAG_CATEGORY
+  self.MAX_VARIANTS_PER_TAG_CATEGORY = 10
 
   validates :context_id, :context_type, :account_id, :root_account_id, :workflow_state, :uuid, presence: true
   validates_allowed_transitions :is_public, false => true
@@ -92,6 +93,12 @@ class Group < ActiveRecord::Base
   delegate :usage_rights_required?, to: :context
   delegate :allow_student_anonymous_discussion_topics, to: :context
 
+  def discussion_checkpoints_enabled?
+    # Groups in a Course don't always belong to the same account, for this reason,
+    # we have to rely on context
+    context&.discussion_checkpoints_enabled? || false
+  end
+
   include StickySisFields
   are_sis_sticky :name
 
@@ -108,6 +115,8 @@ class Group < ActiveRecord::Base
 
     record.errors.add attr, t(:greater_than_1, "Must be greater than 1") unless value.to_i > 1
   end
+
+  validates_with HorizonValidators::GroupValidator, if: -> { context.is_a?(Course) && context.horizon_course? }
 
   def refresh_group_discussion_topics
     if group_category
@@ -169,6 +178,7 @@ class Group < ActiveRecord::Base
 
   def allow_self_signup?(user)
     group_category &&
+      !group_category.past_self_signup_end_at? &&
       (group_category.unrestricted_self_signup? ||
         (group_category.restricted_self_signup? && has_common_section_with_user?(user)))
   end
@@ -192,7 +202,7 @@ class Group < ActiveRecord::Base
   end
 
   def update_max_membership_from_group_category
-    if (!max_membership || max_membership == 0) && group_category && group_category.group_limit
+    if (!max_membership || max_membership == 0) && group_category&.group_limit
       self.max_membership = group_category.group_limit
     end
   end
@@ -261,8 +271,7 @@ class Group < ActiveRecord::Base
   end
 
   def should_add_creator?(creator)
-    group_category &&
-      (group_category.communities? || (group_category.student_organized? && context.user_is_student?(creator)))
+    group_category.communities? || (group_category&.student_organized? && context.user_is_student?(creator))
   end
 
   def submission?
@@ -288,7 +297,7 @@ class Group < ActiveRecord::Base
   end
 
   def self.find_all_by_context_code(codes)
-    ids = codes.filter_map { |c| c.match(/\Agroup_(\d+)\z/)[1] rescue nil }
+    ids = codes.filter_map { |c| c.match(/\Agroup_(\d+)\z/)&.[](1) }
     Group.find(ids)
   end
 
@@ -328,6 +337,11 @@ class Group < ActiveRecord::Base
   Bookmarker = BookmarkedCollection::SimpleBookmarker.new(Group, :name, :id)
 
   scope :active, -> { where("groups.workflow_state<>'deleted'") }
+  scope :context_active, lambda {
+    left_joins(:course).where(
+      "courses.workflow_state IS NULL OR courses.workflow_state NOT IN ('deleted', 'completed')"
+    )
+  }
   scope :collaborative, -> { where(non_collaborative: false) }
   scope :non_collaborative, -> { where(non_collaborative: true) }
   scope :by_name, -> { order(Bookmarker.order_by) }
@@ -344,7 +358,7 @@ class Group < ActiveRecord::Base
 
   def full_name
     res = before_label(name) + " "
-    res += (context.course_code rescue context.name) if context
+    res += context.try(:course_code) || context.name if context
     res
   end
 
@@ -403,6 +417,42 @@ class Group < ActiveRecord::Base
     end
   end
 
+  def bulk_add_users_to_differentiation_tag(user_ids, options = {})
+    # filter out duplicate user_ids, a user can only be in a differentiation tag once
+    user_ids = user_ids.uniq
+    return [] if user_ids.empty?
+
+    old_group_memberships = group_memberships.where(user_id: user_ids).to_a
+    bulk_upsert_group_memberships(user_ids, options)
+    all_group_memberships = group_memberships.where(user_id: user_ids)
+    all_group_memberships - old_group_memberships
+  end
+
+  def bulk_upsert_group_memberships(user_ids, options = {})
+    return if user_ids.empty?
+
+    current_time = Time.zone.now
+    base_options = {
+      group_id: id,
+      workflow_state: "accepted",
+      moderator: false,
+      created_at: current_time,
+      updated_at: current_time,
+      root_account_id:
+    }.merge(options)
+
+    upsert_data = user_ids.map do |user_id|
+      base_options.merge(user_id:, uuid: CanvasSlug.generate_securish_uuid)
+    end
+
+    upsert_data.each_slice(1000) do |batch|
+      GroupMembership.upsert_all(
+        batch,
+        unique_by: [:group_id, :user_id]
+      )
+    end
+  end
+
   def bulk_add_users_to_group(users, options = {})
     return if users.empty?
 
@@ -435,7 +485,7 @@ class Group < ActiveRecord::Base
   end
 
   def bulk_insert_group_memberships(users, options = {})
-    current_time = Time.now
+    current_time = Time.zone.now
     options = {
       group_id: id,
       workflow_state: "accepted",
@@ -520,7 +570,6 @@ class Group < ActiveRecord::Base
     given { |user| !non_collaborative? && user && can_participate?(user) && has_member?(user) }
     can :participate,
         :manage_calendar,
-        :manage_content,
         :manage_course_content_add,
         :manage_course_content_edit,
         :manage_course_content_delete,
@@ -555,11 +604,16 @@ class Group < ActiveRecord::Base
       ]
 
       given do |user, session|
-        user && has_member?(user) &&
-          (!context || context.is_a?(Account) || context.grants_any_right?(user, session, :send_messages, :send_messages_all))
-      end
-      can :send_messages and can :send_messages_all
+        next false unless user
 
+        if context.nil? || context.is_a?(Account)
+          has_member?(user)
+        else
+          context.grants_any_right?(user, session, :send_messages, :send_messages_all)
+        end
+      end
+      can :send_messages
+      can :send_messages_all
       # if I am a member of this group and I can moderate_forum in the group's context
       # (makes it so group members cant edit each other's discussion entries)
       given { |user, session| user && has_member?(user) && (!context || context.grants_right?(user, session, :moderate_forum)) }
@@ -568,7 +622,6 @@ class Group < ActiveRecord::Base
       given { |user| user && has_moderator?(user) }
       can :delete and
         can :manage and
-        can :manage_admin_users and
         can :allow_course_admin_actions and
         can :manage_students and
         can :moderate_forum and
@@ -586,67 +639,22 @@ class Group < ActiveRecord::Base
       given { |user, session| grants_right?(user, session, :participate_as_student) && context.allow_student_organized_groups }
       can :create
 
-      #################### Begin legacy permission block #########################
-
       given do |user, session|
-        !context.root_account.feature_enabled?(:granular_permissions_manage_groups) &&
-          context.grants_right?(user, session, :manage_groups)
-      end
-      can %i[
-        create
-        create_collaborations
-        delete
-        manage
-        manage_admin_users
-        allow_course_admin_actions
-        manage_calendar
-        manage_content
-        manage_course_content_add
-        manage_course_content_edit
-        manage_course_content_delete
-        manage_files_add
-        manage_files_edit
-        manage_files_delete
-        manage_students
-        manage_wiki_create
-        manage_wiki_delete
-        manage_wiki_update
-        moderate_forum
-        post_to_forum
-        create_forum
-        read
-        read_forum
-        read_announcements
-        read_roster
-        send_messages
-        send_messages_all
-        update
-        view_unpublished_items
-        read_files
-      ]
-
-      ##################### End legacy permission block ##########################
-
-      given do |user, session|
-        context.root_account.feature_enabled?(:granular_permissions_manage_groups) &&
-          context.grants_right?(user, session, :manage_groups_add)
+        context.grants_right?(user, session, :manage_groups_add)
       end
       can %i[read read_files create]
 
       # permissions to update a group and manage actions within the context of a group
       given do |user, session|
-        context.root_account.feature_enabled?(:granular_permissions_manage_groups) &&
-          context.grants_right?(user, session, :manage_groups_manage)
+        context.grants_right?(user, session, :manage_groups_manage)
       end
       can %i[
         read
         update
         create_collaborations
         manage
-        manage_admin_users
         allow_course_admin_actions
         manage_calendar
-        manage_content
         manage_course_content_add
         manage_course_content_edit
         manage_course_content_delete
@@ -670,8 +678,7 @@ class Group < ActiveRecord::Base
       ]
 
       given do |user, session|
-        context.root_account.feature_enabled?(:granular_permissions_manage_groups) &&
-          context.grants_right?(user, session, :manage_groups_delete)
+        context.grants_right?(user, session, :manage_groups_delete)
       end
       can %i[read read_files delete]
 
@@ -691,19 +698,9 @@ class Group < ActiveRecord::Base
       given { |user| user && (self.group_category.try(:allows_multiple_memberships?) || allow_self_signup?(user)) }
       can :leave
 
-      #################### Begin legacy permission block #########################
       given do |user, session|
-        !context.root_account.feature_enabled?(:granular_permissions_manage_course_content) &&
-          grants_right?(user, session, :manage_content) && context &&
-          context.grants_right?(user, session, :create_conferences)
-      end
-      can :create_conferences
-      ##################### End legacy permission block ##########################
-
-      given do |user, session|
-        context.root_account.feature_enabled?(:granular_permissions_manage_course_content) &&
-          grants_right?(user, session, :manage_course_content_add) && context &&
-          context.grants_right?(user, session, :create_conferences)
+        grants_right?(user, session, :manage_course_content_add) &&
+          context&.grants_right?(user, session, :create_conferences)
       end
       can :create_conferences
 
@@ -758,7 +755,6 @@ class Group < ActiveRecord::Base
       given { |user, session| user && context&.grants_right?(user, session, :manage_tags_manage) }
       can :update,
           :manage,
-          :manage_admin_users,
           :allow_course_admin_actions,
           :manage_students
 
@@ -795,7 +791,6 @@ class Group < ActiveRecord::Base
       # be used as a context that owns content. So no user should ever be able to manage content in a non_collaborative group.
       # %i[
       #   manage_calendar
-      #   manage_content
       #   manage_course_content_add
       #   manage_course_content_edit
       #   manage_course_content_delete
@@ -1034,10 +1029,13 @@ class Group < ActiveRecord::Base
       errors.add(:base, "Non-collaborative groups must belong to a course") unless context_type == "Course"
       errors.add(:base, "Non-collaborative groups cannot have a leader") if leader_id.present?
       errors.add(:base, "Non-collaborative groups must be private") if is_public
+      errors.add(:base, "Variant limit reached for tag") if new_record? && Group.active.non_collaborative.where(group_category_id:).count >= self.MAX_VARIANTS_PER_TAG_CATEGORY
+      errors.add(:base, "You have reached the tag limit for this course") if new_record? && self.group_category.max_diff_tag_validation_count >= GroupCategory.MAX_DIFFERENTIATION_TAG_PER_COURSE
     end
 
     if group_category && non_collaborative != group_category.non_collaborative
       errors.add(:base, "Group non_collaborative status must match its category")
+
     end
   end
 end

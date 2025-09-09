@@ -59,7 +59,7 @@ module Factories
     {
       name: "value for name",
       group_weighting_scheme: "value for group_weighting_scheme",
-      start_at: Time.now,
+      start_at: Time.zone.now,
       conclude_at: 100.seconds.from_now,
       is_public: true,
       allow_student_wiki_edits: true,
@@ -77,6 +77,12 @@ module Factories
       @enrollment.save!
     end
     @course.reload
+    @enrollment
+  end
+
+  def course_with_test_student(opts = {})
+    course_with_user("StudentViewEnrollment", opts)
+    @test_student = @user
     @enrollment
   end
 
@@ -101,6 +107,19 @@ module Factories
     course_with_user("TeacherEnrollment", opts)
     @teacher = @user
     @enrollment
+  end
+
+  def course_with_teacher_and_student_enrolled(opts = {})
+    course_with_user("TeacherEnrollment", opts.merge(active_all: true))
+    @teacher = @user
+    @teacher_enrollment = @enrollment
+    @student = @course.shard.activate { user_factory }
+    @student_enrollment = @course.enroll_user(@student, "StudentEnrollment", opts)
+    @student.save!
+    @student_enrollment.workflow_state = "active"
+    @student_enrollment.course = @course
+    @student_enrollment.save!
+    @course.reload
   end
 
   def course_with_designer(opts = {})

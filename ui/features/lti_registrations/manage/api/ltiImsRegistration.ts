@@ -15,15 +15,13 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import type {RegistrationOverlay} from '../model/RegistrationOverlay'
 import {parseFetchResult} from '../../common/lib/apiResult/ApiResult'
 import {ZDynamicRegistrationToken} from '../model/DynamicRegistrationToken'
-import {ZLtiImsRegistration} from '../model/lti_ims_registration/LtiImsRegistration'
-import {type AccountId} from '../model/AccountId'
+import type {AccountId} from '../model/AccountId'
 import type {DynamicRegistrationTokenUUID} from '../model/DynamicRegistrationTokenUUID'
-import type {LtiImsRegistrationId} from '../model/lti_ims_registration/LtiImsRegistrationId'
 import {defaultFetchOptions} from '@canvas/util/xhr'
 import type {UnifiedToolId} from '../model/UnifiedToolId'
+import {ZLtiRegistrationWithConfiguration} from '../model/LtiRegistration'
 
 /**
  * Fetch a newly generated registration token which will
@@ -38,15 +36,15 @@ import type {UnifiedToolId} from '../model/UnifiedToolId'
 export const fetchRegistrationToken = (
   accountId: AccountId,
   registrationUrl: string,
-  unifiedToolId?: UnifiedToolId
+  unifiedToolId?: UnifiedToolId,
 ) =>
   parseFetchResult(ZDynamicRegistrationToken)(
     fetch(
       `/api/lti/accounts/${accountId}/registration_token?unified_tool_id=${
         unifiedToolId || ''
       }&registration_url=${registrationUrl}`,
-      defaultFetchOptions()
-    )
+      defaultFetchOptions(),
+    ),
   )
 
 /**
@@ -60,50 +58,13 @@ export const fetchRegistrationToken = (
  *   from the registration token
  * @returns
  */
-export const getRegistrationByUUID = (
+export const getLtiRegistrationByUUID = (
   accountId: AccountId,
-  registrationUuid: DynamicRegistrationTokenUUID
+  registrationUuid: DynamicRegistrationTokenUUID,
 ) =>
-  parseFetchResult(ZLtiImsRegistration)(
+  parseFetchResult(ZLtiRegistrationWithConfiguration)(
     fetch(
-      `/api/lti/accounts/${accountId}/registrations/uuid/${registrationUuid}`,
-      defaultFetchOptions()
-    )
-  )
-
-/**
- * Retrieve a registration by its ID. Useful for managing a registration
- * after it's been created.
- *
- * @param accountId
- * @param registrationId ID of the registration
- * @returns
- */
-export const getRegistrationById = (accountId: AccountId, registrationId: LtiImsRegistrationId) =>
-  parseFetchResult(ZLtiImsRegistration)(
-    fetch(`/api/lti/accounts/${accountId}/registrations/${registrationId}`, defaultFetchOptions())
-  )
-
-/**
- * Updates the overlay for an LtiImsRegistration.
- * @param accountId
- * @param registrationId
- * @param overlay
- * @returns
- */
-export const updateRegistrationOverlay = (
-  accountId: AccountId,
-  registrationId: LtiImsRegistrationId,
-  overlay: RegistrationOverlay
-) =>
-  parseFetchResult(ZLtiImsRegistration)(
-    fetch(`/api/lti/accounts/${accountId}/registrations/${registrationId}/overlay`, {
-      ...defaultFetchOptions(),
-      method: 'PUT',
-      headers: {
-        ...defaultFetchOptions().headers,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(overlay),
-    })
+      `/api/lti/accounts/${accountId}/lti_registrations/uuid/${registrationUuid}`,
+      defaultFetchOptions(),
+    ),
   )

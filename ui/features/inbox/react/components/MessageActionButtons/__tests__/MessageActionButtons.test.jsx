@@ -119,7 +119,7 @@ describe('MessageActionButtons', () => {
     const {queryByTestId} = render(
       <ConversationContext.Provider value={{isSubmissionCommentsType: true}}>
         <MessageActionButtons {...props} />
-      </ConversationContext.Provider>
+      </ConversationContext.Provider>,
     )
 
     expect(queryByTestId('reply')).toBeInTheDocument()
@@ -145,5 +145,34 @@ describe('MessageActionButtons', () => {
     const {queryByTestId} = render(<MessageActionButtons {...props} />)
     fireEvent.click(queryByTestId('archive'))
     expect(props.archive).toHaveBeenCalled()
+  })
+
+  describe('when restrict_student_access feature is enabled', () => {
+    beforeAll(() => {
+      window.ENV.FEATURES ||= {}
+      window.ENV.FEATURES.restrict_student_access = true
+    })
+
+    afterAll(() => {
+      delete window.ENV.FEATURES.restrict_student_access
+    })
+
+    it('does not render the reply all & delete button', async () => {
+      const props = createProps()
+      const {queryByTestId} = render(<MessageActionButtons {...props} />)
+
+      expect(queryByTestId('reply-all')).not.toBeInTheDocument()
+      expect(queryByTestId('delete')).not.toBeInTheDocument()
+    })
+
+    it('renders all other expected buttons', () => {
+      const props = createProps()
+      const {getByTestId} = render(<MessageActionButtons {...props} />)
+
+      expect(getByTestId('compose')).toBeInTheDocument()
+      expect(getByTestId('reply')).toBeInTheDocument()
+      expect(getByTestId('archive')).toBeInTheDocument()
+      expect(getByTestId('settings')).toBeInTheDocument()
+    })
   })
 })

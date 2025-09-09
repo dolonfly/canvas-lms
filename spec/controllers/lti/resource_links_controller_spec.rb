@@ -27,12 +27,11 @@ describe Lti::ResourceLinksController, type: :request do
   let_once(:account) { account_model }
   let_once(:admin) { account_admin_user(name: "A User", account:) }
   let_once(:course) { course_model(account:) }
-  let_once(:developer_key) { developer_key_model(account:) }
-  let_once(:tool) { external_tool_1_3_model(context: account, developer_key:) }
+  let_once(:registration) { lti_registration_with_tool(account:) }
+  let_once(:tool) { registration.deployments.first }
 
   before do
     user_session(admin)
-    account.enable_feature!(:lti_resource_links_api)
   end
 
   describe "GET #index" do
@@ -83,18 +82,9 @@ describe Lti::ResourceLinksController, type: :request do
     context "with non-admin user" do
       before { user_session(student_in_course(account:).user) }
 
-      it "returns 401" do
+      it "returns 403" do
         subject
-        expect(response).to be_unauthorized
-      end
-    end
-
-    context "with flag disabled" do
-      before { account.disable_feature!(:lti_resource_links_api) }
-
-      it "returns 404" do
-        subject
-        expect(response).to be_not_found
+        expect(response).to be_forbidden
       end
     end
 
@@ -120,6 +110,17 @@ describe Lti::ResourceLinksController, type: :request do
       expect(launch_urls[module_item_rl.id]).to eq("http://www.example.com/courses/#{course.id}/external_tools/retrieve?resource_link_lookup_uuid=#{module_item_rl.lookup_uuid}")
       expect(launch_urls[collaboration_rl.id]).to eq("http://www.example.com/courses/#{course.id}/external_tools/retrieve?resource_link_lookup_uuid=#{collaboration_rl.lookup_uuid}")
       expect(launch_urls[rich_content_rl.id]).to eq("http://www.example.com/courses/#{course.id}/external_tools/retrieve?resource_link_lookup_uuid=#{rich_content_rl.lookup_uuid}")
+    end
+
+    it "includes corresponding module_item_id for resource link" do
+      subject
+      content_types = response_json.to_h { |rl| [rl["id"], rl["associated_content_type"]] }
+      content_ids = response_json.to_h { |rl| [rl["id"], rl["associated_content_id"]] }
+
+      expect(content_types[module_item_rl.id]).to eq("ModuleItem")
+      expect(content_ids[module_item_rl.id]).to eq(module_item.id)
+      expect(content_types[assignment_rl.id]).to be_nil
+      expect(content_ids[assignment_rl.id]).to be_nil
     end
 
     context "with deleted link and content" do
@@ -178,18 +179,9 @@ describe Lti::ResourceLinksController, type: :request do
     context "with non-admin user" do
       before { user_session(student_in_course(account:).user) }
 
-      it "returns 401" do
+      it "returns 403" do
         subject
-        expect(response).to be_unauthorized
-      end
-    end
-
-    context "with flag disabled" do
-      before { account.disable_feature!(:lti_resource_links_api) }
-
-      it "returns 404" do
-        subject
-        expect(response).to be_not_found
+        expect(response).to be_forbidden
       end
     end
 
@@ -258,7 +250,11 @@ describe Lti::ResourceLinksController, type: :request do
   describe "PUT #update" do
     subject { put "/api/v1/courses/#{course.id}/lti_resource_links/#{id}", params: }
 
-    let(:resource_link) { resource_link_model(context: course) }
+    let(:resource_link) do
+      resource_link_model(context: course, course:, overrides: {
+                            url: tool.url
+                          })
+    end
     let(:id) { resource_link.id }
     let(:params) { {} }
 
@@ -274,18 +270,9 @@ describe Lti::ResourceLinksController, type: :request do
     context "with non-admin user" do
       before { user_session(student_in_course(account:).user) }
 
-      it "returns 401" do
+      it "returns 403" do
         subject
-        expect(response).to be_unauthorized
-      end
-    end
-
-    context "with flag disabled" do
-      before { account.disable_feature!(:lti_resource_links_api) }
-
-      it "returns 404" do
-        subject
-        expect(response).to be_not_found
+        expect(response).to be_forbidden
       end
     end
 
@@ -300,16 +287,26 @@ describe Lti::ResourceLinksController, type: :request do
     end
 
     context "with url param" do
-      let(:url) { "https://example.com/lti/launch" }
+      let(:url) { resource_link.original_context_external_tool.url + "/deeplink" }
       let(:params) { { url: } }
 
       it "updates the resource link" do
         subject
+        expect(response).to be_successful
         expect(resource_link.reload.url).to eq(url)
       end
 
       context "invalid" do
         let(:url) { "hello world!" }
+
+        it "returns 422" do
+          subject
+          expect(response).to be_unprocessable
+        end
+      end
+
+      context "does not match tool url" do
+        let(:url) { "https://othertool.com/lti/launch" }
 
         it "returns 422" do
           subject
@@ -354,13 +351,56 @@ describe Lti::ResourceLinksController, type: :request do
         end
       end
     end
+
+    context "with tool id" do
+      let(:tool2) { registration.new_external_tool(account) }
+      let(:params) { { context_external_tool_id: tool2.id } }
+
+      it "updates the resource link" do
+        subject
+        expect(response).to be_successful
+        expect(resource_link.reload.context_external_tool_id).to eq(tool2.id)
+      end
+
+      context "invalid" do
+        let(:params) { { context_external_tool_id: 0 } }
+
+        it "returns 422" do
+          subject
+          expect(response).to be_unprocessable
+        end
+      end
+
+      context "that does not match original url" do
+        let(:registration) do
+          lti_registration_with_tool(account:,
+                                     configuration_params: {
+                                       target_link_uri: "https://otherurl.com",
+                                       oidc_initiation_url: "https://otherurl.com/oidc",
+                                       domain: "otherurl.com",
+                                       placements: [
+                                         {
+                                           placement: "course_navigation",
+                                         }
+                                       ]
+                                     })
+        end
+        let(:tool2) { registration.deployments.first }
+        let(:params) { { context_external_tool_id: tool2.id } }
+
+        it "returns 422" do
+          subject
+          expect(response).to be_unprocessable
+        end
+      end
+    end
   end
 
   describe "POST #create" do
     subject { post "/api/v1/courses/#{course.id}/lti_resource_links", params: }
 
     let(:custom) { { "hello" => "world" } }
-    let(:url) { "https://example.com/lti/launch" }
+    let(:url) { "#{tool.url}/launch" }
     let(:title) { "My LTI Link" }
     let(:params) { { url:, custom:, title: } }
 
@@ -376,18 +416,9 @@ describe Lti::ResourceLinksController, type: :request do
     context "with non-admin user" do
       before { user_session(student_in_course(account:).user) }
 
-      it "returns 401" do
+      it "returns 403" do
         subject
-        expect(response).to be_unauthorized
-      end
-    end
-
-    context "with flag disabled" do
-      before { account.disable_feature!(:lti_resource_links_api) }
-
-      it "returns 404" do
-        subject
-        expect(response).to be_not_found
+        expect(response).to be_forbidden
       end
     end
 
@@ -438,8 +469,8 @@ describe Lti::ResourceLinksController, type: :request do
 
     let(:params) do
       [
-        { url: "https://example.com/lti/launch", title: "My LTI Link 1" },
-        { url: "https://example.com/lti/launch", title: "My LTI Link 2", custom: { "hello" => "world" } }
+        { url: tool.url, title: "My LTI Link 1" },
+        { url: tool.url, title: "My LTI Link 2", custom: { "hello" => "world" } }
       ]
     end
 
@@ -455,18 +486,9 @@ describe Lti::ResourceLinksController, type: :request do
     context "with non-admin user" do
       before { user_session(student_in_course(account:).user) }
 
-      it "returns 401" do
+      it "returns 403" do
         subject
-        expect(response).to be_unauthorized
-      end
-    end
-
-    context "with flag disabled" do
-      before { account.disable_feature!(:lti_resource_links_api) }
-
-      it "returns 404" do
-        subject
-        expect(response).to be_not_found
+        expect(response).to be_forbidden
       end
     end
 
@@ -479,10 +501,10 @@ describe Lti::ResourceLinksController, type: :request do
       expect { subject }.to change { course.lti_resource_links.count }.by(2)
       first = course.lti_resource_links.find_by(title: "My LTI Link 1")
       expect(first.custom).to be_nil
-      expect(first.url).to eq("https://example.com/lti/launch")
+      expect(first.url).to eq(params[0][:url])
       second = course.lti_resource_links.find_by(title: "My LTI Link 2")
       expect(second.custom).to eq({ "hello" => "world" })
-      expect(second.url).to eq("https://example.com/lti/launch")
+      expect(second.url).to eq(params[1][:url])
     end
 
     it "returns the resource links" do
@@ -563,18 +585,9 @@ describe Lti::ResourceLinksController, type: :request do
     context "with non-admin user" do
       before { user_session(student_in_course(account:).user) }
 
-      it "returns 401" do
+      it "returns 403" do
         subject
-        expect(response).to be_unauthorized
-      end
-    end
-
-    context "with flag disabled" do
-      before { account.disable_feature!(:lti_resource_links_api) }
-
-      it "returns 404" do
-        subject
-        expect(response).to be_not_found
+        expect(response).to be_forbidden
       end
     end
 

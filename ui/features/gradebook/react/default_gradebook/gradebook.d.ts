@@ -151,6 +151,7 @@ export type GradebookOptions = {
   multiselect_gradebook_filters_enabled: boolean
   outcome_gradebook_enabled: boolean
   performance_controls: PerformanceControlValues
+  post_grades_enhanced_modal: boolean
   post_grades_feature: boolean
   post_grades_ltis: Lti[]
   post_manually: boolean
@@ -176,6 +177,7 @@ export type GradebookOptions = {
   stickers_enabled: boolean
   student_groups: StudentGroupCategoryMap
   user_asset_string: string
+  performance_improvements_for_gradebook: boolean
   teacher_notes: {
     hidden: boolean
     id: string
@@ -292,6 +294,7 @@ export type FilterType =
   | 'section'
   | 'start-date'
   | 'student-group'
+  | 'non-collaborative-group'
   | 'submissions'
   | 'unposted'
 

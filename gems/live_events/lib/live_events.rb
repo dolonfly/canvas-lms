@@ -24,6 +24,7 @@ module LiveEvents
   class << self
     attr_accessor :logger, :cache, :statsd, :on_work_unit_end
     attr_reader :stream_client
+    attr_writer :retry_throttled_events
     attr_reader :kafka_brokers_client
 
     # rubocop:disable Style/TrivialAccessors
@@ -50,6 +51,10 @@ module LiveEvents
     def max_queue_size
       @max_queue_size.call
     end
+
+    def retry_throttled_events
+      @retry_throttled_events&.call
+    end
     # rubocop:enable Style/TrivialAccessors
 
     require "live_events/client"
@@ -71,7 +76,7 @@ module LiveEvents
     end
 
     # Post an event for the current account.
-    def post_event(event_name:, payload:, time: Time.now, context: nil, partition_key: nil)
+    def post_event(event_name:, payload:, time: Time.zone.now, context: nil, partition_key: nil)
       if LiveEvents::Client.config
         context ||= materialized_context
         client.post_event(event_name, payload, time, context, partition_key)
@@ -91,7 +96,7 @@ module LiveEvents
         if use_kafka?
           @worker = LiveEvents::AsyncWorkerForKafka.new(kafka_brokers_client: client.kafka_brokers_client, kafka_broker_topic: client.kafka_broker_topic)
         else
-          @worker = LiveEvents::AsyncWorker.new(stream_client: client.stream_client, stream_name: client.stream_name)
+          @worker = LiveEvents::AsyncWorker.new(stream_client: client.stream_client, stream_name: client.stream_name, retry_throttled_events:)
         end
 
         @launched_pid = Process.pid
@@ -117,7 +122,7 @@ module LiveEvents
         context = Thread.current[:live_events_ctx] = context.call
       end
       if context.blank?
-        LiveEvents.statsd&.increment("live_events.missing_context")
+        LiveEvents.statsd&.distributed_increment("live_events.missing_context")
       end
       context
     end

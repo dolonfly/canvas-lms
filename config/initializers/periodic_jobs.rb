@@ -49,7 +49,7 @@ class PeriodicJobs
     run_at
   end
 
-  def self.with_each_shard_by_database_in_region(klass, method, *args, jitter: nil, local_offset: false, connection_class: nil, error_callback: nil)
+  def self.with_each_shard_by_database_in_region(klass, method, *, jitter: nil, local_offset: false, connection_class: nil, error_callback: nil)
     error_callback ||= -> { Canvas::Errors.capture_exception(:periodic_job, $ERROR_INFO) }
 
     Shard.with_each_shard(Shard.in_current_region, exception: error_callback) do
@@ -65,39 +65,43 @@ class PeriodicJobs
       dj_params[:run_at] = compute_run_at(jitter:, local_offset:)
 
       current_shard.activate do
-        klass.delay(**dj_params).__send__(method, *args)
+        klass.delay(**dj_params).__send__(method, *)
       end
     end
   end
 end
 
 def with_each_job_cluster(klass, method, *, jitter: nil, local_offset: false)
-  DatabaseServer.send_in_each_region(
-    PeriodicJobs,
-    :with_each_shard_by_database_in_region,
-    { singleton: "periodic:region: #{klass}.#{method}" },
-    klass,
-    method,
-    *,
-    jitter:,
-    local_offset:,
-    connection_class: Delayed::Backend::ActiveRecord::AbstractJob
-  )
+  Canvas::CrossRegionQueryMetrics.ignore do
+    DatabaseServer.send_in_each_region(
+      PeriodicJobs,
+      :with_each_shard_by_database_in_region,
+      { singleton: "periodic:region: #{klass}.#{method}" },
+      klass,
+      method,
+      *,
+      jitter:,
+      local_offset:,
+      connection_class: Delayed::Backend::ActiveRecord::AbstractJob
+    )
+  end
 end
 
 def with_each_shard_by_database(klass, method, *, jitter: nil, local_offset: false, error_callback: nil)
-  DatabaseServer.send_in_each_region(
-    PeriodicJobs,
-    :with_each_shard_by_database_in_region,
-    { singleton: "periodic:region: #{klass}.#{method}" },
-    klass,
-    method,
-    *,
-    jitter:,
-    local_offset:,
-    connection_class: ActiveRecord::Base,
-    error_callback:
-  )
+  Canvas::CrossRegionQueryMetrics.ignore do
+    DatabaseServer.send_in_each_region(
+      PeriodicJobs,
+      :with_each_shard_by_database_in_region,
+      { singleton: "periodic:region: #{klass}.#{method}" },
+      klass,
+      method,
+      *,
+      jitter:,
+      local_offset:,
+      connection_class: ActiveRecord::Base,
+      error_callback:
+    )
+  end
 end
 
 Rails.configuration.after_initialize do
@@ -228,7 +232,7 @@ Rails.configuration.after_initialize do
   end
 
   Delayed::Periodic.cron "Auditors::ActiveRecord::Partitioner.prune", "0 0 * * 6" do
-    if Time.now.day >= 3
+    if Time.zone.now.day >= 3
       with_each_shard_by_database(
         Auditors::ActiveRecord::Partitioner, :prune, jitter: 30.minutes, local_offset: true
       )
@@ -240,7 +244,7 @@ Rails.configuration.after_initialize do
   end
 
   Delayed::Periodic.cron "Quizzes::QuizSubmissionEventPartitioner.prune", "0 0 * * 6" do
-    if Time.now.day >= 3
+    if Time.zone.now.day >= 3
       with_each_shard_by_database(
         Quizzes::QuizSubmissionEventPartitioner, :prune, jitter: 30.minutes, local_offset: true
       )
@@ -252,7 +256,7 @@ Rails.configuration.after_initialize do
   end
 
   Delayed::Periodic.cron "Messages::Partitioner.prune", "0 0 * * 6" do
-    if Time.now.day >= 3
+    if Time.zone.now.day >= 3
       with_each_shard_by_database(
         Messages::Partitioner, :prune, jitter: 30.minutes, local_offset: true
       )
@@ -269,6 +273,8 @@ Rails.configuration.after_initialize do
     end
 
     AuthenticationProvider::SAML::Federation.descendants.each do |federation|
+      next if federation::MDQ
+
       Delayed::Periodic.cron "AuthenticationProvider::SAML::#{federation.class_name}.refresh_providers", "45 0 * * *" do
         DatabaseServer.send_in_each_region(federation,
                                            :refresh_providers,
@@ -307,6 +313,10 @@ Rails.configuration.after_initialize do
 
   Delayed::Periodic.cron "MissingPolicyApplicator.apply_missing_deductions", "*/5 * * * *", priority: Delayed::LOW_PRIORITY do
     with_each_shard_by_database(MissingPolicyApplicator, :apply_missing_deductions)
+  end
+
+  Delayed::Periodic.cron "ConcludedGradingStandardSetter.preserve_grading_standard_inheritance", "*/5 * * * *", priority: Delayed::LOW_PRIORITY do
+    with_each_shard_by_database(ConcludedGradingStandardSetter, :preserve_grading_standard_inheritance)
   end
 
   Delayed::Periodic.cron "Assignment.clean_up_duplicating_assignments", "*/15 * * * *", priority: Delayed::LOW_PRIORITY do

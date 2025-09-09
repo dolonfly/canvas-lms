@@ -360,6 +360,11 @@ class AppointmentGroupsController < ApplicationController
                     status: :bad_request
     end
 
+    if contexts.any?(&:horizon_course?)
+      return render json: { error: t("cannot create an appointment group for a Canvas Career course") },
+                    status: :bad_request
+    end
+
     if value_to_boolean(params[:appointment_group][:allow_observer_signup]) && contexts.any? { |c| !c.is_a?(Course) || !c.account.allow_observers_in_appointment_groups? }
       return render json: { error: "cannot allow observers to sign up for appointment groups in this course" },
                     status: :forbidden
@@ -588,7 +593,7 @@ class AppointmentGroupsController < ApplicationController
       return render json: [] unless @group.participant_type == type
 
       render json: Api.paginate(
-        @group.possible_participants(registration_status: params[:registration_status]),
+        @group.possible_participants(registration_status: params[:registration_status], context_code: params[:context_code], current_user: @current_user),
         self,
         send(:"api_v1_appointment_group_#{params[:action]}_url", @group)
       ).map(&)

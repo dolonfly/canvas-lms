@@ -31,8 +31,8 @@ module Services
         @message.user.account.root_account.enable_feature!(:notification_service)
         @message.save!
         @message.to = "testing123"
-        @at = AccessToken.create!(user: @user, developer_key: DeveloperKey.default)
-        @at2 = AccessToken.create!(user: @user, developer_key: DeveloperKey.default)
+        @at = AccessToken.create!(user: @user, developer_key: DeveloperKey.default, purpose: "at")
+        @at2 = AccessToken.create!(user: @user, developer_key: DeveloperKey.default, purpose: "at2")
       end
 
       before do
@@ -46,15 +46,8 @@ module Services
         expect { @message.deliver }.not_to raise_error
       end
 
-      it "processes twitter message type" do
-        @user.user_services.create!(service: "twitter", service_user_name: "user", service_user_id: "user", visible: true)
-        expect(@queue).to receive(:send_message).once
-        @message.path_type = "twitter"
-        expect { @message.deliver }.not_to raise_error
-      end
-
       it "processes slack message type" do
-        encrypted_slack_key, salt = Canvas::Security.encrypt_password("testkey".to_s, "instructure_slack_encrypted_key")
+        encrypted_slack_key, salt = Canvas::Security.encrypt_password("testkey", "instructure_slack_encrypted_key")
         @account.settings[:encrypted_slack_key] = encrypted_slack_key
         @account.settings[:encrypted_slack_key_salt] = salt
         @account.save!
@@ -65,7 +58,7 @@ module Services
       end
 
       it "expects slack to not call mailer create_message" do
-        encrypted_slack_key, salt = Canvas::Security.encrypt_password("testkey".to_s, "instructure_slack_encrypted_key")
+        encrypted_slack_key, salt = Canvas::Security.encrypt_password("testkey", "instructure_slack_encrypted_key")
         @account.settings[:encrypted_slack_key] = encrypted_slack_key
         @account.settings[:encrypted_slack_key_salt] = salt
         @account.save!

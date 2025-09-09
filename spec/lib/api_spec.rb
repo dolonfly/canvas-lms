@@ -52,7 +52,7 @@ describe Api do
     end
 
     it "does not find a missing record" do
-      expect { @api.api_find(User, (User.all.map(&:id).max + 1)) }.to raise_error(ActiveRecord::RecordNotFound)
+      expect { @api.api_find(User, User.all.map(&:id).max + 1) }.to raise_error(ActiveRecord::RecordNotFound)
     end
 
     it "finds an existing sis_id record" do
@@ -223,7 +223,7 @@ describe Api do
 
     it "finds group by lti_context_id" do
       lti_group = Group.create!(context: course_factory)
-      Lti::Asset.opaque_identifier_for(lti_group)
+      Lti::V1p1::Asset.opaque_identifier_for(lti_group)
       expect(@api.api_find(Group, "lti_context_id:#{lti_group.lti_context_id}")).to eq lti_group
     end
 
@@ -681,7 +681,7 @@ describe Api do
     end
 
     it "properly generates an escaped arg string" do
-      expect(Api.relation_for_sis_mapping_and_columns(User, { "id" => { ids: ["1", 2, 3] } }, { scope: "scope" }, Account.default).to_sql).to match(/\(scope = #{Account.default.id} AND \(id IN \('1',2,3\)\)\)/)
+      expect(Api.relation_for_sis_mapping_and_columns(User, { "id" => { ids: ["1", 2, 3] } }, { root_account_id_column: "scope" }, Account.default).to_sql).to match(/\(scope = #{Account.default.id} AND \(id IN \('1', 2, 3\)\)\)/)
     end
 
     it "works with no columns" do
@@ -689,11 +689,11 @@ describe Api do
     end
 
     it "adds in joins if the sis_mapping has some with columns" do
-      expect(Api.relation_for_sis_mapping_and_columns(User, { "id" => { ids: ["1", 2, 3] } }, { scope: "scope", joins: "some joins" }, Account.default).eager_load_values).to eq ["some joins"]
+      expect(Api.relation_for_sis_mapping_and_columns(User, { "id" => { ids: ["1", 2, 3] } }, { root_account_id_column: "scope", joins: "some joins" }, Account.default).eager_load_values).to eq ["some joins"]
     end
 
     it "works with a few different column types and account scopings" do
-      expect(Api.relation_for_sis_mapping_and_columns(User, { "id1" => { ids: [1, 2, 3] }, "id2" => { ids: %w[a b c] }, "id3" => { ids: %w[s1 s2 s3] } }, { scope: "some_scope", is_not_scoped_to_account: ["id3"] }, Account.default).to_sql).to match(/\(\(some_scope = #{Account.default.id} AND \(id1 IN \(1,2,3\)\)\) OR \(some_scope = #{Account.default.id} AND \(id2 IN \('a','b','c'\)\)\) OR id3 IN \('s1','s2','s3'\)\)/)
+      expect(Api.relation_for_sis_mapping_and_columns(User, { "id1" => { ids: [1, 2, 3] }, "id2" => { ids: %w[a b c] }, "id3" => { ids: %w[s1 s2 s3] } }, { root_account_id_column: "some_scope", is_not_scoped_to_account: ["id3"] }, Account.default).to_sql).to match(/\(\(some_scope = #{Account.default.id} AND \(id1 IN \(1, 2, 3\)\)\) OR \(some_scope = #{Account.default.id} AND \(id2 IN \('a', 'b', 'c'\)\)\) OR id3 IN \('s1', 's2', 's3'\)\)/)
     end
 
     it "fails if we're scoping to an account and the scope isn't provided" do
@@ -888,6 +888,46 @@ describe Api do
       end
     end
 
+    context "with location tag" do
+      let(:proxy_instance) { klass.new }
+
+      before do
+        proxy_instance.instance_variable_set(:@domain_root_account, Account.default)
+        proxy_instance.extend Rails.application.routes.url_helpers
+        proxy_instance.extend ActionDispatch::Routing::UrlFor
+
+        allow(proxy_instance).to receive_messages(
+          request: nil,
+          get_host_and_protocol_from_request: ["school.instructure.com", "https"],
+          url_options: {}
+        )
+      end
+
+      it "adds location to html file tags" do
+        student_in_course
+        @course.root_account.enable_feature!(:file_association_access)
+        att = attachment_model(context: @course)
+        att2 = attachment_model(context: @student)
+
+        html = <<~HTML
+          <iframe src="/media_attachments_iframe/#{att.id}"></iframe>
+          <img src="/courses/#{@course.id}/files/#{att.id}/preview">
+          <img src="/users/#{@student.id}/files/#{att2.id}/preview">
+          <img src="https://dummy-web.test/asdf">
+        HTML
+
+        location = "course_#{@course.id}"
+
+        expected = <<~HTML
+          <iframe src="https://school.instructure.com/media_attachments_iframe/#{att.id}?location=#{location}" loading="lazy"></iframe>
+          <img src="https://school.instructure.com/courses/#{@course.id}/files/#{att.id}/preview?location=#{location}" loading="lazy" data-api-endpoint="https://school.instructure.com/api/v1/courses/#{@course.id}/files/#{att.id}" data-api-returntype="File">
+          <img src="https://school.instructure.com/users/#{@student.id}/files/#{att2.id}/preview?location=#{location}" loading="lazy" data-api-endpoint="https://school.instructure.com/api/v1/users/#{@student.id}/files/#{att2.id}" data-api-returntype="File">
+          <img src="https://dummy-web.test/asdf" loading="lazy">
+        HTML
+        expect(proxy_instance.api_user_content(html, @course, @student, location: @course.asset_string)).to eq expected
+      end
+    end
+
     context "sharding" do
       specs_require_sharding
 
@@ -906,24 +946,31 @@ describe Api do
           )
         end
 
-        it "transposes ids in urls, leaving equation images alone" do
-          html = @shard1.activate do
-            a = Account.create!
-            student_in_course(account: a, active_all: true)
-            @file = attachment_model(context: @course, folder: Folder.root_folders(@course).first)
-            <<~HTML
-              <img src="/equation_images/1%2520%252B%25201%2520%252B%2520n%2520%252B%25202%250A2%2520%252B%25201n%2520%252B%25202n%250A3%2520%252B%2520n%250Ax%2520%252B%250A4%2520%252B%250An?scale=1">
-              <img src="/courses/#{@course.id}/files/#{@file.id}/download?wrap=1" data-api-returntype="File" data-api-endpoint="https://canvas.vanity.edu/api/v1/courses/#{@course.id}/files/#{@file.id}">
-              <a href="/courses/#{@course.id}/pages/module-1" data-api-returntype="Page" data-api-endpoint="https://canvas.vanity.edu/api/v1/courses/#{@course.id}/pages/module-1">link</a>
-            HTML
+        context "with double testing disable_adding_uuid_verifier_in_api FF" do
+          before do
+            @html = @shard1.activate do
+              a = Account.create!
+              student_in_course(account: a, active_all: true)
+              @file = attachment_model(context: @course, folder: Folder.root_folders(@course).first)
+              <<~HTML
+                <img src="/equation_images/1%2520%252B%25201%2520%252B%2520n%2520%252B%25202%250A2%2520%252B%25201n%2520%252B%25202n%250A3%2520%252B%2520n%250Ax%2520%252B%250A4%2520%252B%250An?scale=1">
+                <img src="/courses/#{@course.id}/files/#{@file.id}/download?wrap=1" data-api-returntype="File" data-api-endpoint="https://canvas.vanity.edu/api/v1/courses/#{@course.id}/files/#{@file.id}">
+                <a href="/courses/#{@course.id}/pages/module-1" data-api-returntype="Page" data-api-endpoint="https://canvas.vanity.edu/api/v1/courses/#{@course.id}/pages/module-1">link</a>
+              HTML
+            end
           end
 
-          res = proxy_instance.api_user_content(html, @course, @student)
-          expect(res).to eq <<~HTML
-            <img src="https://school.instructure.com/equation_images/1%2520%252B%25201%2520%252B%2520n%2520%252B%25202%250A2%2520%252B%25201n%2520%252B%25202n%250A3%2520%252B%2520n%250Ax%2520%252B%250A4%2520%252B%250An?scale=1">
-            <img src="https://school.instructure.com/courses/#{@shard1.id}~#{@course.local_id}/files/#{@shard1.id}~#{@file.local_id}/download?verifier=#{@file.uuid}&amp;wrap=1" data-api-returntype="File" data-api-endpoint="https://school.instructure.com/api/v1/courses/#{@shard1.id}~#{@course.local_id}/files/#{@shard1.id}~#{@file.local_id}">
-            <a href="https://school.instructure.com/courses/#{@shard1.id}~#{@course.local_id}/pages/module-1" data-api-returntype="Page" data-api-endpoint="https://school.instructure.com/api/v1/courses/#{@shard1.id}~#{@course.local_id}/pages/module-1">link</a>
-          HTML
+          double_testing_with_disable_adding_uuid_verifier_in_api_ff(attachment_variable_name: "file") do
+            it "transposes ids in urls, leaving equation images alone" do
+              Account.default.disable_feature!(:disable_adding_uuid_verifier_in_api) unless disable_adding_uuid_verifier_in_api
+              res = proxy_instance.api_user_content(@html, @course, @student)
+              expect(res).to eq <<~HTML
+                <img src="https://school.instructure.com/equation_images/1%2520%252B%25201%2520%252B%2520n%2520%252B%25202%250A2%2520%252B%25201n%2520%252B%25202n%250A3%2520%252B%2520n%250Ax%2520%252B%250A4%2520%252B%250An?scale=1" loading="lazy">
+                <img src="https://school.instructure.com/courses/#{@shard1.id}~#{@course.local_id}/files/#{@shard1.id}~#{@file.local_id}/download#{disable_adding_uuid_verifier_in_api ? "?" : "?verifier=#{@file.uuid}&amp;"}wrap=1" data-api-returntype="File" data-api-endpoint="https://school.instructure.com/api/v1/courses/#{@shard1.id}~#{@course.local_id}/files/#{@shard1.id}~#{@file.local_id}" loading="lazy">
+                <a href="https://school.instructure.com/courses/#{@shard1.id}~#{@course.local_id}/pages/module-1" data-api-returntype="Page" data-api-endpoint="https://school.instructure.com/api/v1/courses/#{@shard1.id}~#{@course.local_id}/pages/module-1">link</a>
+              HTML
+            end
+          end
         end
       end
 
@@ -1238,6 +1285,109 @@ describe Api do
     it "returns url with a combination of items" do
       url = @api.templated_url(:course_assignment_url, "{courses.id}", "1}")
       expect(url).to eq "http://www.example.com/courses/{courses.id}/assignments/1%7D"
+    end
+  end
+
+  context "api_user_content with YouTube banner injection" do
+    let(:test_controller) do
+      Class.new(ApplicationController) do
+        include Api
+        attr_accessor :current_user, :context, :domain_root_account, :include_mobile, :native_app_user_agent
+
+        def initialize
+          @current_user = nil
+          @context = nil
+          @domain_root_account = nil
+          @include_mobile = false
+          @native_app_user_agent = nil
+          super
+        end
+
+        def request
+          @request ||= Struct.new(:user_agent, :host_with_port, :ssl?) do
+            def initialize(user_agent, host_with_port = "example.com", ssl: false)
+              super(user_agent, host_with_port, ssl)
+            end
+          end.new(@native_app_user_agent)
+        end
+      end
+    end
+
+    let(:controller) { test_controller.new }
+    let(:course) { course_model }
+    let(:user) { user_model }
+
+    let(:html_with_youtube) do
+      '<p>Check out this video:</p><iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ" width="560" height="315" lazy="true" loading="lazy"></iframe>'
+    end
+
+    let(:html_without_youtube) do
+      "<p>This is regular content without any videos.</p>"
+    end
+
+    before do
+      controller.current_user = user
+      controller.context = course
+      controller.domain_root_account = Account.default
+    end
+
+    context "when accessed from native mobile app" do
+      before do
+        controller.native_app_user_agent = "iosTeacher/1.0" # Simulate Canvas iOS Teacher app
+      end
+
+      it "injects YouTube banner when YouTube embeds are present" do
+        result = controller.api_user_content(html_with_youtube)
+
+        expect(result).to include("This page has embedded YouTube content that may display advertisements.")
+        expect(result).to include(html_with_youtube)
+      end
+
+      it "does not inject banner when no YouTube embeds are present" do
+        result = controller.api_user_content(html_without_youtube)
+
+        expect(result).not_to include("This page has embedded YouTube content that may display advertisements.")
+        expect(result).to include(html_without_youtube)
+      end
+    end
+
+    context "when accessed from web browser" do
+      before do
+        controller.native_app_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" # Regular web browser
+      end
+
+      it "does not inject YouTube banner even when YouTube embeds are present" do
+        result = controller.api_user_content(html_with_youtube)
+
+        expect(result).not_to include("This page has embedded YouTube content that may display advertisements.")
+        expect(result).to include(html_with_youtube)
+      end
+    end
+
+    context "when mobile_device? method is not available" do
+      let(:controller_without_mobile) do
+        Class.new do
+          include Api
+          attr_accessor :current_user, :context, :domain_root_account
+
+          def initialize
+            @current_user = nil
+            @context = nil
+            @domain_root_account = nil
+          end
+        end.new
+      end
+
+      it "does not inject banner and does not raise error" do
+        controller_without_mobile.current_user = user
+        controller_without_mobile.context = course
+        controller_without_mobile.domain_root_account = Account.default
+
+        result = controller_without_mobile.api_user_content(html_with_youtube)
+
+        expect(result).not_to include("YouTube Content Detected")
+        expect(result).to include(html_with_youtube)
+      end
     end
   end
 end

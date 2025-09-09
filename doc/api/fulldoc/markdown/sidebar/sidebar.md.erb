@@ -14,7 +14,6 @@
     * [OAuth2 Endpoints](file.oauth_endpoints.md)
     * [Developer Keys](file.developer_keys.md)
   * Resources
-    * [All Resources Reference](all_resources.md)
     <% options[:resources].each do |(resource, controllers)|
       next if resource.include?('Plagiarism')
       link = url_for("#{topicize resource}.md") %>
@@ -24,18 +23,22 @@
     * [Outcomes CSV Format](file.outcomes_csv.md)
   * Group Categories
     * [Group Categories CSV Format](file.group_category_csv.md)
+    * [Differentiation Tags CSV Format](file.differentiation_tags_csv.md)
   * SIS
     * [SIS CSV Format](file.sis_csv.md)
   * External Tools
     * LTI
       * [Introduction](file.tools_intro.md)
       * [Registration](file.registration.md)
+      * [Launch Overview](file.lti_launch_overview.md)
       * [Configuring](file.lti_dev_key_config.md)
       * [Variable Substitutions](file.tools_variable_substitutions.md)
       * [Deep Linking](file.content_item.md)
       * [Grading](file.assignment_tools.md)
       * [Provisioning](file.provisioning.md)
       * [PostMessage](file.lti_window_post_message.md)
+      * [Platform Notification Service](file.pns.md)
+      * [Legacy 1.1 Configuration](file.tools_xml.md)
       * Placements
         * [Placements Overview](file.placements_overview.md)
         * [Navigation](file.navigation_tools.md)

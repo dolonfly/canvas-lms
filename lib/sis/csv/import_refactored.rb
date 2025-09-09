@@ -52,8 +52,11 @@ module SIS
                      enrollment
                      admin
                      group_category
+                     differentiation_tag_set
                      group
+                     differentiation_tag
                      group_membership
+                     differentiation_tag_membership
                      grade_publishing_results
                      user_observer].freeze
 
@@ -119,7 +122,7 @@ module SIS
             Dir[File.join(tmp_dir, "**/**")].each do |fn|
               next if File.directory?(fn) || !!(fn =~ IGNORE_FILES)
 
-              file_name = fn[tmp_dir.size + 1..]
+              file_name = fn[(tmp_dir.size + 1)..]
               att = create_batch_attachment(File.join(tmp_dir, file_name))
               process_file(tmp_dir, file_name, att)
             end
@@ -241,7 +244,7 @@ module SIS
           parallel_importer.abort
           return
         end
-        InstStatsd::Statsd.increment("sis_parallel_worker", tags: { attempt:, retry: in_retry })
+        InstStatsd::Statsd.distributed_increment("sis_parallel_worker", tags: { attempt:, retry: in_retry })
 
         importer_type = parallel_importer.importer_type.to_sym
         importer_object = SIS::CSV.const_get(importer_type.to_s.camelcase + "Importer").new(self)
@@ -400,7 +403,7 @@ module SIS
             return
           end
           begin
-            ::CSV.foreach(csv[:fullpath], **CSVBaseImporter::PARSE_ARGS.merge(headers: false)) do |row|
+            ::CSV.foreach(csv[:fullpath], **CSVBaseImporter::PARSE_ARGS, headers: false) do |row|
               row.each { |header| header&.downcase! }
               importer = IMPORTERS.index do |type|
                 if SIS::CSV.const_get(type.to_s.camelcase + "Importer").send(type.to_s + "_csv?", row)

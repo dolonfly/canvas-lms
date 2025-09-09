@@ -16,13 +16,14 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import gql from 'graphql-tag'
-import {executeQuery} from '@canvas/query/graphql'
+import {gql} from '@apollo/client'
+import {executeQuery} from '@canvas/graphql'
 import type {
   RubricQueryResponse,
   DeleteRubricQueryResponse,
   DuplicateRubricQueryResponse,
   archiveRubricResponse,
+  // @ts-expect-error
   RubricImport,
 } from '../types/Rubric'
 import getCookie from '@instructure/get-cookie'
@@ -31,10 +32,11 @@ import type {Rubric, RubricCriterion} from '@canvas/rubrics/react/types/rubric'
 import type {UsedLocation} from '@canvas/grading_scheme/gradingSchemeApiModel'
 import doFetchApi from '@canvas/do-fetch-api-effect'
 
+const rubricsPerPage = 100
 const COURSE_RUBRICS_QUERY = gql`
-  query CourseRubricsQuery($courseId: ID!) {
+  query CourseRubricsQuery($courseId: ID!, $after: String) {
     course(id: $courseId) {
-      rubricsConnection {
+      rubricsConnection(first: ${rubricsPerPage}, after: $after) {
         nodes {
           id: _id
           buttonDisplay
@@ -51,6 +53,8 @@ const COURSE_RUBRICS_QUERY = gql`
             longDescription
             description
             ignoreForScoring
+            learningOutcomeId
+            criterionUseRange
           }
           hasRubricAssociations
           hidePoints
@@ -60,15 +64,19 @@ const COURSE_RUBRICS_QUERY = gql`
           title
           workflowState
         }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
     }
   }
 `
 
 const ACCOUNT_RUBRICS_QUERY = gql`
-  query AccountRubricsQuery($accountId: ID!) {
+  query AccountRubricsQuery($accountId: ID!, $after: String) {
     account(id: $accountId) {
-      rubricsConnection {
+      rubricsConnection(first: ${rubricsPerPage}, after: $after) {
         nodes {
           id: _id
           buttonDisplay
@@ -84,6 +92,8 @@ const ACCOUNT_RUBRICS_QUERY = gql`
             longDescription
             description
             ignoreForScoring
+            learningOutcomeId
+            criterionUseRange
           }
           hasRubricAssociations
           hidePoints
@@ -92,6 +102,10 @@ const ACCOUNT_RUBRICS_QUERY = gql`
           ratingOrder
           title
           workflowState
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
         }
       }
     }
@@ -121,6 +135,7 @@ const RUBRIC_PREVIEW_QUERY = gql`
           title
         }
       }
+      hidePoints
       title
       ratingOrder
       freeFormCriterionComments
@@ -158,7 +173,15 @@ type CourseRubricQueryResponse = {
 }
 
 type RubricPreviewQueryResponse = {
-  rubric: Pick<Rubric, 'criteria' | 'title' | 'ratingOrder' | 'freeFormCriterionComments'>
+  rubric: Pick<
+    Rubric,
+    | 'criteria'
+    | 'title'
+    | 'ratingOrder'
+    | 'freeFormCriterionComments'
+    | 'pointsPossible'
+    | 'hidePoints'
+  >
 }
 
 type AccountRubricQueryResponse = {
@@ -182,6 +205,7 @@ type DuplicateRubricProps = {
   pointsPossible: number
   buttonDisplay?: string
   ratingOrder?: string
+  workflowState?: string
 }
 
 type RubricArchiveResponse = {
@@ -198,19 +222,27 @@ type RubricArchiveResponse = {
 
 export type FetchRubricVariables = AccountRubricsQueryVariables | CourseRubricsQueryVariables
 
-export const fetchCourseRubrics = async (queryVariables: FetchRubricVariables) => {
-  const {course} = await executeQuery<CourseRubricQueryResponse>(
-    COURSE_RUBRICS_QUERY,
-    queryVariables
-  )
+export const fetchCourseRubrics = async (
+  pageParam: string | null,
+  queryVariables: FetchRubricVariables,
+) => {
+  const {course} = await executeQuery<CourseRubricQueryResponse>(COURSE_RUBRICS_QUERY, {
+    ...queryVariables,
+    after: pageParam,
+  })
+
   return course
 }
 
-export const fetchAccountRubrics = async (queryVariables: FetchRubricVariables) => {
-  const {account} = await executeQuery<AccountRubricQueryResponse>(
-    ACCOUNT_RUBRICS_QUERY,
-    queryVariables
-  )
+export const fetchAccountRubrics = async (
+  pageParam: string | null,
+  queryVariables: FetchRubricVariables,
+) => {
+  const {account} = await executeQuery<AccountRubricQueryResponse>(ACCOUNT_RUBRICS_QUERY, {
+    ...queryVariables,
+    after: pageParam,
+  })
+
   return account
 }
 
@@ -307,6 +339,7 @@ export const duplicateRubric = async ({
   criteria,
   ratingOrder,
   buttonDisplay,
+  workflowState,
 }: DuplicateRubricProps): Promise<DuplicateRubricQueryResponse> => {
   const urlPrefix = accountId ? `/accounts/${accountId}` : `/courses/${courseId}`
   const url = `${urlPrefix}/rubrics/`
@@ -319,6 +352,7 @@ export const duplicateRubric = async ({
       long_description: criterion.longDescription,
       points: criterion.points,
       learning_outcome_id: criterion.learningOutcomeId,
+      criterion_use_range: criterion.criterionUseRange,
       ratings: criterion.ratings.map(rating => ({
         description: rating.description,
         long_description: rating.longDescription,
@@ -344,6 +378,7 @@ export const duplicateRubric = async ({
         button_display: buttonDisplay,
         rating_order: ratingOrder,
         is_duplicate: true,
+        workflow_state: workflowState,
       },
       rubric_association: {
         association_id: accountId ?? courseId,
@@ -386,7 +421,7 @@ export const unarchiveRubric = async (rubricId: string): Promise<archiveRubricRe
 export const importRubric = async (
   file?: File,
   accountId?: string,
-  courseId?: string
+  courseId?: string,
 ): Promise<RubricImport> => {
   if (!file) {
     throw new Error('No file to import')
@@ -416,7 +451,7 @@ export const importRubric = async (
 export const fetchRubricImport = async (
   importId?: string,
   accountId?: string,
-  courseId?: string
+  courseId?: string,
 ): Promise<RubricImport> => {
   const urlPrefix = accountId ? `/accounts/${accountId}` : `/courses/${courseId}`
   const url = `/api/v1/${urlPrefix}/rubrics/upload/${importId ?? 'latest'}`
@@ -438,7 +473,7 @@ export const fetchRubricImport = async (
 export const downloadRubrics = async (
   courseId: string | undefined,
   accountId: string | undefined,
-  selectedRubricIds: string[]
+  selectedRubricIds: string[],
 ) => {
   let postUrl = ''
 
@@ -479,7 +514,7 @@ export const downloadRubrics = async (
 export const getImportedRubrics = async (
   importId: string,
   accountId?: string,
-  courseId?: string
+  courseId?: string,
 ): Promise<Rubric[]> => {
   const urlPrefix = accountId ? `/accounts/${accountId}` : `/courses/${courseId}`
   const url = `/api/v1/${urlPrefix}/rubrics/upload/${importId}/rubrics`

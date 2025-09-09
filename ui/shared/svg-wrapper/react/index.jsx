@@ -38,6 +38,9 @@ class SVGWrapper extends React.Component {
     if (newProps.url !== this.props.url) {
       this.fetchSVG()
     }
+    if (newProps.fillColor !== this.props.fillColor) {
+      this.setSVGFillColor(newProps.fillColor)
+    }
   }
 
   fetchSVG() {
@@ -52,18 +55,21 @@ class SVGWrapper extends React.Component {
 
         if (this.svg.nodeType !== ELEMENT_NODE && this.svg.nodeName !== 'SVG') {
           throw new Error(
-            `SVGWrapper: SVG Element must be returned by request to ${this.props.url}`
+            `SVGWrapper: SVG Element must be returned by request to ${this.props.url}`,
           )
         }
 
-        if (this.props.fillColor) {
-          this.svg.setAttribute('style', `fill:${this.props.fillColor}`)
-        }
-
+        this.setSVGFillColor(this.props.fillColor)
         this.svg.setAttribute('focusable', false)
+        this.rootSpan.innerHTML = ''
         this.rootSpan.appendChild(this.svg)
       },
     })
+  }
+
+  setSVGFillColor(color) {
+    if (!color || !this.svg) return
+    this.svg.setAttribute('style', `fill:${color}`)
   }
 
   render() {

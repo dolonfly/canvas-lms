@@ -16,123 +16,326 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
-import {useQuery} from '@tanstack/react-query'
-import {Heading} from '@instructure/ui-heading'
-import {useScope as useI18nScope} from '@canvas/i18n'
-import {ProgressBar} from '@instructure/ui-progress'
-import {Text} from '@instructure/ui-text'
-import {View} from '@instructure/ui-view'
-import filesEnv from '@canvas/files/react/modules/filesEnv'
-import {showFlashError} from '@canvas/alerts/react/FlashAlert'
-import formatMessage from '../../../../../packages/canvas-media/src/format-message'
-import friendlyBytes from '@canvas/files/util/friendlyBytes'
-import {Flex} from '@instructure/ui-flex'
-import {canvas} from '@instructure/ui-theme-tokens'
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {Alert} from '@instructure/ui-alerts'
 import {Responsive} from '@instructure/ui-responsive'
+import {canvas} from '@instructure/ui-themes'
 
-import TopLevelButtons from './TopLevelButtons'
+import {useScope as createI18nScope} from '@canvas/i18n'
+import {showFlashError} from '@canvas/alerts/react/FlashAlert'
+import {Checkbox} from '@instructure/ui-checkbox'
+import {getFilesEnv} from '../../utils/filesEnvUtils'
+import {FileManagementProvider} from '../contexts/FileManagementContext'
+import {RowFocusProvider, SELECT_ALL_FOCUS_STRING} from '../contexts/RowFocusContext'
+import {RowsProvider} from '../contexts/RowsContext'
 import FileFolderTable from './FileFolderTable'
+import FilesUsageBar from './FilesUsageBar'
+import SearchBar from './SearchBar'
+import {BBFolderWrapper, FileFolderWrapper} from '../../utils/fileFolderWrappers'
+import {NotFoundError, UnauthorizedError} from '../../utils/apiUtils'
+import {getUniqueId} from '../../utils/fileFolderUtils'
+import {useGetFolders} from '../hooks/useGetFolders'
+import {useHandleSelections} from '../hooks/useHandleSelections'
+import {File, Folder} from '../../interfaces/File'
+import {PER_PAGE, useGetPaginatedFiles} from '../hooks/useGetPaginatedFiles'
+import {FilesLayout} from '../layouts/FilesLayout'
+import TopLevelButtons from './FilesHeader/TopLevelButtons'
+import Breadcrumbs from './FileFolderTable/Breadcrumbs'
+import BulkActionButtons from './FileFolderTable/BulkActionButtons'
+import CurrentUploads from './FilesHeader/CurrentUploads'
+import CurrentDownloads from './FilesHeader/CurrentDownloads'
+import NotFoundArtwork from '@canvas/generic-error-page/react/NotFoundArtwork'
+import {FilesGenericSessionExpired} from './FilesGenericSessionExpired'
+import {BasicPagination} from './BasicPagination'
+import {usePreviewHandler} from '../hooks/usePreviewHandler'
+import {FilePreviewModal} from './FileFolderTable/FilePreviewModal'
 
-const I18n = useI18nScope('files_v2')
+const I18n = createI18nScope('files_v2')
 
-const fetchQuota = async (contextType: string, contextId: string) => {
-  const response = await fetch(`/api/v1/${contextType}/${contextId}/files/quota`)
-  if (!response.ok) {
-    throw new Error('Failed to fetch quota data')
-  }
-  return response.json()
-}
 interface FilesAppProps {
+  folders: Folder[]
   isUserContext: boolean
   size: 'small' | 'medium' | 'large'
 }
 
-const FilesApp = ({isUserContext, size}: FilesAppProps) => {
-  const contextType = filesEnv.contextType
-  const contextId = filesEnv.contextId
+const FilesApp = ({folders, isUserContext, size}: FilesAppProps) => {
+  const filesEnv = getFilesEnv()
+  const showingAllContexts = filesEnv.showingAllContexts
 
-  const {data, error} = useQuery(['quota'], () => fetchQuota(contextType, contextId))
+  const [currentRows, setCurrentRows] = useState<(File | Folder)[]>([])
+  const [paginationAlert, setPaginationAlert] = useState<string>('')
+  const [rowToFocus, setRowToFocus] = useState<number | SELECT_ALL_FOCUS_STRING | null>(null)
+  const [sessionExpired, setSessionExpired] = useState(false)
+  const currentFolderWrapper = useRef<BBFolderWrapper | null>(null)
+  const fileDropRef = useRef<HTMLInputElement | null>(null)
+  const selectAllRef = useRef<Checkbox | null>(null)
+  const actionButtonRefArray = useRef<React.RefObject<HTMLElement>[]>([])
 
-  const renderFilesUsageBar = () => {
-    if (error) {
-      showFlashError(I18n.t('An error occurred while loading files usage data'))(error as Error)
-    }
-
-    const {quota_used = 0, quota = 1} = data || {quota_used: 0, quota: 1}
-    const percentage = Math.round((quota_used / quota) * 100)
-
-    const filesUsageString = I18n.t('%{percentUsed} of %{quota} used', {
-      percentUsed: I18n.n(percentage, {percentage: true}),
-      quota: friendlyBytes(data?.quota) || 0,
-    })
-
-    return (
-      <ProgressBar
-        meterColor="brand"
-        screenReaderLabel={formatMessage('File Storage Quota Used')}
-        formatScreenReaderValue={() => filesUsageString}
-        renderValue={<Text>{filesUsageString}</Text>}
-        size="x-small"
-        valueMax={quota}
-        valueNow={quota_used}
-      />
-    )
+  const handleFileDropRef = (el: HTMLInputElement | null) => {
+    fileDropRef.current = el
   }
+  const handleActionButtonRef = (el: HTMLElement | null, i: number) => {
+    actionButtonRefArray.current[i] = {current: el}
+  }
+
+  const currentFolder = folders[folders.length - 1]
+  const folderId = currentFolder.id
+  const contextId = currentFolder.context_id
+  const contextType = currentFolder.context_type.toLowerCase()
+
+  const onSettled = useCallback(
+    (rows: (File | Folder)[]) => {
+      const currentFolderId = currentFolderWrapper.current?.id
+      if (currentFolderId !== currentFolder.id) {
+        currentFolderWrapper.current = new BBFolderWrapper(currentFolder)
+      }
+      currentFolderWrapper.current!.files.set(rows.map((row: any) => new FileFolderWrapper(row)))
+      setCurrentRows(rows)
+    },
+    [currentFolder],
+  )
+
+  const {
+    data: rows,
+    isFetching: isLoading,
+    error,
+    page,
+    search,
+    sort,
+  } = useGetPaginatedFiles({
+    folder: currentFolder,
+    onSettled,
+  })
+
+  // used to set focus after a move or delete action
+  useEffect(() => {
+    if (rowToFocus != null && !isLoading) {
+      if (currentRows?.length === 0) {
+        // empty table, focus on file drop
+        fileDropRef.current?.focus()
+      } else if (rowToFocus === SELECT_ALL_FOCUS_STRING) {
+        selectAllRef.current?.focus()
+      } else if (currentRows?.length) {
+        // focus on the next row from the row just moved or deleted
+        const rowToFocusIndex =
+          rowToFocus >= currentRows.length ? currentRows.length - 1 : rowToFocus
+        const menu = actionButtonRefArray.current[rowToFocusIndex]?.current
+        const focusable = menu?.querySelector('button')
+        ;(focusable as HTMLElement)?.focus()
+      }
+      setRowToFocus(null)
+    }
+  }, [rowToFocus, isLoading, currentRows?.length])
+
+  useEffect(() => {
+    if (error instanceof UnauthorizedError) {
+      window.location.href = '/login'
+    } else if (error) {
+      showFlashError(I18n.t('Failed to fetch files and folders.'))()
+    }
+  }, [error])
+
+  useEffect(() => {
+    if (!isLoading) {
+      setPaginationAlert(
+        I18n.t('Table page %{current} of %{total}', {
+          current: page.current,
+          total: page.totalPages,
+        }),
+      )
+    }
+  }, [isLoading, page.current, page.totalPages])
+
+  const canManageFilesForContext = (permission: string) => {
+    return filesEnv.userHasPermission({contextType, contextId}, permission)
+  }
+  const userCanAddFilesForContext = canManageFilesForContext('manage_files_add')
+  const userCanEditFilesForContext = canManageFilesForContext('manage_files_edit')
+  const userCanDeleteFilesForContext = canManageFilesForContext('manage_files_delete')
+  const userCanRestrictFilesForContext = userCanEditFilesForContext && contextType !== 'group'
+  const userCanManageFilesForContext =
+    userCanAddFilesForContext || userCanEditFilesForContext || userCanDeleteFilesForContext
+  const usageRightsRequiredForContext =
+    filesEnv.contextFor({contextType, contextId})?.usage_rights_required || false
+  const fileIndexMenuTools =
+    filesEnv.contextFor({contextType, contextId})?.file_index_menu_tools || []
+  const fileMenuTools = filesEnv.contextFor({contextType, contextId})?.file_menu_tools || []
+
+  const [selectionAnnouncement, setSelectionAnnouncement] = useState<string>('')
+
+  const rowIds = useMemo(() => {
+    return rows ? rows.map(row => getUniqueId(row)) : []
+  }, [rows])
+
+  const {selectedIds, selectionHandlers} = useHandleSelections(rowIds, setSelectionAnnouncement)
+
+  const currentFiles = useMemo(() => {
+    if (!currentRows) return []
+
+    return currentRows.filter((item): item is File => 'display_name' in item)
+  }, [currentRows])
+
+  const {previewState, previewHandlers} = usePreviewHandler({
+    collection: currentFiles,
+    contextType: contextType,
+    contextId: contextId,
+  })
+
   return (
-    <View as="div">
-      <Flex justifyItems="center" padding="none">
-        <Flex.Item shouldShrink={true} shouldGrow={true} textAlign="center">
-          <Flex
-            wrap="wrap"
-            margin="0 0 medium"
-            justifyItems="space-between"
-            direction={size === 'large' ? 'row' : 'column'}
-          >
-            <Flex.Item padding="small small small none" align="start">
-              <Heading level="h1">
-                {isUserContext ? I18n.t('All My Files') : I18n.t('Files')}
-              </Heading>
-            </Flex.Item>
-            <Flex.Item
-              padding="xx-small"
-              direction={size === 'small' ? 'column' : 'row'}
-              align={size === 'medium' ? 'start' : undefined}
-              overflowX="hidden"
-            >
-              <TopLevelButtons size={size} isUserContext={isUserContext} />
-            </Flex.Item>
-          </Flex>
-        </Flex.Item>
-      </Flex>
-      <FileFolderTable size={size} />
-      <Flex padding="small none none none">
-        <Flex.Item size="50%">{renderFilesUsageBar()}</Flex.Item>
-      </Flex>
-    </View>
+    <FileManagementProvider
+      value={{
+        folderId,
+        contextType,
+        contextId,
+        showingAllContexts,
+        currentFolder: currentFolderWrapper.current,
+        rootFolder: folders[0],
+        fileIndexMenuTools,
+        fileMenuTools,
+      }}
+    >
+      <RowFocusProvider value={{setRowToFocus, handleActionButtonRef}}>
+        <RowsProvider value={{setCurrentRows, currentRows, setSessionExpired}}>
+          <FilesLayout
+            size={size}
+            title={I18n.t('Files')}
+            headerActions={
+              <TopLevelButtons
+                size={size}
+                isUserContext={isUserContext}
+                shouldHideUploadButtons={!userCanAddFilesForContext || search.term.length > 0}
+              />
+            }
+            search={
+              <SearchBar key={search.term} initialValue={search.term} onSearch={search.set} />
+            }
+            breadcrumbs={<Breadcrumbs folders={folders} size={size} search={search.term} />}
+            bulkActions={
+              <BulkActionButtons
+                size={size}
+                selectedRows={selectedIds}
+                rows={currentRows ?? []}
+                totalRows={currentRows?.length ?? 0}
+                userCanEditFilesForContext={userCanEditFilesForContext}
+                userCanDeleteFilesForContext={userCanDeleteFilesForContext}
+                userCanRestrictFilesForContext={userCanRestrictFilesForContext}
+                usageRightsRequiredForContext={usageRightsRequiredForContext}
+              />
+            }
+            progress={
+              <>
+                <CurrentUploads />
+                <CurrentDownloads rows={currentRows ?? []} />
+              </>
+            }
+            table={
+              <FileFolderTable
+                size={size}
+                rows={isLoading ? [] : currentRows!}
+                isLoading={isLoading}
+                userCanEditFilesForContext={userCanEditFilesForContext}
+                userCanDeleteFilesForContext={userCanDeleteFilesForContext}
+                userCanRestrictFilesForContext={userCanRestrictFilesForContext}
+                usageRightsRequiredForContext={usageRightsRequiredForContext}
+                onSortChange={sort.set}
+                sort={sort}
+                searchString={search.term}
+                selectedRows={selectedIds}
+                selectionHandler={selectionHandlers}
+                handleFileDropRef={handleFileDropRef}
+                selectAllRef={selectAllRef}
+                onPreviewFile={previewHandlers.handleOpenPreview}
+              />
+            }
+            usageBar={userCanManageFilesForContext && <FilesUsageBar />}
+            pagination={
+              <>
+                <Alert
+                  liveRegion={() => document.getElementById('flash_screenreader_holder')!}
+                  liveRegionPoliteness="polite"
+                  screenReaderOnly
+                  data-testid="pagination-announcement"
+                >
+                  {paginationAlert}
+                </Alert>
+                {!isLoading && page.totalItems > 0 && (
+                  <BasicPagination
+                    labelNext={I18n.t('Next Page')}
+                    labelPrev={I18n.t('Previous Page')}
+                    currentPage={page.current}
+                    perPage={PER_PAGE}
+                    totalItems={page.totalItems}
+                    onNext={page.next}
+                    onPrev={page.prev}
+                  />
+                )}
+              </>
+            }
+          />
+          <FilesGenericSessionExpired
+            isOpen={sessionExpired}
+            onClose={() => setSessionExpired(false)}
+          />
+          {previewState.isModalOpen && (
+            <FilePreviewModal
+              isOpen={previewState.isModalOpen}
+              onClose={previewHandlers.handleCloseModal}
+              item={previewState.previewFile}
+              collection={currentFiles}
+              showNavigationButtons={previewState.showNavigationButtons}
+              error={previewState.error}
+            />
+          )}
+        </RowsProvider>
+      </RowFocusProvider>
+      {selectionAnnouncement && (
+        <Alert
+          liveRegion={() => document.getElementById('flash_screenreader_holder')!}
+          liveRegionPoliteness="polite"
+          screenReaderOnly
+        >
+          {selectionAnnouncement}
+        </Alert>
+      )}
+    </FileManagementProvider>
   )
 }
-interface ResponsiveFilesAppProps {
-  contextAssetString: string
-}
 
-const ResponsiveFilesApp = ({contextAssetString}: ResponsiveFilesAppProps) => {
-  const isUserContext = contextAssetString.startsWith('user_')
+const ResponsiveFilesApp = () => {
+  const isUserContext = getFilesEnv().showingAllContexts
+  const {data: folders, error} = useGetFolders()
+
+  useEffect(() => {
+    if (error instanceof UnauthorizedError) {
+      window.location.href = '/login'
+    }
+  }, [error])
+
+  const isNotFoundError = error instanceof NotFoundError
+  if (isNotFoundError) {
+    return <NotFoundArtwork />
+  }
+
+  if (!folders) {
+    return null
+  }
 
   return (
     <Responsive
       match="media"
       query={{
         small: {maxWidth: canvas.breakpoints.small},
-        medium: {maxWidth: canvas.breakpoints.tablet},
+        medium: {maxWidth: '1140px'},
       }}
       render={(_props: any, matches: string[] | undefined) => (
         <FilesApp
           isUserContext={isUserContext}
+          folders={folders}
           size={(matches?.[0] as 'small' | 'medium') || 'large'}
         />
       )}
     />
   )
 }
+
 export default ResponsiveFilesApp

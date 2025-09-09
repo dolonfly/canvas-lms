@@ -58,8 +58,23 @@ class Account::HelpLinks
         is_featured: false,
         is_new: false,
         feature_headline: -> { "" }
-      }.freeze
+      }.freeze,
     ]
+
+    if @account.root_account.feature_enabled?(:ada_chatbot)
+      defaults << {
+        available_to: %w[user student teacher admin observer unenrolled],
+        text: -> { I18n.t("#help_dialog.ada_chatbot", "Ask Panda Bot") },
+        subtext: -> { I18n.t("#help_dialog.ada_chatbot_sub", "Get instant help from our Virtual Assistant") },
+        url: "#ada_chatbot",
+        type: "default",
+        id: :ada_chatbot,
+        is_featured: false,
+        is_new: false,
+        feature_headline: -> { "" }
+      }.freeze
+    end
+
     filter ? filtered_links(defaults) : defaults
   end
 
@@ -80,7 +95,6 @@ class Account::HelpLinks
       link[:text] = link[:text].call if link[:text].respond_to?(:call)
       link[:subtext] = link[:subtext].call if link[:subtext].respond_to?(:call)
       link[:feature_headline] = link[:feature_headline].call if link[:feature_headline].respond_to?(:call)
-      link = link.except(:is_featured, :is_new, :feature_headline) unless Account.site_admin.feature_enabled?(:featured_help_links)
       link
     end
     featured, not_featured = instantiated.partition { |link| link[:is_featured] }

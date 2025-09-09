@@ -53,8 +53,8 @@ describe Lti::Concerns::ParentFrame do
     controller.instance_variable_set(:@current_user, current_pseudonym.user)
     controller.instance_variable_set(:@current_pseudonym, current_pseudonym)
     allow(controller).to receive_messages(parent_frame_context: tool.id.to_s, session: nil, request:)
-    allow(ContextExternalTool).to receive(:find_by).and_return(nil)
-    allow(ContextExternalTool).to receive(:find_by).with(id: tool.id.to_s).and_return(tool)
+    allow(Lti::ToolFinder).to receive(:find_by).and_return(nil)
+    allow(Lti::ToolFinder).to receive(:find_by).with(id: tool.id.to_s).and_return(tool)
   end
 
   %w[course account].each do |context_type|
@@ -114,6 +114,16 @@ describe Lti::Concerns::ParentFrame do
           expect(error_report.data).to include("query_params" => "hello=world")
         end
       end
+    end
+  end
+
+  context "when the user is the test student" do
+    let(:tool_context) { course_model }
+    let(:current_user) { tool_context.student_view_student }
+    let(:current_pseudonym) { current_user.pseudonym }
+
+    it "allows the test student to access the tool" do
+      expect(subject).to eq(expected_tool_origin)
     end
   end
 

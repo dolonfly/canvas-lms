@@ -87,13 +87,9 @@ module AddressBook
         execute_pager(configure_pager(new_pager, options))
       end
 
-      def new_pager
-        @collection.new_pager
-      end
+      delegate :new_pager, to: :@collection
 
-      def configure_pager(pager, options)
-        @collection.configure_pager(pager, options)
-      end
+      delegate :configure_pager, to: :@collection
 
       def execute_pager(pager)
         @collection.execute_pager(pager)
@@ -101,9 +97,7 @@ module AddressBook
         pager
       end
 
-      def depth
-        @collection.depth
-      end
+      delegate :depth, to: :@collection
     end
 
     def search_users(options = {})
@@ -114,7 +108,8 @@ module AddressBook
         context: asset_string,
         admin_context: admin_context?(options[:context]),
         strict_checks: !options[:weak_checks],
-        include_concluded: options[:include_concluded]
+        include_concluded: options[:include_concluded],
+        restrict_to_teacher_recipients: options[:restrict_to_teacher_recipients]
       )
       Collection.new(collection, @cache)
     end

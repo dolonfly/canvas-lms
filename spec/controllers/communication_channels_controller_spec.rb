@@ -1403,7 +1403,7 @@ describe CommunicationChannelsController do
       DeveloperKey.default
     end
 
-    let(:sns_access_token) { @user.access_tokens.create!(developer_key: sns_developer_key) }
+    let(:sns_access_token) { @user.access_tokens.create!(purpose: "Test Access Token", developer_key: sns_developer_key) }
     let(:sns_channel) { @user.communication_channels.create(path_type: CommunicationChannel::TYPE_PUSH, path: "push") }
 
     it "404s if there is no communication channel", type: :request do
@@ -1440,7 +1440,7 @@ describe CommunicationChannelsController do
         DeveloperKey.default
       end
 
-      let(:second_sns_access_token) { @user.access_tokens.create!(developer_key: second_sns_developer_key) }
+      let(:second_sns_access_token) { @user.access_tokens.create!(purpose: "Test Access Token", developer_key: second_sns_developer_key) }
       let(:sns_channel) { @user.communication_channels.create(path_type: CommunicationChannel::TYPE_PUSH, path: "push") }
 
       before { sns_channel }
@@ -1479,6 +1479,23 @@ describe CommunicationChannelsController do
             endpoints = @user.notification_endpoints.shard(@user).where("lower(token) = ?", fake_token)
             expect(endpoints.length).to eq 0
           end
+        end
+
+        it "creates push even if cannot manage comm channels" do
+          user_with_pseudonym(active_user: true)
+          user_session(@user, @pseudonym)
+          controller.instance_variable_set(:@access_token, second_sns_access_token)
+          @user.account.settings[:users_can_edit_comm_channels] = false
+          @user.account.save!
+
+          post "create", params: {
+            user_id: @user.id,
+            communication_channel: {
+              token: "asdasd123123", type: "push"
+            }
+          }
+          ap(response.parsed_body)
+          expect(response).to be_successful
         end
 
         it "deletes a push_token", type: :request do

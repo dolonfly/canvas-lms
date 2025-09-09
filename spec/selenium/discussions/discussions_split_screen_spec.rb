@@ -33,7 +33,6 @@ describe "threaded discussions" do
 
   before do
     stub_rcs_config
-    Account.site_admin.enable_feature! :react_discussions_post
 
     @first_reply = @topic.discussion_entries.create!(
       user: @student,
@@ -41,16 +40,16 @@ describe "threaded discussions" do
     )
     @second_reply = DiscussionEntry.create!(
       message: "2nd level reply",
-      discussion_topic_id: @first_reply.discussion_topic_id,
-      user_id: @first_reply.user_id,
+      discussion_topic_id: @topic.id,
+      user: @student,
       root_entry_id: @first_reply.id,
       parent_id: @first_reply.id
     )
 
     @deleted_reply = DiscussionEntry.create!(
       message: "1.2 reply",
-      discussion_topic_id: @first_reply.discussion_topic_id,
-      user_id: @first_reply.user_id,
+      discussion_topic_id: @topic.id,
+      user: @student,
       root_entry_id: @first_reply.id,
       parent_id: @first_reply.id
     )
@@ -139,8 +138,6 @@ describe "threaded discussions" do
     expect(@second_reply.discussion_entry_participants.where(user: @teacher).count).to eq 0
     Discussion.visit(@course, @topic)
     wait_for_ajaximations
-    expect(f("div[data-testid='replies-counter']")).to include_text("2 Replies, 2 Unread")
-    expect(f("div[data-testid='is-unread']")).to be_displayed
     f("button[data-testid='expand-button']").click
     wait_for_ajaximations
     # Auto read has a 3 second delay before firing off the read event
@@ -163,8 +160,6 @@ describe "threaded discussions" do
     expect(@second_reply.discussion_entry_participants.where(user: @teacher).count).to eq 0
     Discussion.visit(@course, @topic)
     wait_for_ajaximations
-    expect(f("div[data-testid='replies-counter']")).to include_text("2 Replies, 2 Unread")
-    expect(f("div[data-testid='is-unread']")).to be_displayed
     f("button[data-testid='expand-button']").click
     wait_for_ajaximations
     wait_for_ajax_requests

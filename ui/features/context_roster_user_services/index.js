@@ -19,10 +19,11 @@ import $ from 'jquery'
 
 import '@canvas/jquery/jquery.ajaxJSON'
 import {initializeTopNavPortalWithDefaults} from '@canvas/top-navigation/react/TopNavPortalWithDefaults'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
+import ready from '@instructure/ready'
 
-const I18n = useI18nScope('RegisteredServices')
-$(document).ready(() => {
+const I18n = createI18nScope('RegisteredServices')
+ready(() => {
   const handleBreadCrumbSetter = ({getCrumbs, setCrumbs}) => {
     const crumbs = getCrumbs()
     crumbs.push({name: I18n.t('People'), url: document.referrer})
@@ -41,7 +42,7 @@ $(document).ready(() => {
       'PUT',
       {'user[show_user_services]': $(this).prop('checked')},
       _data => {},
-      _data => {}
+      _data => {},
     )
   })
 })

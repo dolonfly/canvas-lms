@@ -16,50 +16,9 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-const {join, resolve} = require('path')
+const {resolve} = require('path')
 const {canvasDir} = require('../params')
 const {globPlugins} = require('./webpack.utils')
-
-exports.instUIWorkaround =
-  // remove when you no longer get an error from @instructure/ui* around
-  // import/export with a package not marked as ESM:
-  //
-  //     ERROR in ./node_modules/@instructure/ui-view/es/index.js 24:0
-  //     Module parse failed: 'import' and 'export' may appear only with 'sourceType: module' (24:0)
-  //     You may need an appropriate loader to handle this file type, currently no loaders are configured to process this file. See https://webpack.js.org/concepts#loaders
-  //
-  {
-    test: /\.js$/,
-    type: 'javascript/auto',
-    include: [
-      resolve(canvasDir, 'node_modules/@instructure'),
-      ...globPlugins('/node_modules/@instructure'),
-    ],
-  }
-
-exports.webpack5Workaround =
-  // packages that do specify "type": "module" for their package but are
-  // still using non-fully qualified relative imports (e.g. "./foo"
-  // instead of "./foo.js") are rejected by webpack 5, and this works
-  // around it in the meantime
-  //
-  // to reproduce in the future, disable this rule block and verify that
-  // webpack compiles successfully without errors like:
-  //
-  //     BREAKING CHANGE: The request '../jsutils/inspect' failed to
-  //     resolve only because it was resolved as fully specified
-  //
-  // refs: https://github.com/webpack/webpack/issues/11467#issuecomment-691873586
-  //       https://github.com/babel/babel/issues/12058
-  //       https://github.com/graphql/graphql-js/issues/2721
-  {
-    test: /\.m?js$/,
-    type: 'javascript/auto',
-    include: [resolve(canvasDir, 'node_modules/graphql')],
-    resolve: {
-      fullySpecified: false,
-    },
-  }
 
 // inline global and module CSS into JS using style-loader and css-loader
 // https://rspack.dev/guide/tech/css
@@ -117,7 +76,8 @@ exports.swc = [
       // we can use rspack's builtin:swc-loader later when it supports SWC plugins
       loader: isCrystalballEnabled ? 'swc-loader' : 'builtin:swc-loader',
       options: {
-        parseMap: true,
+        // if isCrystalballEnabled is true, set parseMap to true
+        ...(isCrystalballEnabled ? {parseMap: true} : {}),
         sourceMaps: true,
         jsc: {
           externalHelpers: true,
@@ -146,13 +106,20 @@ exports.swc = [
       // we can use rspack's builtin:swc-loader later when it supports SWC plugins
       loader: isCrystalballEnabled ? 'swc-loader' : 'builtin:swc-loader',
       options: {
-        parseMap: true,
+        ...(isCrystalballEnabled ? {parseMap: true} : {}),
         sourceMaps: true,
         jsc: {
           externalHelpers: true,
           parser: {
             syntax: 'typescript',
             tsx: true,
+          },
+          transform: {
+            react: {
+              runtime: 'automatic',
+              development: process.env.NODE_ENV === 'development',
+              refresh: process.env.NODE_ENV === 'development',
+            },
           },
           ...(isCrystalballEnabled
             ? {
@@ -165,19 +132,6 @@ exports.swc = [
         env: {
           targets: browserTargets,
         },
-        // Our coverage plugin gets really upset about the transform field, even
-        // if it's just react: {development: false, refresh: false}, so we only
-        // include it in development mode when crystalball is disabled.
-        ...(process.env.NODE_ENV === 'development' && !isCrystalballEnabled
-          ? {
-              transform: {
-                react: {
-                  development: process.env.NODE_ENV === 'development',
-                  refresh: process.env.NODE_ENV === 'development',
-                },
-              },
-            }
-          : {}),
       },
     },
   },
@@ -209,4 +163,9 @@ exports.istanbul = {
     options: {esModules: true, produceSourceMap: true},
   },
   enforce: 'post',
+}
+
+exports.graphql = {
+  test: /\.graphql$/,
+  type: 'asset/source',
 }

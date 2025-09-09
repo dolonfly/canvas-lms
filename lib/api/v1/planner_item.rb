@@ -30,6 +30,7 @@ module Api::V1::PlannerItem
   include Api::V1::PlannerNote
   include Api::V1::AssessmentRequest
   include PlannerApiHelper
+  include AssignmentsHelper
 
   API_PLANNABLE_FIELDS = %i[id
                             title
@@ -119,11 +120,8 @@ module Api::V1::PlannerItem
         hash[:plannable_date] = item.asset.assignment.peer_reviews_due_at || item.assessor_asset.cached_due_date
         title_date = { title: item.asset&.assignment&.title, todo_date: hash[:plannable_date] }
         hash[:plannable] = plannable_json(title_date.merge(item.attributes), extra_fields: ASSESSMENT_REQUEST_FIELDS)
-        hash[:html_url] = Submission::ShowPresenter.new(
-          submission: item.asset,
-          current_user: user,
-          assessment_request: item
-        ).submission_data_url
+        submission = item.asset
+        hash[:html_url] = student_peer_review_url(submission.context, submission.assignment, item, user)
       else
         hash[:plannable_date] = item[:user_due_date] || item.due_at
         hash[:plannable] = plannable_json(item.attributes, extra_fields: GRADABLE_FIELDS)
@@ -162,6 +160,12 @@ module Api::V1::PlannerItem
     ss = submission_statuses(context_items.select { |i| i.is_a?(::Assignment) || i.is_a?(::SubAssignment) }, user, opts:)
     discussions = context_items.select { |i| i.is_a?(::DiscussionTopic) }
     topics_status = topics_status_for(user, discussions.map(&:id))
+
+    items = items.reject do |item|
+      item.try(:context).is_a?(Course) &&
+        item.context.horizon_course? &&
+        !item.context.grants_right?(user, session, :read_as_admin)
+    end
 
     items.map do |item|
       planner_item_json(item, user, session, opts.merge(submission_statuses: ss, topics_status:))

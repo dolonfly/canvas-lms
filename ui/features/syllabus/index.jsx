@@ -17,8 +17,8 @@
  */
 
 import React from 'react'
-import ReactDOM from 'react-dom'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {createRoot} from 'react-dom/client'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import $ from 'jquery'
 import {map} from 'lodash'
 import SyllabusBehaviors from '@canvas/syllabus/backbone/behaviors/SyllabusBehaviors'
@@ -32,67 +32,67 @@ import ready from '@instructure/ready'
 import {View} from '@instructure/ui-view'
 import {Spinner} from '@instructure/ui-spinner'
 
-const I18n = useI18nScope('syllabus')
-
-const immersive_reader_mount_point = () => document.getElementById('immersive_reader_mount_point')
-const immersive_reader_mobile_mount_point = () =>
-  document.getElementById('immersive_reader_mobile_mount_point')
-const showCourseSummary = !!document.getElementById('syllabusContainer')
-
-let collections = []
-let deferreds
-
-// If we're in a paced course, we're not showing the assignments
-// so skip retrieving them.
-// Also, ensure 'Show Course Summary' is checked otherwise don't bother.
-if (!(ENV.IN_PACED_COURSE && !ENV.current_user_is_student) && showCourseSummary) {
-  // Setup the collections
-  collections = [
-    new SyllabusCalendarEventsCollection([ENV.context_asset_string], 'event'),
-    new SyllabusCalendarEventsCollection([ENV.context_asset_string], 'assignment'),
-    new SyllabusCalendarEventsCollection([ENV.context_asset_string], 'sub_assignment'),
-  ]
-
-  // Don't show appointment groups for non-logged in users
-  if (ENV.current_user_id) {
-    collections.push(
-      new SyllabusAppointmentGroupsCollection([ENV.context_asset_string], 'reservable')
-    )
-    collections.push(
-      new SyllabusAppointmentGroupsCollection([ENV.context_asset_string], 'manageable')
-    )
-  }
-
-  collections.push(new SyllabusPlannerCollection([ENV.context_asset_string]))
-
-  // Perform a fetch on each collection
-  //   The fetch continues fetching until no next link is returned
-  deferreds = map(collections, collection => {
-    const deferred = $.Deferred()
-
-    const error = () => deferred.reject()
-
-    const success = () => {
-      if (collection.canFetch('next')) {
-        return collection.fetch({page: 'next', success, error})
-      } else {
-        return deferred.resolve()
-      }
-    }
-
-    collection.fetch({
-      data: {
-        per_page: ENV.SYLLABUS_PER_PAGE || 50,
-      },
-      success,
-      error,
-    })
-
-    return deferred
-  })
-}
+const I18n = createI18nScope('syllabus')
 
 ready(() => {
+  const immersive_reader_mount_point = () => document.getElementById('immersive_reader_mount_point')
+  const immersive_reader_mobile_mount_point = () =>
+    document.getElementById('immersive_reader_mobile_mount_point')
+  const showCourseSummary = !!document.getElementById('syllabusContainer')
+
+  let collections = []
+  let deferreds
+
+  // If we're in a paced course, we're not showing the assignments
+  // so skip retrieving them.
+  // Also, ensure 'Show Course Summary' is checked otherwise don't bother.
+  if (!(ENV.IN_PACED_COURSE && !ENV.current_user_is_student) && showCourseSummary) {
+    // Setup the collections
+    collections = [
+      new SyllabusCalendarEventsCollection([ENV.context_asset_string], 'event'),
+      new SyllabusCalendarEventsCollection([ENV.context_asset_string], 'assignment'),
+      new SyllabusCalendarEventsCollection([ENV.context_asset_string], 'sub_assignment'),
+    ]
+
+    // Don't show appointment groups for non-logged in users
+    if (ENV.current_user_id) {
+      collections.push(
+        new SyllabusAppointmentGroupsCollection([ENV.context_asset_string], 'reservable'),
+      )
+      collections.push(
+        new SyllabusAppointmentGroupsCollection([ENV.context_asset_string], 'manageable'),
+      )
+    }
+
+    collections.push(new SyllabusPlannerCollection([ENV.context_asset_string]))
+
+    // Perform a fetch on each collection
+    //   The fetch continues fetching until no next link is returned
+    deferreds = map(collections, collection => {
+      const deferred = $.Deferred()
+
+      const error = () => deferred.reject()
+
+      const success = () => {
+        if (collection.canFetch('next')) {
+          return collection.fetch({page: 'next', success, error})
+        } else {
+          return deferred.resolve()
+        }
+      }
+
+      collection.fetch({
+        data: {
+          per_page: ENV.SYLLABUS_PER_PAGE || 50,
+        },
+        success,
+        error,
+      })
+
+      return deferred
+    })
+  }
+
   // Attach the immersive reader button if enabled
   const activeMountPoints = [
     immersive_reader_mount_point(),
@@ -137,12 +137,17 @@ ready(() => {
   // Add the loading indicator now that the collections are fetching
   const node = document.querySelector('#loading_indicator')
   if (node instanceof HTMLElement) {
-    ReactDOM.render(
+    const root = createRoot(node)
+    root.render(
       <View padding="x-small" textAlign="center" as="div" display="block">
         <Spinner delay={300} size="x-small" renderTitle={() => I18n.t('Loading')} />
       </View>,
-      node
     )
+
+    // Cleanup on unmount
+    $(window).on('beforeunload', () => {
+      root.unmount()
+    })
   }
 
   // Binding to the mini calendar must take place after sidebar initializes,
@@ -163,7 +168,6 @@ function renderCoursePacingNotice() {
         renderNotice($mountPoint, courseId)
       })
       .catch(ex => {
-        // eslint-disable-next-line no-console
         console.error('Falied loading CoursePacingNotice', ex)
       })
   }

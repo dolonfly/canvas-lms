@@ -18,8 +18,7 @@
 
 import groovy.transform.Field
 
-@Field static final KARMA_NODE_COUNT = 4
-@Field static final JEST_NODE_COUNT = 5
+@Field static final JEST_NODE_COUNT = 16
 
 def jestNodeRequirementsTemplate(index) {
   def baseTestContainer = [
@@ -29,6 +28,17 @@ def jestNodeRequirementsTemplate(index) {
 
   return [
     containers: [baseTestContainer + [name: "jest-${index}"]]
+  ]
+}
+
+def rceNodeRequirementsTemplate(index) {
+  def baseTestContainer = [
+    image: 'local/karma-runner',
+    command: 'cat'
+  ]
+
+  return [
+    containers: [baseTestContainer + [name: "rce-${index}"]]
   ]
 }
 
@@ -62,19 +72,6 @@ def getSeleniumGridContainers(parentIndex, count) {
   ]
 }
 
-def karmaNodeRequirementsTemplate(index) {
-  def baseTestContainer = [
-    image: 'local/karma-runner',
-    command: 'cat',
-    ports: [9876],
-    envVars: [KARMA_BROWSER: 'ChromeSeleniumGridHeadless', KARMA_PORT: 9876],
-  ]
-
-  return [
-    containers: [baseTestContainer + [name: "karma-qunit-${index}"]] + getSeleniumGridContainers("karma-${index}", 1),
-  ]
-}
-
 def packagesNodeRequirementsTemplate() {
   def baseTestContainer = [
     image: 'local/karma-runner',
@@ -82,7 +79,6 @@ def packagesNodeRequirementsTemplate() {
     ports: [9876],
     envVars: [
       SELENIUM_SERVER: 'http://selenium-hub:4444/wd/hub',
-      TESTCAFE_PROVIDER: 'selenium:chrome'
     ]
   ]
 
@@ -130,20 +126,9 @@ def queueJestDistribution(index) {
   }
 }
 
-def queueKarmaDistribution(index) {
-  { stages ->
-    def jsgEnvVars = [
-        "CI_NODE_INDEX=${index}",
-        "CI_NODE_TOTAL=${KARMA_NODE_COUNT}",
-      ]
-
-    callableWithDelegate(queueTestStage())(stages, "karma-qunit-${index}", jsgEnvVars, 'yarn test:karma:headless')
-  }
-}
-
 def queuePackagesDistribution() {
   { stages ->
-    callableWithDelegate(queueTestStage())(stages, 'packages', ['CANVAS_RCE_PARALLEL=1'], 'TEST_RESULT_OUTPUT_DIR=/usr/src/app/$TEST_RESULT_OUTPUT_DIR yarn test:packages:parallel')
+    callableWithDelegate(queueTestStage())(stages, 'packages', [], 'TEST_RESULT_OUTPUT_DIR=/usr/src/app/$TEST_RESULT_OUTPUT_DIR yarn test:packages')
   }
 }
 

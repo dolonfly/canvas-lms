@@ -131,10 +131,17 @@ class ExternalToolsController < ApplicationController
   #     ]
   def index
     if authorized_action(@context, @current_user, :read)
-      @tools = if params[:include_parents]
-                 Lti::ContextToolFinder.all_tools_for(@context, user: (params[:include_personal] ? @current_user : nil))
+      @tools = if Canvas::Plugin.value_to_boolean(params[:include_parents])
+                 Lti::ContextToolFinder.all_tools_for(@context, current_user: (params[:include_personal] ? @current_user : nil))
                else
-                 @context.context_external_tools.active
+                 base_scope = Lti::ContextToolFinder.only_for(@context).active
+
+                 if @context.root_account.feature_enabled?(:lti_registrations_next)
+                   available_deployment_ids = Lti::ContextControl.deployment_ids_for_context(@context)
+                   base_scope.where(id: available_deployment_ids).or(base_scope.lti_1_1)
+                 else
+                   base_scope
+                 end
                end
       @tools = ContextExternalTool.search_by_attribute(@tools, :name, params[:search_term])
 
@@ -212,7 +219,7 @@ class ExternalToolsController < ApplicationController
                     end
     if resource_link.nil? || resource_link.url.nil?
       # If the resource_link doesn't have a url, then use the provided url to look up the tool
-      tool = ContextExternalTool.find_external_tool(provided_url, context, nil, nil, client_id, prefer_1_1:)
+      tool = Lti::ToolFinder.from_url(provided_url, context, preferred_client_id: client_id, prefer_1_1:)
       unless tool
         invalid_settings_error
       end
@@ -347,8 +354,8 @@ class ExternalToolsController < ApplicationController
       @lti_launch.link_text =  launch_settings["tool_name"]
       @lti_launch.analytics_id = launch_settings["analytics_id"]
 
-      tool = ContextExternalTool.where(id: launch_settings.dig("metadata", "tool_id")).first ||
-             ContextExternalTool.find_external_tool(launch_settings["launch_url"], @context)
+      tool = Lti::ToolFinder.find_by(id: launch_settings.dig("metadata", "tool_id")) ||
+             Lti::ToolFinder.from_url(launch_settings["launch_url"], @context)
       if tool
         placement = launch_settings.dig("metadata", "placement")
         launch_type = launch_settings.dig("metadata", "launch_type")&.to_sym
@@ -449,8 +456,7 @@ class ExternalToolsController < ApplicationController
   #             "url": "...",
   #             "default": "disabled",
   #             "enabled": "true",
-  #             "visibility": "public",
-  #             "windowTarget": "_blank"
+  #             "visibility": "public"
   #        },
   #        "selection_width": 500,
   #        "selection_height": 500,
@@ -460,7 +466,7 @@ class ExternalToolsController < ApplicationController
   def show
     Utils::InstStatsdUtils::Timing.track "lti.show.request_time" do |timing_meta|
       if api_request?
-        tool = @context.context_external_tools.active.find(params[:external_tool_id])
+        tool = Lti::ContextToolFinder.only_for(@context).active.find(params[:external_tool_id])
         render json: external_tool_json(tool, @context, @current_user, session)
         timing_meta.tags = { lti_version: tool.lti_version }
       else
@@ -563,13 +569,19 @@ class ExternalToolsController < ApplicationController
       selection_type = "editor_button" if params[:editor]
       selection_type = "homework_submission" if params[:homework]
 
-      @return_url = named_context_url(@context, :context_external_content_success_url, "external_tool_dialog", { include_host: true })
       @headers = false
 
       unless find_tool(params[:external_tool_id], selection_type)
         timing_meta.tags = { error: true }
         return
       end
+
+      @return_url =
+        if @tool&.use_1_3?
+          deep_linking_cancel_url(include_host: true, placement:)
+        else
+          named_context_url(@context, :context_external_content_success_url, "external_tool_dialog", include_host: true)
+        end
 
       @lti_launch = lti_launch(tool: @tool, selection_type:, launch_token: params[:launch_token])
       unless @lti_launch
@@ -588,7 +600,7 @@ class ExternalToolsController < ApplicationController
     return unless selection_type == "editor_button" || verified_user_check
 
     if selection_type.nil? || Lti::ResourcePlacement::PLACEMENTS.include?(selection_type.to_sym)
-      @tool = ContextExternalTool.find_for(id, @context, selection_type, false)
+      @tool = Lti::ToolFinder.from_id(id, @context, placement: selection_type)
     end
 
     unless @tool
@@ -735,7 +747,7 @@ class ExternalToolsController < ApplicationController
 
     # This is only for 1.3: editing collaborations for 1.1 goes thru content_item_selection_request()
     if selection_type == "collaboration"
-      collaboration = opts[:content_item_id].presence&.then { ExternalToolCollaboration.find _1 }
+      collaboration = opts[:content_item_id].presence&.then { ExternalToolCollaboration.find it }
       collaboration = nil unless collaboration&.update_url == params[:url]
     end
 
@@ -824,7 +836,7 @@ class ExternalToolsController < ApplicationController
                                                       # required params
                                                       lti_message_type: message_type,
                                                       lti_version: "LTI-1p0",
-                                                      resource_link_id: Lti::Asset.opaque_identifier_for(@context),
+                                                      resource_link_id: Lti::V1p1::Asset.opaque_identifier_for(@context),
                                                       content_items: content_item_response.to_json(lti_message_type: message_type),
                                                       launch_presentation_return_url: @return_url,
                                                       context_title: @context.name,
@@ -931,8 +943,8 @@ class ExternalToolsController < ApplicationController
   #   multiple times
   #
   # @argument is_rce_favorite [Boolean]
-  #   (Deprecated in favor of {api:ExternalToolsController#add_rce_favorite Add tool to RCE Favorites} and
-  #   {api:ExternalToolsController#remove_rce_favorite Remove tool from RCE Favorites})
+  #   (Deprecated in favor of {api:ExternalToolsController#mark_rce_favorite Mark tool to RCE Favorites} and
+  #   {api:ExternalToolsController#unmark_rce_favorite Unmark tool from RCE Favorites})
   #   Whether this tool should appear in a preferred location in the RCE.
   #   This only applies to tools in root account contexts that have an editor
   #   button placement.
@@ -954,7 +966,7 @@ class ExternalToolsController < ApplicationController
   #
   # @argument account_navigation[display_type] [String]
   #   The layout type to use when launching the tool. Must be
-  #   "full_width", "full_width_in_context", "in_nav_context", "borderless", or "default"
+  #   "full_width", "full_width_in_context", "full_width_with_nav", "in_nav_context", "borderless", or "default"
   #
   # @argument user_navigation[url] [String]
   #   The url of the external tool for user navigation
@@ -1009,7 +1021,7 @@ class ExternalToolsController < ApplicationController
   #
   # @argument course_navigation[display_type] [String]
   #   The layout type to use when launching the tool. Must be
-  #   "full_width", "full_width_in_context", "in_nav_context", "borderless", or "default"
+  #   "full_width", "full_width_in_context", "full_width_with_nav", "in_nav_context", "borderless", or "default"
   #
   # @argument editor_button[url] [String]
   #   The url of the external tool
@@ -1168,7 +1180,7 @@ class ExternalToolsController < ApplicationController
     if params.key?(:client_id)
       raise ActiveRecord::RecordInvalid unless developer_key.usable_in_context?(@context)
 
-      @tool = developer_key.lti_registration.new_external_tool(@context)
+      @tool = developer_key.lti_registration.new_external_tool(@context, verify_uniqueness: params.dig(:external_tool, :verify_uniqueness).present?, current_user: @current_user)
     else
       external_tool_params = (params[:external_tool] || params).to_unsafe_h
       @tool = @context.context_external_tools.new
@@ -1177,20 +1189,20 @@ class ExternalToolsController < ApplicationController
         external_tool_params[:custom_fields] = custom_fields if custom_fields.present?
       end
       set_tool_attributes(@tool, external_tool_params)
-    end
-    @tool.check_for_duplication(params.dig(:external_tool, :verify_uniqueness).present?)
-    if @tool.errors.blank? && @tool.save
-      @tool.migrate_content_to_1_3_if_needed!
-      invalidate_nav_tabs_cache(@tool)
-      if api_request?
-        render json: external_tool_json(@tool, @context, @current_user, session)
-      else
-        render json: @tool.as_json(methods: %i[readable_state custom_fields_string vendor_help_link], include_root: false)
+      @tool.check_for_duplication if params.dig(:external_tool, :verify_uniqueness).present?
+      unless @tool.errors.blank? && @tool.save
+        raise Lti::ContextExternalToolErrors, @tool.errors
       end
-    else
-      render json: @tool.errors, status: :bad_request
-      @tool.destroy if @tool.persisted?
     end
+    @tool.migrate_content_to_1_3_if_needed!
+    ContextExternalTool.invalidate_nav_tabs_cache(@tool, @domain_root_account)
+    if api_request?
+      render json: external_tool_json(@tool, @context, @current_user, session)
+    else
+      render json: @tool.as_json(methods: %i[readable_state custom_fields_string], include_root: false)
+    end
+  rescue Lti::ContextExternalToolErrors => e
+    render json: e.errors, status: :bad_request
   end
 
   # Add an external tool and verify the provided
@@ -1230,7 +1242,7 @@ class ExternalToolsController < ApplicationController
       set_tool_attributes(@tool, external_tool_params)
       respond_to do |format|
         if @tool.save
-          invalidate_nav_tabs_cache(@tool)
+          ContextExternalTool.invalidate_nav_tabs_cache(@tool, @domain_root_account)
           format.json { render json: external_tool_json(@tool, @context, @current_user, session) }
         else
           format.json { render json: @tool.errors, status: :bad_request }
@@ -1250,7 +1262,7 @@ class ExternalToolsController < ApplicationController
   #        -F 'name=Public Example' \
   #        -F 'privacy_level=public'
   def update
-    @tool = @context.context_external_tools.active.find(params[:id] || params[:external_tool_id])
+    @tool = Lti::ContextToolFinder.only_for(@context).active.find(params[:id] || params[:external_tool_id])
     if authorized_action(@tool, @current_user, :update_manually)
       external_tool_params = (params[:external_tool] || params).to_unsafe_h
       if request.media_type == "application/x-www-form-urlencoded"
@@ -1260,7 +1272,7 @@ class ExternalToolsController < ApplicationController
       respond_to do |format|
         set_tool_attributes(@tool, external_tool_params)
         if @tool.save
-          invalidate_nav_tabs_cache(@tool)
+          ContextExternalTool.invalidate_nav_tabs_cache(@tool, @domain_root_account)
           if api_request?
             format.json { render json: external_tool_json(@tool, @context, @current_user, session) }
           else
@@ -1282,12 +1294,12 @@ class ExternalToolsController < ApplicationController
   #   curl -X DELETE 'https://<canvas>/api/v1/courses/<course_id>/external_tools/<external_tool_id>' \
   #        -H "Authorization: Bearer <token>"
   def destroy
-    @tool = @context.context_external_tools.active.find(params[:id] || params[:external_tool_id])
+    @tool = Lti::ContextToolFinder.only_for(@context).active.find(params[:id] || params[:external_tool_id])
     delete_tool(@tool)
   end
 
   def jwt_token
-    tool = ContextExternalTool.find_external_tool(params[:tool_launch_url], @context, params[:tool_id])
+    tool = Lti::ToolFinder.from_url(params[:tool_launch_url], @context, preferred_tool_id: params[:tool_id])
 
     raise ActiveRecord::RecordNotFound if tool.nil?
 
@@ -1301,18 +1313,19 @@ class ExternalToolsController < ApplicationController
     render json: { jwt_token: Canvas::Security.create_jwt(params, nil, tool.shared_secret) }
   end
 
-  # @API Add tool to RCE Favorites
-  # Add the specified editor_button external tool to a preferred location in the RCE
+  # @API Mark tool as RCE Favorite
+  # Mark the specified editor_button external tool as a favorite in the RCE editor
   # for courses in the given account and its subaccounts (if the subaccounts
-  # haven't set their own RCE Favorites). Cannot set more than 2 RCE Favorites.
+  # haven't set their own RCE Favorites). This places the tool in a preferred location
+  # in the RCE. Cannot mark more than 2 tools as RCE Favorites.
   #
   # @example_request
   #
   #   curl -X POST 'https://<canvas>/api/v1/accounts/<account_id>/external_tools/rce_favorites/<id>' \
   #        -H "Authorization: Bearer <token>"
-  def add_rce_favorite
-    if authorized_action(@context, @current_user, [:lti_add_edit, :manage_lti_add])
-      @tool = ContextExternalTool.find_external_tool_by_id(params[:id], @context)
+  def mark_rce_favorite
+    if authorized_action(@context, @current_user, :manage_lti_edit)
+      @tool = Lti::ToolFinder.from_id(params[:id], @context)
       raise ActiveRecord::RecordNotFound unless @tool
       unless @tool.can_be_rce_favorite?
         return render json: { message: "Tool does not have an editor_button placement" }, status: :bad_request
@@ -1327,7 +1340,7 @@ class ExternalToolsController < ApplicationController
         favorite_ids &= valid_ids # try to clear out any possibly deleted tool references first before causing a fuss
       end
       # On_by_default tools don't count towards the limit
-      client_ids = ContextExternalTool.find_external_tool_client_id(favorite_ids, @context)
+      client_ids = ContextExternalTool.where(id: favorite_ids).select(:developer_key_id).map(&:global_developer_key_id)
       on_by_default_ids = ContextExternalTool.on_by_default_ids
       if (client_ids - on_by_default_ids).length > 2
         render json: { message: "Cannot have more than 2 favorited tools" }, status: :bad_request
@@ -1339,16 +1352,17 @@ class ExternalToolsController < ApplicationController
     end
   end
 
-  # @API Remove tool from RCE Favorites
-  # Remove the specified external tool from a preferred location in the RCE
-  # for the given account
+  # @API Unmark tool as RCE Favorite
+  # Unmark the specified external tool as a favorite in the RCE editor
+  # for the given account. The tool will remain available but will no longer
+  # appear in the preferred favorites location.
   #
   # @example_request
   #
   #   curl -X DELETE 'https://<canvas>/api/v1/accounts/<account_id>/external_tools/rce_favorites/<id>' \
   #        -H "Authorization: Bearer <token>"
-  def remove_rce_favorite
-    if authorized_action(@context, @current_user, [:lti_add_edit, :manage_lti_delete])
+  def unmark_rce_favorite
+    if authorized_action(@context, @current_user, :manage_lti_edit)
       favorite_ids = @context.get_rce_favorite_tool_ids
       if favorite_ids.delete(Shard.global_id_for(params[:id]))
         @context.settings[:rce_favorite_tool_ids] = { value: favorite_ids }
@@ -1367,8 +1381,8 @@ class ExternalToolsController < ApplicationController
   #   curl -X POST 'https://<canvas>/api/v1/accounts/<account_id>/external_tools/top_nav_favorites/<id>' \
   #        -H "Authorization: Bearer <token>"
   def add_top_nav_favorite
-    if authorized_action(@context, @current_user, [:lti_add_edit, :manage_lti_add])
-      @tool = ContextExternalTool.find_external_tool_by_id(params[:id], @context)
+    if authorized_action(@context, @current_user, :manage_lti_add)
+      @tool = Lti::ToolFinder.from_id(params[:id], @context)
       raise ActiveRecord::RecordNotFound unless @tool
       unless @tool.can_be_top_nav_favorite?
         return render json: { message: "Tool does not have top_navigation placement" }, status: :bad_request
@@ -1400,7 +1414,7 @@ class ExternalToolsController < ApplicationController
   #   curl -X DELETE 'https://<canvas>/api/v1/accounts/<account_id>/external_tools/top_nav_favorites/<id>' \
   #        -H "Authorization: Bearer <token>"
   def remove_top_nav_favorite
-    if authorized_action(@context, @current_user, [:lti_add_edit, :manage_lti_delete])
+    if authorized_action(@context, @current_user, :manage_lti_delete)
       favorite_ids = @context.get_top_nav_favorite_tool_ids
       if favorite_ids.delete(Shard.global_id_for(params[:id]))
         @context.settings[:top_nav_favorite_tool_ids] = { value: favorite_ids }
@@ -1573,9 +1587,9 @@ class ExternalToolsController < ApplicationController
     if resource_link_lookup_uuid
       @tool = find_tool_and_url(resource_link_lookup_uuid, launch_url, context, nil).first
     elsif launch_url && module_item.blank?
-      @tool = ContextExternalTool.find_external_tool(launch_url, @context, tool_id)
+      @tool = Lti::ToolFinder.from_url(launch_url, @context, preferred_tool_id: tool_id)
     elsif module_item
-      @tool = ContextExternalTool.from_content_tag(module_item, @context)
+      @tool = Lti::ToolFinder.from_content_tag(module_item, @context)
     else
       return unless find_tool(tool_id, launch_type)
     end
@@ -1707,15 +1721,10 @@ class ExternalToolsController < ApplicationController
                 is_top_nav_favorite
                 unified_tool_id]
     attrs += [:allow_membership_service_access] if @context.root_account.feature_enabled?(:membership_service_for_lti_tools)
+    attrs += [:estimated_duration_attributes] if @context.try(:horizon_course?)
 
     attrs.each do |prop|
       tool.send(:"#{prop}=", params[prop]) if params.key?(prop)
-    end
-  end
-
-  def invalidate_nav_tabs_cache(tool)
-    if tool.has_placement?(:user_navigation) || tool.has_placement?(:course_navigation) || tool.has_placement?(:account_navigation)
-      Lti::NavigationCache.new(@domain_root_account).invalidate_cache_key
     end
   end
 
@@ -1739,7 +1748,7 @@ class ExternalToolsController < ApplicationController
   end
 
   def require_tool_create_rights
-    authorized_action(@context, @current_user, [:create_tool_manually, :manage_lti_add])
+    authorized_action(@context, @current_user, :manage_lti_add)
   end
 
   def require_tool_configuration
@@ -1757,7 +1766,7 @@ class ExternalToolsController < ApplicationController
       respond_to do |format|
         if tool.destroy
           if api_request?
-            invalidate_nav_tabs_cache(tool)
+            ContextExternalTool.invalidate_nav_tabs_cache(tool, @domain_root_account)
             format.json { render json: external_tool_json(tool, @context, @current_user, session) }
           else
             format.json { render json: tool.as_json(methods: [:readable_state, :custom_fields_string], include_root: false) }

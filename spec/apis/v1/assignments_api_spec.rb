@@ -129,7 +129,7 @@ describe AssignmentsApiController, type: :request do
                },
                {},
                {},
-               { expected_status: 401 })
+               { expected_status: 403 })
     end
 
     it "returns the ids and names of users in the same group as the student" do
@@ -184,7 +184,7 @@ describe AssignmentsApiController, type: :request do
 
     describe "checkpoints in-place" do
       before do
-        @course.root_account.enable_feature!(:discussion_checkpoints)
+        @course.account.enable_feature!(:discussion_checkpoints)
 
         assignment = @course.assignments.create!(title: "Assignment 1", has_sub_assignments: true)
         @c1 = assignment.sub_assignments.create!(context: assignment.context, sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC, points_possible: 5, due_at: 3.days.from_now)
@@ -240,7 +240,7 @@ describe AssignmentsApiController, type: :request do
       end
     end
 
-    it "returns unauthorized for users who cannot :read the course" do
+    it "returns forbidden for users who cannot :read the course" do
       # unpublished course with invited student
       course_with_student
       expect(@course.grants_right?(@student, :read)).to be_falsey
@@ -255,7 +255,7 @@ describe AssignmentsApiController, type: :request do
                },
                {},
                {},
-               { expected_status: 401 })
+               { expected_status: 403 })
     end
 
     context "when the 'new_quizzes' query param is set" do
@@ -439,7 +439,7 @@ describe AssignmentsApiController, type: :request do
                         },
                         {},
                         {},
-                        expected_status: 401)
+                        expected_status: 403)
         expect(json["status"]).to eq "unauthorized"
       end
 
@@ -1740,7 +1740,7 @@ describe AssignmentsApiController, type: :request do
     describe "checkpoints in-place" do
       before do
         course_with_teacher(active_all: true)
-        @course.root_account.enable_feature!(:discussion_checkpoints)
+        @course.account.enable_feature!(:discussion_checkpoints)
 
         assignment = @course.assignments.create!(title: "Assignment 1", has_sub_assignments: true)
         @c1 = assignment.sub_assignments.create!(context: assignment.context, sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC, points_possible: 5, due_at: 3.days.from_now)
@@ -1797,7 +1797,7 @@ describe AssignmentsApiController, type: :request do
                  user_id: @student.id.to_s },
                {},
                {},
-               { expected_status: 401 })
+               { expected_status: 403 })
     end
 
     it "returns data for for teacher who can read target student data" do
@@ -1834,7 +1834,7 @@ describe AssignmentsApiController, type: :request do
                          user_id: student.id.to_s },
                        {},
                        {},
-                       { expected_status: 401 })
+                       { expected_status: 403 })
     end
   end
 
@@ -1860,7 +1860,7 @@ describe AssignmentsApiController, type: :request do
                          assignment_id: assignment.id.to_s },
                        {},
                        {},
-                       { expected_status: 401 })
+                       { expected_status: 403 })
     end
 
     it "duplicates if teacher" do
@@ -2237,7 +2237,7 @@ describe AssignmentsApiController, type: :request do
           },
           {},
           {},
-          { expected_status: 401 }
+          { expected_status: 403 }
         )
       end
 
@@ -2408,6 +2408,15 @@ describe AssignmentsApiController, type: :request do
       expect(json["post_to_sis"]).to be false
     end
 
+    it "creates attachment association when attachments are in description" do
+      aa_test_data = AttachmentAssociationsSpecHelper.new(@user.account, @user)
+      json = api_create_assignment_in_course(@course, { description: aa_test_data.base_html })
+      @assignment = Assignment.find(json["id"])
+      expect(aa_test_data.attachment1.attachment_associations.count).to eq 1
+      expect(aa_test_data.attachment1.attachment_associations.last.context_id).to eq @assignment.id
+      expect(aa_test_data.attachment1.attachment_associations.last.context_type).to eq "Assignment"
+    end
+
     it "accepts a value for post_to_sis" do
       a = @course.account
       a.settings[:sis_default_grade_export] = { locked: false, value: false }
@@ -2442,7 +2451,7 @@ describe AssignmentsApiController, type: :request do
       expect(@assignment.post_to_sis).to be true
     end
 
-    it "returns unauthorized for users who do not have permission" do
+    it "returns forbidden for users who do not have permission" do
       student_in_course(active_all: true)
       @group = @course.assignment_groups.create!({ name: "some group" })
       @group_category = @course.group_categories.create!(name: "foo")
@@ -2458,7 +2467,7 @@ describe AssignmentsApiController, type: :request do
                },
                create_assignment_json(@group, @group_category),
                {},
-               { expected_status: 401 })
+               { expected_status: 403 })
     end
 
     it "allows authenticated users to create assignments" do
@@ -2707,7 +2716,7 @@ describe AssignmentsApiController, type: :request do
       context "when no tool association exists" do
         let(:assignment) { assignment_model(course: @course) }
         let(:update_response) do
-          put "/api/v1/courses/#{@course.id}/assignments/#{assignment.id}", params: {
+          put "/api/v1/courses/#{assignment.course.id}/assignments/#{assignment.id}", params: {
             assignment: { name: "banana" }
           }
         end
@@ -2726,7 +2735,7 @@ describe AssignmentsApiController, type: :request do
           a
         end
         let(:update_response) do
-          put "/api/v1/courses/#{@course.id}/assignments/#{assignment.id}", params:
+          put "/api/v1/courses/#{assignment.course.id}/assignments/#{assignment.id}", params:
         end
         let(:lookups) { assignment.assignment_configuration_tool_lookups }
 
@@ -2774,6 +2783,16 @@ describe AssignmentsApiController, type: :request do
           it "does not attempt to clear tool associations" do
             expect(assignment).not_to receive(:clear_tool_settings_tools)
             update_response
+          end
+
+          it "does not delete asset processors" do
+            ap = assignment.lti_asset_processors.create!(
+              context_external_tool: external_tool_1_3_model
+            )
+            assignment.update! submission_types: "online_upload"
+
+            update_response
+            expect(ap.reload.workflow_state).to eq("active")
           end
         end
 
@@ -3316,7 +3335,7 @@ describe AssignmentsApiController, type: :request do
         @ta.register!
         @ta.communication_channels.create(path: "ta@instructure.com").confirm!
 
-        @override_due_at = Time.parse("2002 Jun 22 12:00:00")
+        @override_due_at = Time.zone.parse("2002 Jun 22 12:00:00")
 
         @user = @teacher
         json = api_call(:post,
@@ -3833,7 +3852,7 @@ describe AssignmentsApiController, type: :request do
 
       it "returns unauthorized if attempting to change points possible" do
         api_update_assignment_call(@course, @assignment, { points_possible: 12 })
-        expect(response).to be_unauthorized
+        expect(response).to be_forbidden
       end
 
       it "succeeds if grading_type is provided but it matches current grading_type" do
@@ -3843,7 +3862,7 @@ describe AssignmentsApiController, type: :request do
 
       it "returns unauthorized if attempting to change grading_type" do
         api_update_assignment_call(@course, @assignment, { grading_type: "percent" })
-        expect(response).to be_unauthorized
+        expect(response).to be_forbidden
       end
 
       it "succeeds if grading_standard_id is provided but it matches current grading_standard_id" do
@@ -3858,11 +3877,11 @@ describe AssignmentsApiController, type: :request do
         expect(response).to be_successful
       end
 
-      it "returns unauthorized if attempting to change grading_standard_id" do
+      it "returns forbidden if attempting to change grading_standard_id" do
         grading_standard = grading_standard_for(@course)
         @assignment.update!(grading_standard:)
         api_update_assignment_call(@course, @assignment, { grading_standard_id: nil })
-        expect(response).to be_unauthorized
+        expect(response).to be_forbidden
       end
 
       it "succeeds if not provided attributes that trigger a regrade" do
@@ -3871,7 +3890,7 @@ describe AssignmentsApiController, type: :request do
       end
     end
 
-    it "returns unauthorized for users who do not have permission" do
+    it "returns forbidden for users who do not have permission" do
       course_with_student(active_all: true)
       @assignment = @course.assignments.create!({
                                                   name: "some assignment",
@@ -3880,7 +3899,7 @@ describe AssignmentsApiController, type: :request do
 
       api_update_assignment_call(@course, @assignment, { points_possible: 10 })
 
-      expect(response).to have_http_status :unauthorized
+      expect(response).to have_http_status :forbidden
     end
 
     it "allows user with grading rights to update assignment grading type" do
@@ -4488,7 +4507,7 @@ describe AssignmentsApiController, type: :request do
                                                   position: 2,
                                                   peer_review_count: 2,
                                                   peer_reviews: true,
-                                                  peer_reviews_due_at: Time.now,
+                                                  peer_reviews_due_at: Time.zone.now,
                                                   grading_type: "percent",
                                                   due_at: nil)
         @assignment.assignment_group = @start_group
@@ -5945,7 +5964,7 @@ describe AssignmentsApiController, type: :request do
                  },
                  {},
                  {},
-                 { expected_status: 401 })
+                 { expected_status: 403 })
         expect(@assignment.reload).not_to be_deleted
       end
     end
@@ -5994,7 +6013,7 @@ describe AssignmentsApiController, type: :request do
 
     describe "checkpoints in-place" do
       before do
-        @course.root_account.enable_feature!(:discussion_checkpoints)
+        @course.account.enable_feature!(:discussion_checkpoints)
 
         @assignment = @course.assignments.create!(title: "Assignment 1", has_sub_assignments: true)
         @c1 = @assignment.sub_assignments.create!(context: @assignment.context, sub_assignment_tag: CheckpointLabels::REPLY_TO_TOPIC, points_possible: 5, due_at: 3.days.from_now)
@@ -6051,7 +6070,7 @@ describe AssignmentsApiController, type: :request do
       it "translates assignment descriptions" do
         course_with_teacher(active_all: true)
         should_translate_user_content(@course) do |content|
-          assignment = @course.assignments.create!(description: content)
+          assignment = @course.assignments.create!(description: content, saving_user: @teacher)
           json = api_get_assignment_in_course(assignment, @course)
           json["description"]
         end
@@ -6060,7 +6079,7 @@ describe AssignmentsApiController, type: :request do
       it "translates assignment descriptions without verifiers" do
         course_with_teacher(active_all: true)
         should_translate_user_content(@course, false) do |content|
-          assignment = @course.assignments.create!(description: content)
+          assignment = @course.assignments.create!(description: content, saving_user: @teacher)
           json = api_get_assignment_in_course(assignment, @course, no_verifiers: true)
           json["description"]
         end
@@ -6112,14 +6131,19 @@ describe AssignmentsApiController, type: :request do
             "http://www.example.com/courses/#{@course.id}/discussion_topics/#{@topic.id}",
                                                  "attachments" => [],
                                                  "permissions" => { "attach" => true, "update" => true, "reply" => true, "delete" => true, "manage_assign_to" => true },
-                                                 "discussion_type" => "not_threaded",
+                                                 "discussion_type" => "threaded",
                                                  "group_category_id" => nil,
                                                  "can_group" => true,
                                                  "allow_rating" => false,
                                                  "only_graders_can_rate" => false,
                                                  "sort_by_rating" => false,
                                                  "todo_date" => nil,
-                                                 "anonymous_state" => nil
+                                                 "anonymous_state" => nil,
+                                                 "sort_order" => "desc",
+                                                 "sort_order_locked" => false,
+                                                 "expanded" => false,
+                                                 "expanded_locked" => false,
+
                                                })
       end
 
@@ -6495,7 +6519,7 @@ describe AssignmentsApiController, type: :request do
                      })
 
         # should be authorization error
-        expect(response).to have_http_status :unauthorized
+        expect(response).to have_http_status :forbidden
       end
 
       it "shows an unpublished assignment to teachers" do
@@ -6603,7 +6627,7 @@ describe AssignmentsApiController, type: :request do
                      id: @assignment1.id.to_s },
                    {},
                    {},
-                   { expected_status: 401 })
+                   { expected_status: 403 })
         end
 
         it "does not include assignment_visibility data when requested" do
@@ -6884,6 +6908,27 @@ describe AssignmentsApiController, type: :request do
       tag = assignment.external_tool_tag
       expect(tag.content_id).to eq mh.id
       expect(tag.content_type).to eq "Lti::MessageHandler"
+    end
+
+    it "creates attachment association when attachments are in description with an update" do
+      aa_test_data = AttachmentAssociationsSpecHelper.new(@teacher.account, @teacher)
+      api_call_as_user(
+        @teacher,
+        :put,
+        "/api/v1/courses/#{@course.id}/assignments/#{@assignment.id}",
+        {
+          controller: "assignments_api",
+          action: "update",
+          format: "json",
+          course_id: @course.id.to_s,
+          id: @assignment.id.to_s
+        },
+        { assignment: { description: aa_test_data.base_html } }
+      )
+
+      expect(aa_test_data.attachment1.attachment_associations.count).to eq 1
+      expect(aa_test_data.attachment1.attachment_associations.last.context_id).to eq @assignment.id
+      expect(aa_test_data.attachment1.attachment_associations.last.context_type).to eq "Assignment"
     end
 
     it "sets the context external tool type" do
@@ -7400,9 +7445,9 @@ describe AssignmentsApiController, type: :request do
       @new_dates = (7..9).map { |x| x.days.from_now }
     end
 
-    it "requires manage_assignments rights" do
+    it "requires manage_assignments_edit rights" do
       student_in_course(active_all: true)
-      api_bulk_update(@course, [], expected_status: 401)
+      api_bulk_update(@course, [], expected_status: 403)
     end
 
     it "expects an array of assignments" do
@@ -7680,7 +7725,7 @@ describe AssignmentsApiController, type: :request do
       end
 
       it "disallows editing moderated assignments if you're not the moderator" do
-        api_bulk_update(@course, [{ "id" => @a0.id, "all_dates" => [] }], expected_status: 401)
+        api_bulk_update(@course, [{ "id" => @a0.id, "all_dates" => [] }], expected_status: 403)
         api_bulk_update(@course, [{ "id" => @a1.id, "all_dates" => [] }])
       end
 

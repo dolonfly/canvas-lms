@@ -341,6 +341,7 @@ class EnrollmentsApiController < ApplicationController
   }
 
   include Api::V1::User
+  include Api::V1::Progress
   # @API List enrollments
   # Depending on the URL given, return a paginated list of either (1) all of
   # the enrollments in a course, (2) all of the enrollments in a section or (3)
@@ -437,8 +438,7 @@ class EnrollmentsApiController < ApplicationController
 
       enrollments = enrollments.joins(:user).select("enrollments.*")
 
-      has_courses = enrollments.where_clause.instance_variable_get(:@predicates)
-                               .any? { |cond| cond.is_a?(String) && cond.include?("courses.") }
+      has_courses = enrollments.where_clause.ast.to_sql.include?("courses.")
       enrollments = enrollments.joins(:course) if has_courses
       enrollments = enrollments.shard(@shard_scope) if @shard_scope
 
@@ -578,7 +578,7 @@ class EnrollmentsApiController < ApplicationController
   #
   # @argument enrollment[type] [Required, String, "StudentEnrollment"|"TeacherEnrollment"|"TaEnrollment"|"ObserverEnrollment"|"DesignerEnrollment"]
   #   Enroll the user as a student, teacher, TA, observer, or designer. If no
-  #   value is given, the type will be inferred by enrollment[role] if supplied,
+  #   value is given, the type will be inferred by +enrollment[role]+ if supplied,
   #   otherwise 'StudentEnrollment' will be used.
   #
   # @argument enrollment[role] [Deprecated, String]
@@ -801,6 +801,51 @@ class EnrollmentsApiController < ApplicationController
         render(json: { user: @current_user.errors }, status: :bad_request)
       end
     end
+  end
+
+  # @API Enroll multiple users to one or more courses
+  # Enrolls multiple users in one or more courses in a single operation.
+  # @argument user_ids[] [Required, Integer]
+  #   The user IDs to enroll in the courses.
+  #
+  # @argument course_ids[] [Required, Integer]
+  #  The course IDs to enroll each user in.
+  #
+  # @example_request
+  #   curl https://<canvas>/api/v1/account/:account_id/bulk_enrollment \
+  #     -X POST \
+  #     -F 'user_ids[]=1' \
+  #     -F 'user_ids[]=2' \
+  #     -F 'course_ids[]=10' \
+  #     -F 'course_ids[]=11' \
+  #
+  # @example_request
+  #   curl https://<canvas>/api/v1/account/:account_id/bulk_enrollment \
+  #     -X POST \
+  #     -F 'user_ids[]=1' \
+  #     -F 'course_ids[]=10' \
+  #     -F 'course_ids[]=11' \
+  #     -F 'course_ids[]=12' \
+  #
+  # @returns Progress
+  def bulk_enrollment
+    return render_unauthorized_action unless @context.grants_right?(@current_user, :manage_users_in_bulk)
+
+    user_ids = params[:user_ids]
+    course_ids = params[:course_ids]
+    if !user_ids.empty? && !course_ids.empty? && (user_ids.size * course_ids.size) > 500
+      return render json: { errors: "Too many users to enroll at once." }, status: :bad_request
+    end
+
+    progress = Progress.create!(context: @context, user: @current_user, tag: :bulk_enrollment)
+    process_params = {
+      user_ids:,
+      course_ids:
+    }
+
+    progress.process_job(Enrollment::BulkUpdate.new(@context, @current_user), :bulk_enrollment, { run_at: Time.zone.now, priority: Delayed::NORMAL_PRIORITY }, **process_params)
+
+    render json: progress_json(progress, @current_user, session)
   end
 
   # @API Conclude, deactivate, or delete an enrollment

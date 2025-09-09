@@ -17,27 +17,25 @@
  */
 
 import React from 'react'
-import {fireEvent, render} from '@testing-library/react'
-import {
-  CriterionModal,
-  DEFAULT_RUBRIC_RATINGS,
-  reorder,
-  type CriterionModalProps,
-} from '../CriterionModal'
 import type {RubricCriterion} from '@canvas/rubrics/react/types/rubric'
+import {fireEvent, render} from '@testing-library/react'
+import {CriterionModal, type CriterionModalProps} from '../components/CriterionModal/CriterionModal'
+import {DEFAULT_RUBRIC_RATINGS} from '../constants'
+import {reorderRatingsAtIndex} from '../../utils'
 
 describe('CriterionModal tests', () => {
   const renderComponent = (props?: Partial<CriterionModalProps>) => {
     return render(
       <CriterionModal
         isOpen={true}
-        unassessed={true}
         criterionUseRangeEnabled={true}
         onDismiss={() => {}}
         onSave={() => {}}
         hidePoints={false}
+        freeFormCriterionComments={false}
+        isFullWidth={true}
         {...props}
-      />
+      />,
     )
   }
 
@@ -83,7 +81,7 @@ describe('CriterionModal tests', () => {
       fireEvent.click(addRatingRow.firstChild as Element)
 
       const totalRatingNames = queryAllByTestId('rating-name')
-      expect(totalRatingNames.length).toEqual(DEFAULT_RUBRIC_RATINGS.length + 1)
+      expect(totalRatingNames).toHaveLength(DEFAULT_RUBRIC_RATINGS.length + 1)
 
       const ratingName = totalRatingNames[1] as HTMLInputElement
       const ratingPoints = queryAllByTestId(`rating-points`)[1] as HTMLInputElement
@@ -101,7 +99,7 @@ describe('CriterionModal tests', () => {
       fireEvent.click(addRatingRow.firstChild as Element)
 
       const totalRatingNames = queryAllByTestId('rating-name')
-      expect(totalRatingNames.length).toEqual(DEFAULT_RUBRIC_RATINGS.length + 1)
+      expect(totalRatingNames).toHaveLength(DEFAULT_RUBRIC_RATINGS.length + 1)
 
       const newLastIndex = totalRatingNames.length - 1
       const ratingName = totalRatingNames[newLastIndex] as HTMLInputElement
@@ -119,11 +117,11 @@ describe('CriterionModal tests', () => {
       fireEvent.click(removeRating)
 
       const totalRatingNames = queryAllByTestId('rating-name')
-      expect(totalRatingNames.length).toEqual(DEFAULT_RUBRIC_RATINGS.length - 1)
+      expect(totalRatingNames).toHaveLength(DEFAULT_RUBRIC_RATINGS.length - 1)
 
       const removedRating = totalRatingNames.find(
         ratingName =>
-          (ratingName as HTMLInputElement).value === DEFAULT_RUBRIC_RATINGS[2].description
+          (ratingName as HTMLInputElement).value === DEFAULT_RUBRIC_RATINGS[2].description,
       )
       expect(removedRating).toBeUndefined()
     })
@@ -140,7 +138,7 @@ describe('CriterionModal tests', () => {
       const startIndex = 0
       const endIndex = 3
 
-      const reorderedRatings = reorder({list: ratings, startIndex, endIndex})
+      const reorderedRatings = reorderRatingsAtIndex({list: ratings, startIndex, endIndex})
 
       const expectedRatings = [
         {id: '2', points: 4, description: 'Mastery', longDescription: ''},
@@ -210,7 +208,7 @@ describe('CriterionModal tests', () => {
     })
 
     it('should not render range checkbox if FF is false', () => {
-      const {queryByTestId, queryAllByTestId} = renderComponent({criterionUseRangeEnabled: false})
+      const {queryByTestId} = renderComponent({criterionUseRangeEnabled: false})
 
       expect(queryByTestId('enable-range-checkbox')).toBeNull()
     })
@@ -330,33 +328,15 @@ describe('CriterionModal tests', () => {
 
       fireEvent.click(getByTestId('rubric-criterion-cancel'))
 
+      const warningModal = getByTestId('rubric-assignment-exit-warning-modal')
+      expect(warningModal).toBeInTheDocument()
+
+      const exitWarningModalButton = getByTestId('exit-rubric-warning-button')
+      expect(exitWarningModalButton).toBeInTheDocument()
+
+      fireEvent.click(exitWarningModalButton)
+
       expect(onDismiss).toHaveBeenCalled()
-    })
-  })
-
-  describe('Assessed rubric tests', () => {
-    it('should not render editable inputs if the rubric is assessed', () => {
-      const {queryByTestId, queryAllByTestId} = renderComponent({unassessed: false})
-
-      expect(queryByTestId('enable-range-checkbox')).toBeNull()
-      expect(queryAllByTestId('rating-points').length).toEqual(0)
-      expect(queryAllByTestId('rating-points-assessed').length).toEqual(5)
-    })
-
-    it('should not add a new rating if the rubric is assessed', () => {
-      const {queryAllByTestId} = renderComponent({unassessed: false})
-      const addRatingRow = queryAllByTestId('add-rating-row')[1]
-
-      fireEvent.mouseOver(addRatingRow)
-      expect(addRatingRow).toBeEmptyDOMElement()
-    })
-
-    it('should not add a new rating if the rubric is assessed when hovering over the last add rating row', () => {
-      const {queryAllByTestId} = renderComponent({unassessed: false})
-      const addRatingRow = queryAllByTestId('add-rating-row')[DEFAULT_RUBRIC_RATINGS.length]
-
-      fireEvent.mouseOver(addRatingRow)
-      expect(addRatingRow).toBeEmptyDOMElement()
     })
   })
 
@@ -365,19 +345,223 @@ describe('CriterionModal tests', () => {
       const {queryByTestId, queryAllByTestId} = renderComponent({hidePoints: true})
 
       expect(queryByTestId('enable-range-checkbox')).toBeNull()
-      expect(queryAllByTestId('rating-points').length).toEqual(0)
-      expect(queryAllByTestId('rating-points-assessed').length).toEqual(0)
+      expect(queryAllByTestId('rating-points')).toHaveLength(0)
+      expect(queryAllByTestId('rating-points-assessed')).toHaveLength(0)
     })
 
     it('does not render points read-only text if hidePoints is true', () => {
       const {queryByTestId, queryAllByTestId} = renderComponent({
-        unassessed: false,
         hidePoints: true,
       })
 
       expect(queryByTestId('enable-range-checkbox')).toBeNull()
-      expect(queryAllByTestId('rating-points').length).toEqual(0)
-      expect(queryAllByTestId('rating-points-assessed').length).toEqual(0)
+      expect(queryAllByTestId('rating-points')).toHaveLength(0)
+      expect(queryAllByTestId('rating-points-assessed')).toHaveLength(0)
+    })
+  })
+
+  describe('Warning Modal Tests', () => {
+    it('should show call dismiss if nothing changed', () => {
+      const onDismiss = jest.fn()
+      const {getByTestId} = renderComponent({
+        onDismiss,
+        criterion: getCriterion(),
+      })
+
+      fireEvent.click(getByTestId('rubric-criterion-cancel'))
+      expect(onDismiss).toHaveBeenCalled()
+    })
+
+    it('should show warning modal when criterion description has been changed', () => {
+      const onDismiss = jest.fn()
+      const {getByTestId} = renderComponent({
+        onDismiss,
+        criterion: getCriterion(),
+      })
+
+      const descriptionInput = getByTestId('rubric-criterion-name-input') as HTMLInputElement
+      fireEvent.change(descriptionInput, {target: {value: 'Modified Criterion Description'}})
+
+      fireEvent.click(getByTestId('rubric-criterion-cancel'))
+
+      const warningModal = getByTestId('rubric-assignment-exit-warning-modal')
+      expect(warningModal).toBeInTheDocument()
+
+      const exitWarningModalButton = getByTestId('exit-rubric-warning-button')
+      expect(exitWarningModalButton).toBeInTheDocument()
+
+      fireEvent.click(exitWarningModalButton)
+      expect(onDismiss).toHaveBeenCalled()
+    })
+
+    it('should show warning modal when criterion long description has been changed', () => {
+      const onDismiss = jest.fn()
+      const {getByTestId} = renderComponent({
+        onDismiss,
+        criterion: getCriterion(),
+      })
+
+      const longDescriptionInput = getByTestId(
+        'rubric-criterion-description-input',
+      ) as HTMLInputElement
+      fireEvent.change(longDescriptionInput, {target: {value: 'Modified Long Description'}})
+
+      fireEvent.click(getByTestId('rubric-criterion-cancel'))
+
+      const warningModal = getByTestId('rubric-assignment-exit-warning-modal')
+      expect(warningModal).toBeInTheDocument()
+
+      const exitWarningModalButton = getByTestId('exit-rubric-warning-button')
+      expect(exitWarningModalButton).toBeInTheDocument()
+
+      fireEvent.click(exitWarningModalButton)
+      expect(onDismiss).toHaveBeenCalled()
+    })
+
+    it('should show warning modal when criterion use range has been changed', () => {
+      const onDismiss = jest.fn()
+      const {getByTestId} = renderComponent({
+        onDismiss,
+        criterion: getCriterion({criterionUseRange: false}),
+      })
+
+      const useRangeCheckbox = getByTestId('enable-range-checkbox') as HTMLInputElement
+      fireEvent.click(useRangeCheckbox)
+
+      fireEvent.click(getByTestId('rubric-criterion-cancel'))
+
+      const warningModal = getByTestId('rubric-assignment-exit-warning-modal')
+      expect(warningModal).toBeInTheDocument()
+
+      const exitWarningModalButton = getByTestId('exit-rubric-warning-button')
+      expect(exitWarningModalButton).toBeInTheDocument()
+
+      fireEvent.click(exitWarningModalButton)
+      expect(onDismiss).toHaveBeenCalled()
+    })
+
+    it('should show warning modal when ratings have been changed', () => {
+      const onDismiss = jest.fn()
+      const {getByTestId, queryAllByTestId} = renderComponent({
+        onDismiss,
+        criterion: getCriterion(),
+      })
+
+      const ratingDescriptionInput = queryAllByTestId('rating-name')[0] as HTMLInputElement
+      fireEvent.change(ratingDescriptionInput, {target: {value: 'Modified Rating'}})
+
+      fireEvent.click(getByTestId('rubric-criterion-cancel'))
+
+      const warningModal = getByTestId('rubric-assignment-exit-warning-modal')
+      expect(warningModal).toBeInTheDocument()
+
+      const exitWarningModalButton = getByTestId('exit-rubric-warning-button')
+      expect(exitWarningModalButton).toBeInTheDocument()
+
+      fireEvent.click(exitWarningModalButton)
+      expect(onDismiss).toHaveBeenCalled()
+    })
+  })
+
+  describe('Free Form Criterion Comments Tests', () => {
+    it('should not render ratings if freeFormCriterionComments is true', () => {
+      const {queryAllByTestId, getByTestId} = renderComponent({freeFormCriterionComments: true})
+
+      expect(queryAllByTestId('rating-name')).toHaveLength(0)
+      expect(queryAllByTestId('rating-points')).toHaveLength(0)
+      expect(queryAllByTestId('rating-scale')).toHaveLength(0)
+      expect(getByTestId('free-form-criterion-comments-label')).toHaveTextContent(
+        'Written Feedback',
+      )
+    })
+  })
+
+  describe('Auto Generate Points Tests', () => {
+    it('should auto-generate points for ratings when max points input is changed', () => {
+      const ratings = [
+        {id: '1', description: 'First Rating', points: 10, longDescription: ''},
+        {id: '2', description: 'Second Rating', points: 8, longDescription: ''},
+        {id: '3', description: 'Third Rating', points: 6, longDescription: ''},
+        {id: '4', description: 'Fourth Rating', points: 4, longDescription: ''},
+      ]
+      const criterion = getCriterion({ratings})
+      const {queryAllByTestId} = renderComponent({criterion})
+
+      const maxPointsInput = queryAllByTestId('max-points-input')[0] as HTMLInputElement
+      fireEvent.change(maxPointsInput, {target: {value: '20'}})
+      fireEvent.blur(maxPointsInput)
+
+      const totalRatingPoints = queryAllByTestId('rating-points') as HTMLInputElement[]
+      expect(totalRatingPoints[0].value).toEqual('20')
+      expect(totalRatingPoints[1].value).toEqual('16')
+      expect(totalRatingPoints[2].value).toEqual('12')
+      expect(totalRatingPoints[3].value).toEqual('8')
+    })
+
+    it('should auto-generate points when the max points is changed to be lower than the current max', () => {
+      const ratings = [
+        {id: '1', description: 'First Rating', points: 10, longDescription: ''},
+        {id: '2', description: 'Second Rating', points: 8, longDescription: ''},
+        {id: '3', description: 'Third Rating', points: 6, longDescription: ''},
+        {id: '4', description: 'Fourth Rating', points: 4, longDescription: ''},
+      ]
+      const criterion = getCriterion({ratings})
+      const {queryAllByTestId} = renderComponent({criterion})
+
+      const maxPointsInput = queryAllByTestId('max-points-input')[0] as HTMLInputElement
+      fireEvent.change(maxPointsInput, {target: {value: '8'}})
+      fireEvent.blur(maxPointsInput)
+
+      const totalRatingPoints = queryAllByTestId('rating-points') as HTMLInputElement[]
+      expect(totalRatingPoints[0].value).toEqual('8')
+      expect(totalRatingPoints[1].value).toEqual('6.4')
+      expect(totalRatingPoints[2].value).toEqual('4.8')
+      expect(totalRatingPoints[3].value).toEqual('3.2')
+    })
+  })
+
+  describe('Range Tests', () => {
+    it('should render correct ranges for criterion use range', () => {
+      const criterion = getCriterion({
+        criterionUseRange: true,
+        ratings: [
+          {id: '1', description: 'First Rating', points: 10, longDescription: ''},
+          {id: '2', description: 'Second Rating', points: 8, longDescription: ''},
+          {id: '2', description: 'Second Rating', points: 5, longDescription: ''},
+          {id: '2', description: 'Second Rating', points: 3, longDescription: ''},
+        ],
+      })
+
+      const {queryAllByTestId} = renderComponent({criterionUseRangeEnabled: true, criterion})
+
+      const rangeStarts = queryAllByTestId('range-start') as HTMLInputElement[]
+
+      expect(rangeStarts).toHaveLength(4)
+      expect(rangeStarts[0].textContent).toEqual('8.1 to ')
+      expect(rangeStarts[1].textContent).toEqual('5.1 to ')
+      expect(rangeStarts[2].textContent).toEqual('3.1 to ')
+      expect(rangeStarts[3].textContent).toEqual('--')
+    })
+
+    it('should render no range when the ratings of the previous rating are the same as the current rating', () => {
+      const criterion = getCriterion({
+        criterionUseRange: true,
+        ratings: [
+          {id: '1', description: 'First Rating', points: 10, longDescription: ''},
+          {id: '2', description: 'Second Rating', points: 10, longDescription: ''},
+          {id: '3', description: 'Third Rating', points: 8, longDescription: ''},
+          {id: '3', description: 'Third Rating', points: 5, longDescription: ''},
+        ],
+      })
+
+      const {queryAllByTestId} = renderComponent({criterionUseRangeEnabled: true, criterion})
+
+      const rangeStarts = queryAllByTestId('range-start') as HTMLInputElement[]
+      expect(rangeStarts).toHaveLength(4)
+      expect(rangeStarts[0].textContent).toEqual('--')
+      expect(rangeStarts[1].textContent).toEqual('8.1 to ')
+      expect(rangeStarts[2].textContent).toEqual('5.1 to ')
+      expect(rangeStarts[3].textContent).toEqual('--')
     })
   })
 })

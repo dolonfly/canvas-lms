@@ -24,19 +24,10 @@ RSpec.describe DeveloperKeyAccountBindingsController do
   let(:sub_account) { account_model(parent_account: root_account) }
   let(:sub_account_admin) { account_admin_user(account: sub_account) }
   let(:root_account_developer_key) do
-    DeveloperKey.create!(
-      account: root_account,
-      lti_registration: root_account_lti_registration
-    )
+    lti_developer_key_model(account: root_account, lti_registration: root_account_lti_registration)
   end
   let(:root_account_lti_registration) do
-    Lti::Registration.create!(
-      account: root_account,
-      name: "lti registration",
-      admin_nickname: "lti registration",
-      created_by: sub_account_admin,
-      updated_by: sub_account_admin
-    )
+    lti_registration_model(account: root_account)
   end
 
   let(:valid_parameters) do
@@ -59,7 +50,7 @@ RSpec.describe DeveloperKeyAccountBindingsController do
     it 'renders unauthorized if the user does not have "manage_developer_keys"' do
       user_session(unauthorized_admin)
       post :create_or_update, params:, format: :json
-      expect(response).to be_unauthorized
+      expect(response).to be_forbidden
     end
 
     it 'succeeds if the user has "manage_developer_keys"' do
@@ -110,7 +101,7 @@ RSpec.describe DeveloperKeyAccountBindingsController do
     it 'renders unauthorized if the user does not have "manage_developer_keys"' do
       user_session(unauthorized_admin)
       post :create_or_update, params:, format: :json
-      expect(response).to be_unauthorized
+      expect(response).to be_forbidden
     end
 
     it "allows updating the workflow_state" do

@@ -56,7 +56,7 @@ describe('MessageDetailHeader', () => {
     const {getByText, queryByTestId} = render(
       <ConversationContext.Provider value={{isSubmissionCommentsType: true}}>
         <MessageDetailHeader {...props} />
-      </ConversationContext.Provider>
+      </ConversationContext.Provider>,
     )
     expect(getByText('Message Header Text')).toBeInTheDocument()
     expect(queryByTestId('message-more-options')).not.toBeInTheDocument()
@@ -70,12 +70,53 @@ describe('MessageDetailHeader', () => {
     const {getByRole, queryByText, queryByTestId} = render(<MessageDetailHeader {...props} />)
     const moreOptionsButton = getByRole(
       (role, element) =>
-        role === 'button' && element.textContent === 'More options for Message Header Text'
+        role === 'button' && element.textContent === 'More options for Message Header Text',
     )
 
     fireEvent.click(moreOptionsButton)
     expect(queryByText('Reply All')).not.toBeInTheDocument()
     expect(queryByTestId('message-detail-header-reply-btn')).not.toBeInTheDocument()
+  })
+
+  describe('when restrict_student_access feature is enabled', () => {
+    const props = {
+      text: 'Message Header Text',
+      onReplyAll: jest.fn(),
+      onForward: jest.fn(),
+      onArchive: jest.fn(),
+      onStar: jest.fn(),
+      onDelete: jest.fn(),
+    }
+
+    beforeAll(() => {
+      window.ENV.FEATURES ||= {}
+      window.ENV.FEATURES.restrict_student_access = true
+    })
+
+    afterAll(() => {
+      delete window.ENV.FEATURES.restrict_student_access
+    })
+
+    it('does not render the reply all & delete button', async () => {
+      const {getByText, queryByText} = render(<MessageDetailHeader {...props} />)
+      const moreOptionsButton = getByText('More options for Message Header Text')
+
+      fireEvent.click(moreOptionsButton)
+
+      expect(queryByText('Reply All')).not.toBeInTheDocument()
+      expect(queryByText('Delete')).not.toBeInTheDocument()
+    })
+
+    it('renders all other expected buttons', async () => {
+      const {getByText} = render(<MessageDetailHeader {...props} />)
+      const moreOptionsButton = getByText('More options for Message Header Text')
+
+      fireEvent.click(moreOptionsButton)
+
+      expect(getByText('Forward')).toBeInTheDocument()
+      expect(getByText('Star')).toBeInTheDocument()
+      expect(getByText('Archive')).toBeInTheDocument()
+    })
   })
 
   describe('sends the selected option to the provided callback function', () => {
@@ -86,7 +127,7 @@ describe('MessageDetailHeader', () => {
       props.onReply = jest.fn()
       const {getByRole} = render(<MessageDetailHeader {...props} />)
       const replyButton = getByRole(
-        (role, element) => role === 'button' && element.textContent === 'Reply for Button Test'
+        (role, element) => role === 'button' && element.textContent === 'Reply for Button Test',
       )
 
       fireEvent.click(replyButton)
@@ -99,7 +140,7 @@ describe('MessageDetailHeader', () => {
       const {getByRole, getByText} = render(<MessageDetailHeader {...props} />)
       const moreOptionsButton = getByRole(
         (role, element) =>
-          role === 'button' && element.textContent === 'More options for Button Test'
+          role === 'button' && element.textContent === 'More options for Button Test',
       )
 
       fireEvent.click(moreOptionsButton)
@@ -113,7 +154,7 @@ describe('MessageDetailHeader', () => {
       const {getByRole, getByText} = render(<MessageDetailHeader {...props} />)
       const moreOptionsButton = getByRole(
         (role, element) =>
-          role === 'button' && element.textContent === 'More options for Button Test'
+          role === 'button' && element.textContent === 'More options for Button Test',
       )
       fireEvent.click(moreOptionsButton)
       fireEvent.click(getByText('Delete'))
@@ -126,7 +167,7 @@ describe('MessageDetailHeader', () => {
       const {getByRole, getByText} = render(<MessageDetailHeader {...props} />)
       const moreOptionsButton = getByRole(
         (role, element) =>
-          role === 'button' && element.textContent === 'More options for Button Test'
+          role === 'button' && element.textContent === 'More options for Button Test',
       )
       fireEvent.click(moreOptionsButton)
       fireEvent.click(getByText('Forward'))
@@ -140,7 +181,7 @@ describe('MessageDetailHeader', () => {
       const {getByRole, getByText} = render(<MessageDetailHeader {...props} />)
       const moreOptionsButton = getByRole(
         (role, element) =>
-          role === 'button' && element.textContent === 'More options for Button Test'
+          role === 'button' && element.textContent === 'More options for Button Test',
       )
       fireEvent.click(moreOptionsButton)
       fireEvent.click(getByText('Star'))
@@ -153,7 +194,7 @@ describe('MessageDetailHeader', () => {
       const {getByRole, getByText} = render(<MessageDetailHeader {...props} />)
       const moreOptionsButton = getByRole(
         (role, element) =>
-          role === 'button' && element.textContent === 'More options for Button Test'
+          role === 'button' && element.textContent === 'More options for Button Test',
       )
       fireEvent.click(moreOptionsButton)
       fireEvent.click(getByText('Unstar'))
@@ -166,7 +207,7 @@ describe('MessageDetailHeader', () => {
       const {getByRole, getByText} = render(<MessageDetailHeader {...props} />)
       const moreOptionsButton = getByRole(
         (role, element) =>
-          role === 'button' && element.textContent === 'More options for Button Test'
+          role === 'button' && element.textContent === 'More options for Button Test',
       )
       fireEvent.click(moreOptionsButton)
       fireEvent.click(getByText('Archive'))
@@ -179,7 +220,7 @@ describe('MessageDetailHeader', () => {
       const {getByRole, getByText} = render(<MessageDetailHeader {...props} />)
       const moreOptionsButton = getByRole(
         (role, element) =>
-          role === 'button' && element.textContent === 'More options for Button Test'
+          role === 'button' && element.textContent === 'More options for Button Test',
       )
       fireEvent.click(moreOptionsButton)
       fireEvent.click(getByText('Unarchive'))

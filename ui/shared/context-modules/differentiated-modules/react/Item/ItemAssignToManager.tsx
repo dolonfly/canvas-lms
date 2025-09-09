@@ -18,7 +18,8 @@
 
 import React from 'react'
 import ItemAssignToTray, {type ItemAssignToTrayProps} from './ItemAssignToTray'
-import {QueryProvider} from '@canvas/query'
+import {queryClient} from '@canvas/query'
+import {QueryClientProvider} from '@tanstack/react-query'
 
 export default function ItemAssignToManager({
   open,
@@ -50,9 +51,10 @@ export default function ItemAssignToManager({
   onInitialStateSet,
   postToSIS,
   isTray,
+  setOverrides,
 }: ItemAssignToTrayProps) {
   return (
-    <QueryProvider>
+    <QueryClientProvider client={queryClient}>
       <ItemAssignToTray
         open={open}
         onSave={onSave}
@@ -83,7 +85,8 @@ export default function ItemAssignToManager({
         onInitialStateSet={onInitialStateSet}
         postToSIS={postToSIS}
         isTray={isTray}
+        setOverrides={setOverrides}
       />
-    </QueryProvider>
+    </QueryClientProvider>
   )
 }

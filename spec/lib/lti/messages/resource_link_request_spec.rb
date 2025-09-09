@@ -187,10 +187,6 @@ describe Lti::Messages::ResourceLinkRequest do
       end
 
       before do
-        allow(controller).to receive(:lti_line_item_index_url).with(
-          line_items_url_params
-        ).and_return("lti_line_item_index_url")
-
         allow(controller).to receive(:lti_line_item_show_url).with(
           line_items_url_params.merge(
             id: expected_assignment_line_item.id
@@ -242,9 +238,7 @@ describe Lti::Messages::ResourceLinkRequest do
 
       context "when the tool has been re-installed" do
         let(:tool_override) do
-          t = tool.dup
-          t.save!
-          t
+          registration.new_external_tool(course)
         end
 
         before do
@@ -478,6 +472,6 @@ describe Lti::Messages::ResourceLinkRequest do
   end
 
   def expect_assignment_and_grade_line_items_url(claims)
-    expect(claims.dig("https://purl.imsglobal.org/spec/lti-ags/claim/endpoint", "lineitems")).to eq "lti_line_item_index_url"
+    expect(claims.dig("https://purl.imsglobal.org/spec/lti-ags/claim/endpoint", "lineitems")).to eq "http://#{Account.default.environment_specific_domain}/api/lti/courses/#{course.id}/line_items"
   end
 end

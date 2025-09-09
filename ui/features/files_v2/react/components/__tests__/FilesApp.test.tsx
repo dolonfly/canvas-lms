@@ -19,62 +19,186 @@
 import React from 'react'
 import {render, screen} from '@testing-library/react'
 import FilesApp from '../FilesApp'
-import {useQuery} from '@tanstack/react-query'
-import {showFlashError} from '@canvas/alerts/react/FlashAlert'
-import friendlyBytes from '@canvas/files/util/friendlyBytes'
+import {MockedQueryClientProvider} from '@canvas/test-utils/query'
+import {queryClient} from '@canvas/query'
+import fetchMock from 'fetch-mock'
+import {createMemoryRouter, RouterProvider} from 'react-router-dom'
+import {FAKE_FOLDERS} from '../../../fixtures/fakeData'
+import {NotFoundError} from '../../../utils/apiUtils'
+import {resetAndGetFilesEnv} from '../../../utils/filesEnvUtils'
+import {createFilesContexts} from '../../../fixtures/fileContexts'
 
-// Mock the `useQuery` hook from TanStack Query
-jest.mock('@tanstack/react-query', () => ({
-  useQuery: jest.fn(),
-}))
-
-jest.mock('@canvas/alerts/react/FlashAlert', () => ({
-  showFlashError: jest.fn().mockReturnValue(jest.fn()),
-}))
+jest.mock('../../hooks/useGetFolders', () => {
+  const originalModule = jest.requireActual('../../hooks/useGetFolders')
+  return {
+    ...originalModule,
+    useGetFolders: originalModule.useGetFolders,
+  }
+})
 
 describe('FilesApp', () => {
+  let flashElements: any
+
   beforeEach(() => {
-    jest.clearAllMocks()
+    const filesContexts = createFilesContexts({
+      permissions: {
+        manage_files_add: true,
+        manage_files_delete: true,
+        manage_files_edit: true,
+      },
+    })
+    resetAndGetFilesEnv(filesContexts)
+
+    fetchMock.get(/.*\/by_path/, [FAKE_FOLDERS[0]], {overwriteRoutes: true})
+    fetchMock.get(/.*\/all.*/, [FAKE_FOLDERS[1]], {
+      overwriteRoutes: true,
+    })
+    fetchMock.get(/.*\/files\/quota/, {quota_used: 500, quota: 1000}, {overwriteRoutes: true})
+    fetchMock.get(/.*\/folders_and_files\?search_term.*/, [], {overwriteRoutes: true})
+
+    flashElements = document.createElement('div')
+    flashElements.setAttribute('id', 'flash_screenreader_holder')
+    flashElements.setAttribute('role', 'alert')
+    document.body.appendChild(flashElements)
   })
 
-  it('renders "Files" when contextAssetString starts with "course_"', () => {
-    useQuery.mockReturnValue({data: null, isLoading: false, error: null})
-    render(<FilesApp contextAssetString="course_12345" />)
+  afterEach(() => {
+    fetchMock.resetHistory()
+    queryClient.clear()
 
-    const headingElement = screen.getByText('Files', {exact: true})
-    expect(headingElement).toBeInTheDocument()
+    document.body.removeChild(flashElements)
+    flashElements = undefined
   })
 
-  it('renders "All My Files" when contextAssetString starts with "user_"', () => {
-    useQuery.mockReturnValue({data: null, isLoading: false, error: null})
-    render(<FilesApp contextAssetString="user_67890" />)
+  const renderComponent = (overrideEntries?: string[]) => {
+    const entries = overrideEntries || ['/']
+    const router = createMemoryRouter(
+      [
+        {
+          path: '*',
+          Component: FilesApp,
+        },
+      ],
+      {initialEntries: entries},
+    )
+    return render(
+      <MockedQueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </MockedQueryClientProvider>,
+    )
+  }
 
-    const headingElement = screen.getByText(/All My Files/i)
-    expect(headingElement).toBeInTheDocument()
-  })
-
-  it('displays error message if quota fetch fails', () => {
-    useQuery.mockReturnValue({data: null, isLoading: false, error: new Error('Failed to fetch')})
-    render(<FilesApp contextAssetString="user_67890" />)
-
-    expect(showFlashError).toHaveBeenCalledWith('An error occurred while loading files usage data')
-  })
-
-  it('renders progress bar with quota data when fetch is successful', async () => {
-    useQuery.mockReturnValue({
-      data: {quota_used: 500, quota: 1000},
-      isLoading: false,
-      error: null,
+  describe('without permissions', () => {
+    beforeEach(() => {
+      const filesContexts = createFilesContexts({
+        permissions: {
+          manage_files_add: false,
+          manage_files_delete: false,
+          manage_files_edit: false,
+        },
+      })
+      resetAndGetFilesEnv(filesContexts)
     })
 
-    render(<FilesApp contextAssetString="user_67890" />)
+    it('does not render progress bar without permission', async () => {
+      renderComponent()
 
-    const quota = friendlyBytes('1000')
-    const percentageText = await screen.findByText(`50% of ${quota} used`)
-    expect(percentageText).toBeInTheDocument()
+      await screen.findByRole('button', {name: /all my files/i})
 
-    const progressBar = screen.getByLabelText(/File Storage Quota Used/i)
-    expect(progressBar).toHaveAttribute('aria-valuemax', '1000')
-    expect(progressBar).toHaveAttribute('aria-valuenow', '500')
+      expect(fetchMock.calls()).toHaveLength(1)
+      expect(fetchMock.calls()[0][0]).not.toContain('/files/quota')
+    })
+
+    it('does not render Upload File or Create Folder buttons when user does not have permission', async () => {
+      renderComponent()
+
+      const allMyFilesButton = await screen.findByRole('button', {name: /all my files/i})
+      expect(allMyFilesButton).toBeInTheDocument()
+
+      const uploadButton = screen.queryByRole('button', {name: 'Upload'})
+      const createFolderButton = screen.queryByRole('button', {name: 'Folder'})
+
+      expect(uploadButton).not.toBeInTheDocument()
+      expect(createFolderButton).not.toBeInTheDocument()
+    })
+  })
+
+  it('renders Upload File and Create Folder buttons when user has permission', async () => {
+    renderComponent()
+
+    await screen.findByRole('button', {name: /all my files/i})
+
+    const uploadButton = await screen.findByRole('button', {name: 'Upload'})
+    const createFolderButton = await screen.findByRole('button', {name: /add folder/i})
+
+    expect(uploadButton).toBeInTheDocument()
+    expect(createFolderButton).toBeInTheDocument()
+  })
+
+  it('hides Upload File and Create Folder buttons when searching', async () => {
+    renderComponent(['?search_term=foo'])
+
+    const allMyFilesButton = await screen.findByRole('button', {name: /all my files/i})
+    expect(allMyFilesButton).toBeInTheDocument()
+
+    const uploadButton = screen.queryByRole('button', {name: 'Upload'})
+    const createFolderButton = screen.queryByRole('button', {name: 'Folder'})
+
+    expect(uploadButton).not.toBeInTheDocument()
+    expect(createFolderButton).not.toBeInTheDocument()
+  })
+
+  describe('404 error handling', () => {
+    const hooksModule = require('../../hooks/useGetFolders')
+    const originalUseGetFolders = hooksModule.useGetFolders
+
+    afterEach(() => {
+      hooksModule.useGetFolders = originalUseGetFolders
+    })
+
+    it('renders NotFoundArtwork component when a 404 error occurs', async () => {
+      const mockError = new NotFoundError('Not found')
+      hooksModule.useGetFolders = jest.fn().mockReturnValue({
+        data: null,
+        error: mockError,
+        isLoading: false,
+      })
+
+      renderComponent()
+
+      const notFoundMessage = await screen.findByText(/whoops... looks like nothing is here/i)
+      expect(notFoundMessage).toBeInTheDocument()
+      expect(screen.getByText(/we couldn't find that page/i)).toBeInTheDocument()
+    })
+
+    it('does not render NotFoundArtwork component when no error occurs', async () => {
+      hooksModule.useGetFolders = jest.fn().mockReturnValue({
+        data: [{id: '1', name: 'Test Folder', context_id: '123', context_type: 'course'}],
+        error: null,
+        isLoading: false,
+      })
+
+      renderComponent()
+
+      await screen.findByText('Test Folder')
+
+      const notFoundContainer = document.querySelector('.not_found_page_artwork')
+      expect(notFoundContainer).not.toBeInTheDocument()
+    })
+
+    it('does not show flash error message for 404 errors', async () => {
+      const mockError = new NotFoundError('Not found')
+      hooksModule.useGetFolders = jest.fn().mockReturnValue({
+        data: null,
+        error: mockError,
+        isLoading: false,
+      })
+
+      renderComponent()
+
+      // Verify the 404 error doesn't trigger a flash message
+      await screen.findByText(/whoops... looks like nothing is here/i)
+      expect(flashElements.textContent).not.toContain('Failed to fetch files and folders')
+    })
   })
 })

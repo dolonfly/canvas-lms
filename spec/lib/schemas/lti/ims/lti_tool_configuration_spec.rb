@@ -49,7 +49,8 @@ describe Schemas::Lti::IMS::LtiToolConfiguration do
               "https://canvas.instructure.com/lti/account_navigation"
             ],
             roles: [],
-            target_link_uri: "http://yaltt.inseng.test/api/registrations/14/launch?placement=https://canvas.instructure.com/lti/account_navigation"
+            target_link_uri: "http://yaltt.inseng.test/api/registrations/14/launch?placement=https://canvas.instructure.com/lti/account_navigation",
+            "https://canvas.instructure.com/lti/display_type": "new_window",
           }
         ],
         target_link_uri: "http://yaltt.inseng.test/api/registrations/14/launch",
@@ -81,12 +82,12 @@ describe Schemas::Lti::IMS::LtiToolConfiguration do
         ]
       }
       invalid_configuration = valid_configuration.deep_merge(invalid_placement)
-      config_errors = Schemas::Lti::IMS::LtiToolConfiguration.simple_validation_first_error(
+      config_errors = Schemas::Lti::IMS::LtiToolConfiguration.simple_validation_errors(
         invalid_configuration,
         error_format: :hash
       )
 
-      expect(config_errors).not_to be_blank
+      expect(config_errors).not_to be_empty
     end
   end
 end

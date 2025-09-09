@@ -18,7 +18,7 @@
 
 import React from 'react'
 import DateHelper from '@canvas/datetime/dateHelper'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 
 import useStore from '../../stores'
 
@@ -39,8 +39,11 @@ import {View} from '@instructure/ui-view'
 
 import WhatIfGrade from '../WhatIfGrade'
 import {getDisplayStatus, getDisplayScore, submissionCommentsPresent} from '../utils'
+import AssetProcessorCell from '../../AssetProcessorCell'
+import {convertGraphqlLtiAssetReportToLtiAssetReportWithAsset} from '@canvas/lti-asset-processor/model/AssetReport'
+import {existingAttachedAssetProcessorFromGraphql} from '@canvas/lti/model/AssetProcessor'
 
-const I18n = useI18nScope('grade_summary')
+const I18n = createI18nScope('grade_summary')
 
 const getSubmissionCommentsTrayProps = assignmentId => {
   const matchingSubmission = ENV.submissions.find(x => x.assignment_id === assignmentId)
@@ -91,8 +94,11 @@ export const assignmentRow = (
   setOpenRubricDetailIds,
   openRubricDetailIds,
   setActiveWhatIfScores,
-  activeWhatIfScores
+  activeWhatIfScores,
+  showDocumentProcessors = false,
 ) => {
+  const submission = assignment?.submissionsConnection?.nodes[0]
+
   const handleAssignmentDetailOpen = () => {
     if (!openAssignmentDetailIds.includes(assignment._id)) {
       setOpenAssignmentDetailIds([...openAssignmentDetailIds, assignment._id])
@@ -107,8 +113,8 @@ export const assignmentRow = (
   }
 
   const handleRubricDetailOpen = () => {
-    if (assignment?.submissionsConnection?.nodes[0]?.hasUnreadRubricAssessment) {
-      handleRubricReadStateChange(assignment?.submissionsConnection?.nodes[0]?._id)
+    if (submission?.hasUnreadRubricAssessment) {
+      handleRubricReadStateChange(submission?._id)
     }
     if (!openRubricDetailIds.includes(assignment._id)) {
       setOpenRubricDetailIds([...openRubricDetailIds, assignment._id])
@@ -123,7 +129,7 @@ export const assignmentRow = (
   }
 
   const renderRubricButton = () => {
-    return assignment?.submissionsConnection?.nodes[0]?.hasUnreadRubricAssessment ? (
+    return submission?.hasUnreadRubricAssessment ? (
       <Badge
         type="notification"
         formatOutput={() => (
@@ -155,13 +161,20 @@ export const assignmentRow = (
     )
   }
 
+  const reports = submission?.ltiAssetReportsConnection?.nodes?.map(
+    convertGraphqlLtiAssetReportToLtiAssetReportWithAsset,
+  )
+  const assetProcessors = (assignment?.ltiAssetProcessorsConnection?.nodes || []).map(
+    existingAttachedAssetProcessorFromGraphql,
+  )
+
   return (
     <Table.Row
       data-testid="assignment-row"
       key={`assignment_${assignment._id}`}
       onMouseEnter={() => {
-        if (assignment?.submissionsConnection?.nodes[0]?.readState !== 'read') {
-          handleReadStateChange(assignment?.submissionsConnection?.nodes[0]?._id)
+        if (submission?.readState !== 'read') {
+          handleReadStateChange(submission?._id)
         }
       }}
     >
@@ -182,7 +195,7 @@ export const assignmentRow = (
       </Table.Cell>
       <Table.Cell textAlign="center">{getDisplayStatus(assignment)}</Table.Cell>
       <Table.Cell textAlign="center">
-        {assignment?.submissionsConnection?.nodes[0]?.hideGradeFromStudent ? (
+        {submission?.hideGradeFromStudent ? (
           <Tooltip renderTip={I18n.t('This assignment is muted')}>
             <IconMutedLine />
           </Tooltip>
@@ -235,7 +248,7 @@ export const assignmentRow = (
               </View>
             </Flex.Item>
             {assignment?.submissionsConnection?.nodes.length > 0 &&
-              assignment?.submissionsConnection?.nodes[0]?.readState !== 'read' && (
+              submission?.readState !== 'read' && (
                 <Flex.Item>
                   <div
                     style={{
@@ -260,12 +273,20 @@ export const assignmentRow = (
           </Flex>
         )}
       </Table.Cell>
+      <Table.Cell textAlign="start">
+        {showDocumentProcessors && Array.isArray(reports) && (
+          <AssetProcessorCell
+            assetProcessors={assetProcessors}
+            assetReports={reports}
+            submissionType={submission?.submissionType}
+            assignmentName={assignment?.name}
+          />
+        )}
+      </Table.Cell>
       <Table.Cell textAlign="end">
         <Flex justifyItems="end">
           <Flex.Item>
-            {assignment?.rubric &&
-            assignment?.submissionsConnection?.nodes[0]?.rubricAssessmentsConnection?.nodes.length >
-              0 ? (
+            {assignment?.rubric && submission?.rubricAssessmentsConnection?.nodes.length > 0 ? (
               renderRubricButton()
             ) : (
               <View as="div" width="52px" />
@@ -301,9 +322,7 @@ export const assignmentRow = (
                 aria-expanded={assignment?._id === submissionAssignmentId}
               >
                 <IconCommentLine />
-                <Text size="small">
-                  {assignment?.submissionsConnection.nodes[0].commentsConnection.nodes.length}
-                </Text>
+                <Text size="small">{submission.commentsConnection.nodes.length}</Text>
               </IconButton>
             ) : (
               <View as="div" width="52px" />

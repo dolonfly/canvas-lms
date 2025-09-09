@@ -16,40 +16,25 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
-import classNames from 'classnames'
-import type {AuthProvider} from '../types'
-import type {ViewOwnProps} from '@instructure/ui-view'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {Button} from '@instructure/ui-buttons'
-import {Grid, GridCol, GridRow} from '@instructure/ui-grid'
+import {Flex} from '@instructure/ui-flex'
 import {Img} from '@instructure/ui-img'
-import {useNewLogin} from '../context/NewLoginContext'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {type ViewOwnProps} from '@instructure/ui-view'
+import React from 'react'
+import {useNewLogin, useNewLoginData} from '../context'
+import type {AuthProvider} from '../types'
 
-// @ts-expect-error
 import iconApple from '../assets/images/apple.svg'
-// @ts-expect-error
 import iconClasslink from '../assets/images/classlink.svg'
-// @ts-expect-error
 import iconClever from '../assets/images/clever.svg'
-// @ts-expect-error
 import iconFacebook from '../assets/images/facebook.svg'
-// @ts-expect-error
 import iconGithub from '../assets/images/github.svg'
-// @ts-expect-error
 import iconGoogle from '../assets/images/google.svg'
-// @ts-expect-error
 import iconLinkedin from '../assets/images/linkedin.svg'
-// @ts-expect-error
 import iconMicrosoft from '../assets/images/microsoft.svg'
-// @ts-expect-error
-import iconX from '../assets/images/x.svg'
 
-const I18n = useI18nScope('new_login')
-
-interface Props {
-  className?: string
-}
+const I18n = createI18nScope('new_login')
 
 const providerIcons: Record<string, string> = {
   apple: iconApple,
@@ -60,20 +45,22 @@ const providerIcons: Record<string, string> = {
   google: iconGoogle,
   linkedin: iconLinkedin,
   microsoft: iconMicrosoft,
-  twitter: iconX,
 }
 
-const SSOButtons = ({className}: Props) => {
-  const {isUiActionPending, isPreviewMode, authProviders} = useNewLogin()
+const SSOButtons = () => {
+  const {isUiActionPending} = useNewLogin()
+  const {isPreviewMode, authProviders} = useNewLoginData()
+
+  const isDisabled = isPreviewMode || isUiActionPending
 
   if (!authProviders || authProviders.length === 0) {
     return null
   }
 
   const handleClick = (
-    event: React.KeyboardEvent<ViewOwnProps> | React.MouseEvent<ViewOwnProps>
+    event: React.KeyboardEvent<ViewOwnProps> | React.MouseEvent<ViewOwnProps>,
   ) => {
-    if (isPreviewMode || isUiActionPending) {
+    if (isDisabled) {
       event.preventDefault()
     }
   }
@@ -88,32 +75,35 @@ const SSOButtons = ({className}: Props) => {
     const iconSrc = providerIcons[authType]
 
     return (
-      <GridCol key={provider.id} width={{small: 12, large: 6}}>
+      <Flex.Item
+        key={provider.id}
+        overflowX="visible"
+        overflowY="visible"
+        shouldGrow={true}
+        size="100%"
+      >
         <Button
           href={link}
           display="block"
           disabled={isUiActionPending}
-          renderIcon={() => (
-            <Img
-              src={iconSrc}
-              alt={displayName}
-              width="1.125rem"
-              height="1.125rem"
-              display="block"
-            />
-          )}
           onClick={handleClick}
+          width="100%"
+          renderIcon={
+            iconSrc ? (
+              <Img display="block" height="1.125rem" src={iconSrc} width="1.125rem" />
+            ) : null
+          }
         >
-          {I18n.t('Sign in with %{displayName}', {displayName})}
+          {I18n.t('Log in with %{displayName}', {displayName})}
         </Button>
-      </GridCol>
+      </Flex.Item>
     )
   }
 
   return (
-    <Grid startAt="x-large" colSpacing="small" rowSpacing="small" className={classNames(className)}>
-      <GridRow hAlign="space-around">{authProviders.map(renderProviderButton)}</GridRow>
-    </Grid>
+    <Flex direction="column" wrap="no-wrap" gap="small" justifyItems="center" alignItems="stretch">
+      {authProviders.map(renderProviderButton)}
+    </Flex>
   )
 }
 

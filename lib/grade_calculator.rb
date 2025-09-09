@@ -197,6 +197,7 @@ class GradeCalculator
   end
 
   LIVE_EVENT_FIELDS = %i[current_score final_score unposted_current_score unposted_final_score].freeze
+  private_constant :LIVE_EVENT_FIELDS
 
   def create_course_grade_live_event(old_score, score)
     return if LIVE_EVENT_FIELDS.all? { |f| old_score.send(f) == score.send(f) }
@@ -1001,7 +1002,7 @@ class GradeCalculator
       if full_weight.zero?
         final_grade = nil
       elsif full_weight < 100
-        final_grade *= 100.0 / full_weight
+        final_grade = BigDecimal(final_grade.to_s) / BigDecimal(full_weight.to_s) * BigDecimal(100)
       end
 
       rounded_grade = final_grade&.to_f.try(:round, 2)

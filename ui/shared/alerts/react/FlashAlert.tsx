@@ -41,16 +41,17 @@
  *        default is 'info' unless an error object is passed in, else is 'error'
  */
 
-import React from 'react'
-import ReactDOM from 'react-dom'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import * as React from 'react'
+import * as ReactDOM from 'react-dom'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {Alert} from '@instructure/ui-alerts'
 import {Link} from '@instructure/ui-link'
 import {Text} from '@instructure/ui-text'
 import {PresentationContent, ScreenReaderContent} from '@instructure/ui-a11y-content'
 import {Transition} from '@instructure/ui-motion'
+import {SafeString} from '@instructure/html-escape'
 
-const I18n = useI18nScope('ajaxflashalert')
+const I18n = createI18nScope('ajaxflashalert')
 
 const messageHolderId = 'flashalert_message_holder' // specs fail if I reuse jquery's elements
 const screenreaderMessageHolderId = 'flash_screenreader_holder'
@@ -83,7 +84,7 @@ function findDetailMessage(err: CanvasApiResponseError) {
           a = err.response.data.message
           b = err.message
         }
-      } catch (ignore) {
+      } catch (_ignore) {
         a = err.message
       }
     }
@@ -101,18 +102,20 @@ const isLoadingChunkError = (a?: string): boolean => {
 
 type FlashAlertProps = {
   onClose: () => void
-  message: string | React.ReactNode
+  message: string | React.ReactNode | SafeString
   error?: Error | null
   variant?: 'info' | 'success' | 'warning' | 'error'
   timeout?: number
   screenReaderOnly?: boolean
   liveRegionPoliteness?: 'assertive' | 'polite'
+  dismissible?: boolean
 }
 export default class FlashAlert extends React.Component<FlashAlertProps> {
   static defaultProps = {
     variant: 'info',
     timeout,
     screenReaderOnly: false,
+    dismissible: true,
   }
 
   timerId: number = 0
@@ -196,7 +199,7 @@ export default class FlashAlert extends React.Component<FlashAlertProps> {
       <Transition transitionOnMount={true} in={this.state.isOpen} type="fade">
         <Alert
           variant={this.props.variant}
-          renderCloseButtonLabel={I18n.t('Close')}
+          renderCloseButtonLabel={this.props.dismissible ? I18n.t('Close') : undefined}
           onDismiss={this.closeAlert}
           margin="small auto"
           timeout={this.props.timeout}
@@ -206,7 +209,14 @@ export default class FlashAlert extends React.Component<FlashAlertProps> {
           liveRegionPoliteness={this.props.liveRegionPoliteness}
         >
           <div>
-            <p style={{margin: '0 -5px'}}>{this.props.message}</p>
+            {this.props.message instanceof SafeString ? (
+              <p
+                style={{margin: '0 -5px'}}
+                dangerouslySetInnerHTML={{__html: this.props.message}}
+              />
+            ) : (
+              <p style={{margin: '0 -5px'}}>{this.props.message}</p>
+            )}
             {details}
           </div>
         </Alert>
@@ -216,15 +226,28 @@ export default class FlashAlert extends React.Component<FlashAlertProps> {
 }
 
 type ShowFlashAlertArgs = {
-  message: string | React.ReactNode
+  message: string | React.ReactNode | SafeString
   err?: Error | null
   type?: 'info' | 'success' | 'warning' | 'error'
   srOnly?: boolean
   politeness?: 'assertive' | 'polite'
+  dismissible?: boolean
 }
 
 export function showFlashAlert(args: ShowFlashAlertArgs) {
-  const {message, err, type = err ? 'error' : 'info', srOnly = false, politeness} = args
+  const {
+    message,
+    err,
+    type = err ? 'error' : 'info',
+    srOnly = false,
+    politeness,
+    dismissible = true,
+  } = args
+
+  // Check if document is available (guard against calls after test cleanup)
+  if (typeof document === 'undefined') {
+    return
+  }
 
   function closeAlert(atNode: Element) {
     ReactDOM.unmountComponentAtNode(atNode)
@@ -239,7 +262,7 @@ export function showFlashAlert(args: ShowFlashAlertArgs) {
       alertContainer.id = messageHolderId
       alertContainer.setAttribute(
         'style',
-        'position: fixed; top: 0; left: 0; width: 100%; z-index: 100000;'
+        'position: fixed; top: 0; left: 0; width: 100%; z-index: 100000;',
       )
       document.body.appendChild(alertContainer)
     }
@@ -256,8 +279,9 @@ export function showFlashAlert(args: ShowFlashAlertArgs) {
         onClose={closeAlert.bind(null, parent)}
         screenReaderOnly={srOnly}
         liveRegionPoliteness={politeness}
+        dismissible={dismissible}
       />,
-      parent
+      parent,
     )
   }
 
@@ -280,7 +304,7 @@ export function showFlashError(message = I18n.t('An error occurred making a netw
   return (err?: Error) => showFlashAlert({message, err, type: 'error'})
 }
 
-export function showFlashSuccess(message: string) {
+export function showFlashSuccess(message: string | SafeString) {
   return () => showFlashAlert({message, type: 'success'})
 }
 

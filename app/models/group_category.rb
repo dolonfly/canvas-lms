@@ -24,6 +24,9 @@ class GroupCategory < ActiveRecord::Base
   attr_accessor :group_by_section
   attr_writer :assign_unassigned_members
 
+  cattr_accessor :MAX_DIFFERENTIATION_TAG_PER_COURSE
+  self.MAX_DIFFERENTIATION_TAG_PER_COURSE = 40
+
   attr_readonly :non_collaborative
 
   belongs_to :context, polymorphic: [:course, :account]
@@ -41,6 +44,7 @@ class GroupCategory < ActiveRecord::Base
 
   after_save :auto_create_groups
   after_update :update_groups_max_membership
+  after_update :clear_permissions_cache_for_selfsignup
 
   delegate :time_zone, to: :context
 
@@ -50,14 +54,20 @@ class GroupCategory < ActiveRecord::Base
     max_len = maximum_string_length
     max_len -= record.create_group_count.to_s.length + 1 if record.create_group_count
 
-    if value.blank?
-      record.errors.add attr, t(:name_required, "Name is required")
+    if record.non_collaborative?
+      if value.blank?
+        record.errors.add(attr, t(:name_required, "Name is required"))
+      elsif value.length > max_len
+        record.errors.add(attr, t(:name_too_long, "Enter a shorter category name"))
+      end
+    elsif value.blank?
+      record.errors.add(attr, t(:name_required, "Name is required"))
     elsif GroupCategory.protected_name_for_context?(value, record.context)
-      record.errors.add attr, t(:name_reserved, "%{name} is a reserved name.", name: value)
+      record.errors.add(attr, t(:name_reserved, "%{name} is a reserved name.", name: value))
     elsif record.context && record.context.group_categories.other_than(record).where(name: value).exists?
-      record.errors.add attr, t(:name_unavailable, "%{name} is already in use.", name: value)
+      record.errors.add(attr, t(:name_unavailable, "%{name} is already in use.", name: value))
     elsif value.length > max_len
-      record.errors.add attr, t(:name_too_long, "Enter a shorter category name")
+      record.errors.add(attr, t(:name_too_long, "Enter a shorter category name"))
     end
   end
 
@@ -208,6 +218,12 @@ class GroupCategory < ActiveRecord::Base
     self_signup.present? && self_signup == "restricted"
   end
 
+  def past_self_signup_end_at?
+    return false unless context.is_a?(Course) && context.account.feature_enabled?(:self_signup_deadline)
+
+    self_signup? && self_signup_end_at.present? && self_signup_end_at < Time.now.utc
+  end
+
   def has_heterogenous_group?
     # if it's not a course, we want the answer to be false. but that same
     # condition would may any group in the category say has_common_section?
@@ -242,7 +258,7 @@ class GroupCategory < ActiveRecord::Base
   end
 
   def restore
-    groups.where(deleted_at: [deleted_at - 10.minutes..deleted_at]).update_all(workflow_state: "available", deleted_at: nil)
+    groups.where(deleted_at: [(deleted_at - 10.minutes)..deleted_at]).update_all(workflow_state: "available", deleted_at: nil)
     self.deleted_at = nil
     save!
   end
@@ -572,11 +588,33 @@ class GroupCategory < ActiveRecord::Base
     end
   end
 
+  def max_diff_tag_validation_count
+    sql = <<-SQL.squish
+      SELECT
+        SUM(
+          (SELECT COUNT(id) FROM #{Group.quoted_table_name} WHERE group_category_id = parent.id AND workflow_state <> 'deleted')
+        ) AS diff_tag_count
+      FROM #{GroupCategory.quoted_table_name} parent
+      WHERE#{" "}
+        non_collaborative = true
+        AND context_type = 'Course'
+        AND context_id = #{context_id}
+        AND deleted_at IS null
+    SQL
+
+    ActiveRecord::Base.connection.execute(sql).first["diff_tag_count"].to_i
+  end
+
+  def single_tag?
+    groups.count == 1 && groups.first.name == name
+  end
+
   protected
 
   def validate_non_collaborative_constraints
     errors.add(:base, "Non-collaborative group categories can only be created for courses") unless context_type == "Course"
     errors.add(:base, "Non-collaborative group categories cannot be student organized or communities") if ["student_organized", "communities"].include?(role)
+    errors.add(:base, "You have reached the tag limit for this course") if new_record? && max_diff_tag_validation_count >= self.MAX_DIFFERENTIATION_TAG_PER_COURSE
   end
 
   def start_progress
@@ -696,5 +734,11 @@ class GroupCategory < ActiveRecord::Base
         end
       end
     end
+  end
+
+  def clear_permissions_cache_for_selfsignup
+    return unless %i[self_signup self_signup_end_at].any? { |k| saved_changes.key?(k) } # Skip if neither setting was changed
+
+    context.students.each { |student| clear_permissions_cache(student) } if context.is_a?(Course)
   end
 end

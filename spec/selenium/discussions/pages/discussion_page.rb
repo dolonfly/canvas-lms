@@ -119,12 +119,20 @@ class Discussion
       "[data-testid='summary-generate-button']"
     end
 
-    def summary_disable_button_selector
-      "[data-testid='summary-disable-button']"
-    end
-
     def summary_user_input_selector
       "[data-testid='summary-user-input']"
+    end
+
+    def sort_button_selector
+      "[data-testid='sort-order-dropdown']"
+    end
+
+    def sort_order_selector
+      "[data-testid='sort-order-select']"
+    end
+
+    def discussion_entries_selector
+      "[data-testid='discussion-entry-container']"
     end
 
     def sync_to_sis_checkbox_selector
@@ -185,15 +193,15 @@ class Discussion
     end
 
     def manage_discussion_button
-      fj("[role='button']:contains('Manage Discussion')")
+      f('[data-testid="discussion-post-menu-trigger"]')
     end
 
     def send_to_menuitem
-      fj("li:contains('Send To...')")
+      f('[data-testid="discussion-thread-menuitem-send"]')
     end
 
     def copy_to_menuitem
-      fj("li:contains('Copy To...')")
+      f('[data-testid="discussion-thread-menuitem-copy"]')
     end
 
     def course_pacing_notice
@@ -228,16 +236,20 @@ class Discussion
       f(summary_generate_button_selector)
     end
 
-    def summary_disable_button
-      f(summary_disable_button_selector)
-    end
-
     def summary_user_input
       f(summary_user_input_selector)
     end
 
+    def discussion_entries
+      ff(discussion_entries_selector)
+    end
+
     def sync_to_sis_checkbox
       f(sync_to_sis_checkbox_selector)
+    end
+
+    def mastery_path_toggle
+      f("[data-testid='MasteryPathToggle'] svg[name='IconCheck'], [data-testid='MasteryPathToggle'] svg[name='IconX']")
     end
 
     # ---------------------- Actions ----------------------
@@ -276,6 +288,10 @@ class Discussion
 
     def group_category_option(group_cat_name)
       fj(group_category_option_selector(group_cat_name))
+    end
+
+    def save_discussion
+      f("button[type='submit']").click
     end
 
     # ---------------------- Actions ----------------------
@@ -320,8 +336,12 @@ class Discussion
       summary_generate_button.click
     end
 
-    def click_summary_disable_button
-      summary_disable_button.click
+    def click_sort_dropdown
+      f(sort_order_selector).click
+    end
+
+    def select_sort_option(option)
+      fj("[data-testid='sort-order-select-option-#{option}']").click
     end
 
     def click_sync_to_sis_checkbox

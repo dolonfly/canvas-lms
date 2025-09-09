@@ -189,7 +189,7 @@ describe MasterCourses::MasterMigration do
       @copy_from = @course
       @copy_to = course_factory
       @sub = @template.add_child_course!(@copy_to)
-      tool = external_tool_model(context: Account.default, opts: { use_1_3: true, developer_key: DeveloperKey.create!(account: Account.default) })
+      tool = lti_registration_with_tool(account: Account.default).deployments.first
       @original_assignment = @copy_from.assignments.create!(title: "some assignment", submission_types: "external_tool", points_possible: 10)
       tag = ContentTag.new(content: tool, url: "http://example.com/original", context: @original_assignment)
       @original_assignment.update!(external_tool_tag: tag)
@@ -741,6 +741,63 @@ describe MasterCourses::MasterMigration do
                                                      [file_name, "available"],
                                                      ["#{file_name}-1", "available"]
                                                    ])
+        end
+      end
+
+      context "when we replace a file multiple times that attached to a module item" do
+        it "does not delete module item(ContentTag) and not set the associated MasterCourse::ChildContentTag to manually_deleted" do
+          original_attachment = master_course.attachments.first
+
+          master_module = master_course.context_modules.create!(
+            name: "Test Module",
+            workflow_state: "active",
+            position: 1
+          )
+
+          master_module.content_tags.create!(
+            context: master_course,
+            content: original_attachment,
+            tag_type: "context_module",
+            title: "Test Attachment Module Item",
+            position: 1,
+            workflow_state: "active"
+          )
+
+          master_module.save!
+          # First migration
+          run_master_migration
+
+          child_module = child_course.context_modules.find_by(name: "Test Module")
+          child_content_tag = child_module.content_tags.first
+          child_attachment = child_content_tag.content
+
+          # First replacement
+          Timecop.travel(1.minute.from_now) do
+            master_course.attachments.create!(attachment_attributes).handle_duplicates(:overwrite)
+          end
+
+          # Second migration
+          run_master_migration
+
+          # Second replacement
+          Timecop.travel(2.minutes.from_now) do
+            master_course.attachments.create!(attachment_attributes).handle_duplicates(:overwrite)
+          end
+
+          # Third migration
+          run_master_migration
+
+          child_content_tag.reload
+
+          expect(child_content_tag.workflow_state).to eq("active")
+
+          newest_attachment = child_course.attachments.where(file_state: "available").order(created_at: :desc).first
+          expect(child_content_tag.content_id).to eq(newest_attachment.id)
+          expect(child_content_tag.content_id).not_to eq(child_attachment.id)
+
+          # It should not have manually_deleted downstream_changes
+          child_child_content_tag = MasterCourses::ChildContentTag.find_by(content: child_content_tag)
+          expect(child_child_content_tag.downstream_changes).not_to include("manually_deleted")
         end
       end
     end
@@ -1455,27 +1512,6 @@ describe MasterCourses::MasterMigration do
       expect(@att1_to.folder).to_not be_deleted
     end
 
-    context "media_links_use_attachment_id feature flag off" do
-      before do
-        Account.site_admin.disable_feature!(:media_links_use_attachment_id)
-      end
-
-      it "does not copy media tracks" do
-        @copy_to = course_factory
-        @template.add_child_course!(@copy_to)
-
-        media_id = "m-you_know_what_you_did"
-        media_object = @copy_from.media_objects.create!(title: "video.mp4", media_id:)
-        media_object.media_tracks.create!(kind: "subtitles", locale: "en", content: "en subs")
-
-        run_master_migration
-
-        att_to = @copy_to.attachments.where(migration_id: mig_id(media_object.attachment)).first
-        expect(att_to.media_entry_id).to eq media_id
-        expect(att_to.media_tracks).to be_empty
-      end
-    end
-
     it "copies media tracks" do
       @copy_to = course_factory
       @template.add_child_course!(@copy_to)
@@ -1821,6 +1857,7 @@ describe MasterCourses::MasterMigration do
 
       assignment = @copy_from.assignments.create!(title: "hahaha")
       assignment.description = "<p><a id=\"\" class=\"instructure_file_link instructure_image_thumbnail \" title=\"lalala\" href=\"/courses/#{@copy_from.id}/files/#{attachment.id}/download?wrap=1\" target=\"\">lalala</a></p>"
+      assignment.saving_user = @user
       assignment.save!
 
       run_master_migration
@@ -2532,6 +2569,49 @@ describe MasterCourses::MasterMigration do
       expect(copied_att.reload.full_path).to eq "course files/B/C/file.txt"
     end
 
+    describe "moving sub folder to root folder sync" do
+      subject do
+        folder_A = Folder.root_folders(@copy_from).first.sub_folders.create!(name: "A", context: @copy_from)
+        folder_B = folder_A.sub_folders.create!(name: "B", context: @copy_from)
+        # this needs to be here because empty folders don't sync
+        Attachment.create!(filename: "decoy.txt", uploaded_data: StringIO.new("1"), folder: folder_B, context: @copy_from)
+
+        @copy_to = course_factory
+        @sub = @template.add_child_course!(@copy_to)
+        run_master_migration
+
+        cloned_item_id_folder_A = folder_A.reload.cloned_item_id
+        expect(Folder.find_by(cloned_item_id: cloned_item_id_folder_A)).not_to be_nil
+        cloned_item_id_folder_B = folder_B.reload.cloned_item_id
+        expect(Folder.find_by(cloned_item_id: cloned_item_id_folder_B)).not_to be_nil
+
+        Timecop.travel(10.minutes.from_now) do
+          folder_B.parent_folder = Folder.root_folders(@copy_from).first
+          folder_B.save!
+          run_master_migration
+        end
+
+        synced_folder = @copy_to.folders.find_by(cloned_item_id: cloned_item_id_folder_B)
+        synced_folder
+      end
+
+      context "when blueprint_support_sync_for_folder_movement_to_root_folder enabled" do
+        it "syncs folder move from sub folder to root folder" do
+          expect(subject.parent_folder.root_folder?).to be_truthy
+        end
+      end
+
+      context "when blueprint_support_sync_for_folder_movement_to_root_folder disabled" do
+        before do
+          Account.site_admin.disable_feature!(:blueprint_support_sync_for_folder_movement_to_root_folder)
+        end
+
+        it "does not sync folder move from sub folder to root folder" do
+          expect(subject.parent_folder.root_folder?).to be_falsey
+        end
+      end
+    end
+
     it "baleets assignment overrides when an admin pulls a bait-n-switch with date restrictions" do
       @copy_to = course_factory
       @template.add_child_course!(@copy_to)
@@ -2948,7 +3028,7 @@ describe MasterCourses::MasterMigration do
       expect(qg_to.question_points).to eq 2.0
       qg_to.question_points = 3.0
       expect(qg_to.save).to be false
-      expect(qg_to.errors.first.second).to eq "cannot change column(s): question_points - locked by Master Course"
+      expect(qg_to.errors.full_messages).to include "cannot change column(s): question_points - locked by Master Course"
     end
 
     it "copies tab configurations for account-level external tools" do
@@ -3226,7 +3306,7 @@ describe MasterCourses::MasterMigration do
       expect(@att_copy).to be_present
 
       Timecop.freeze(1.minute.from_now) do
-        @topic = @copy_from.discussion_topics.create!(title: "some topic", message: "<img src='/courses/#{@copy_from.id}/files/#{@att.id}/download?wrap=1'>")
+        @topic = @copy_from.discussion_topics.create!(title: "some topic", message: "<img src='/courses/#{@copy_from.id}/files/#{@att.id}/download?wrap=1'>", user: @user)
       end
       run_master_migration
 

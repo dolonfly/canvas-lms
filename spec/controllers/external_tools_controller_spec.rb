@@ -17,8 +17,6 @@
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-
-require "lti_1_3_spec_helper"
 require_relative "lti/concerns/parent_frame_shared_examples"
 require_relative "../support/request_helper"
 
@@ -102,21 +100,201 @@ describe ExternalToolsController do
     end
   end
 
+  describe "GET 'index'" do
+    subject { get :index, params: { course_id: @course.id }, format: "json" }
+
+    before do
+      user_session(@teacher)
+    end
+
+    it "returns a list of tools" do
+      subject
+      expect(response).to be_successful
+      expect(response.parsed_body).to be_an(Array)
+    end
+
+    context "with tool availability controls" do
+      let(:registration) { lti_registration_with_tool(account: @course.root_account) }
+      let(:tool) { registration.new_external_tool(@course) }
+      let(:control) { tool.primary_context_control }
+      let(:lti1tool) { external_tool_model(context: @course) }
+
+      before do
+        lti1tool
+        tool
+      end
+
+      context "with the lti_registrations_next flag off" do
+        before do
+          @course.root_account.disable_feature!(:lti_registrations_next)
+        end
+
+        context "with unavailable ContextControl" do
+          before { control.update!(available: false) }
+
+          it "still includes the tool in the response" do
+            subject
+            expect(response.parsed_body.length).to eq 2
+            expect(response.parsed_body.map { |t| t["id"] }).to include tool.id
+          end
+        end
+
+        context "with available ContextControl" do
+          it "includes the tool in the response" do
+            subject
+            expect(response.parsed_body.length).to eq 2
+            expect(response.parsed_body.map { |t| t["id"] }).to include tool.id
+          end
+        end
+      end
+
+      context "with the lti_registrations_next flag on" do
+        before do
+          @course.root_account.enable_feature!(:lti_registrations_next)
+        end
+
+        context "with unavailable ContextControl" do
+          before { control.update!(available: false) }
+
+          it "does not include the tool in the response" do
+            subject
+            expect(response.parsed_body.length).to eq 1
+            expect(response.parsed_body.map { |t| t["id"] }).not_to include tool.id
+          end
+        end
+
+        context "with available ContextControl" do
+          it "includes the tool in the response" do
+            subject
+            expect(response.parsed_body.length).to eq 2
+            expect(response.parsed_body.map { |t| t["id"] }).to include tool.id
+          end
+        end
+      end
+    end
+
+    context "with include_parents: true" do
+      subject { get :index, params: { course_id: @course.id, include_parents: true }, format: "json" }
+
+      let(:parent_tool) { external_tool_model(context: @course.root_account) }
+
+      before do
+        parent_tool
+      end
+
+      it "includes tools from the parent account" do
+        subject
+        expect(response).to be_successful
+        expect(response.parsed_body.map { |t| t["id"] }).to include parent_tool.id
+      end
+    end
+
+    context "with include_parents: false" do
+      subject { get :index, params: { course_id: @course.id, include_parents: false }, format: "json" }
+
+      let(:parent_tool) { external_tool_model(context: @course.root_account) }
+
+      before do
+        parent_tool
+      end
+
+      it "does not include tools from the parent account" do
+        subject
+        expect(response).to be_successful
+        expect(response.parsed_body.map { |t| t["id"] }).not_to include parent_tool.id
+      end
+    end
+
+    context "with placements param" do
+      subject { get :index, params: { course_id: @course.id, placement: }, format: "json" }
+
+      let(:placement) { "course_navigation" }
+      let(:course_nav_tool) { external_tool_model(context: @course, placements: ["course_navigation"]) }
+      let(:editor_button_tool) { external_tool_model(context: @course, placements: ["editor_button"]) }
+
+      before do
+        course_nav_tool
+        editor_button_tool
+      end
+
+      it "only includes tools that are in the specified placements" do
+        subject
+        expect(response).to be_successful
+        expect(response.parsed_body.map { |t| t["id"] }).to include course_nav_tool.id
+        expect(response.parsed_body.map { |t| t["id"] }).not_to include editor_button_tool.id
+      end
+    end
+
+    context "with selectable: true" do
+      subject { get :index, params: { course_id: @course.id, selectable: true }, format: "json" }
+
+      let(:selectable_tool) { @course.context_external_tools.create!(name: "selectable_tool", consumer_key: "selectable_tool", shared_secret: "selectable_tool", url: "https://example.com/launch") }
+      let(:non_selectable_tool) { @course.context_external_tools.create!(name: "non_selectable_tool", consumer_key: "non_selectable_tool", shared_secret: "non_selectable_tool", url: "https://example.com/launch", not_selectable: true) }
+
+      before do
+        selectable_tool
+        non_selectable_tool
+      end
+
+      it "only includes tools that are selectable" do
+        subject
+        expect(response).to be_successful
+        expect(response.parsed_body.length).to eq 1
+        expect(response.parsed_body.map { |t| t["id"] }).to include selectable_tool.id
+      end
+    end
+
+    context "with search_term param" do
+      subject { get :index, params: { course_id: @course.id, search_term: }, format: "json" }
+
+      let(:search_term) { "bob" }
+
+      before do
+        @course.context_external_tools.create!(name: "bob", consumer_key: "bob", shared_secret: "bob", url: "https://example.com/launch")
+        @course.context_external_tools.create!(name: "alice", consumer_key: "alice", shared_secret: "alice", url: "https://example.com/launch")
+      end
+
+      it "returns tools matching the search term" do
+        subject
+        expect(response).to be_successful
+        expect(response.parsed_body.length).to eq 1
+        expect(response.parsed_body.first["name"]).to eq "bob"
+      end
+
+      context "when no tools match" do
+        let(:search_term) { "charlie" }
+
+        it "returns no tools if no matches found" do
+          subject
+          expect(response).to be_successful
+          expect(response.parsed_body).to be_empty
+        end
+      end
+    end
+  end
+
   describe "GET 'show'" do
     context "resource link request" do
-      include_context "lti_1_3_spec_helper"
+      include_context "key_storage_helper"
 
       let(:tool) do
-        tool = @course.context_external_tools.new(
-          name: "bob",
-          consumer_key: "bob",
-          shared_secret: "bob"
+        registration = lti_registration_with_tool(
+          account: @course.account,
+          configuration_params: {
+            name: "bob",
+            target_link_uri: "http://www.example.com/basic_lti",
+            redirect_uris: ["http://www.example.com/launch"],
+            domain: "www.example.com",
+            placements: [
+              {
+                placement: "course_navigation",
+                enabled: true,
+                target_link_uri: "http://www.example.com/basic_lti",
+              }
+            ]
+          }
         )
-        tool.url = "http://www.example.com/basic_lti"
-        tool.course_navigation = { enabled: true }
-        tool.use_1_3 = true
-        tool.developer_key = DeveloperKey.create!
-        tool.save!
+        tool = registration.new_external_tool(@course)
         tool
       end
 
@@ -161,14 +339,36 @@ describe ExternalToolsController do
             canvas_region
             canvas_environment
             client_id
-            deployment_id
+            lti_deployment_id
             lti_storage_target
           ]
         end
 
+        context "with lti_deployment_id_in_login_request FF off" do
+          before do
+            @course.root_account.disable_feature!(:lti_deployment_id_in_login_request)
+          end
+
+          it "creates a login message that includes deployment_id" do
+            subject
+            expect(assigns[:lti_launch].params.keys).to match_array %w[
+              iss
+              login_hint
+              target_link_uri
+              lti_message_hint
+              canvas_region
+              canvas_environment
+              client_id
+              deployment_id
+              lti_deployment_id
+              lti_storage_target
+            ]
+          end
+        end
+
         it 'sets the "login_hint" to the current user lti id' do
           subject
-          expect(assigns[:lti_launch].params["login_hint"]).to eq Lti::Asset.opaque_identifier_for(@teacher)
+          expect(assigns[:lti_launch].params["login_hint"]).to eq Lti::V1p1::Asset.opaque_identifier_for(@teacher)
         end
 
         it "caches the the LTI 1.3 launch" do
@@ -248,7 +448,7 @@ describe ExternalToolsController do
             user_session(@teacher)
           end
 
-          it "logs launch with placement and indirect_link launch_type" do
+          it "logs launch with placement and direct_link launch_type" do
             expect(Lti::LogService).to receive(:new).with(
               tool:,
               context: @course,
@@ -777,7 +977,7 @@ describe ExternalToolsController do
           expect(lti_launch.params["accept_media_types"]).to eq "application/pdf,image/jpeg"
         end
 
-        it "sends the ext_content_file_extensions paramter for restriced file types" do
+        it "sends the ext_content_file_extensions parameter for restricted file types" do
           user_session(@teacher)
           assignment = @course.assignments.new(name: "an assignment")
           assignment.allowed_extensions += ["pdf", "jpeg"]
@@ -954,25 +1154,31 @@ describe ExternalToolsController do
     end
 
     context "LTI 1.3" do
-      let(:developer_key) do
-        key = DeveloperKey.create!(account: @course.account)
-        key.generate_rsa_keypair!
-        key.developer_key_account_bindings.first.update!(
-          workflow_state: "on"
-        )
-        key.save!
-        key
+      let(:registration) do
+        lti_registration_with_tool(account: @course.account,
+                                   created_by: @teacher,
+                                   configuration_params:)
       end
 
       let(:lti_1_3_tool) do
-        tool = @course.context_external_tools.new(name: "test",
-                                                  consumer_key: "key",
-                                                  shared_secret: "secret")
-        tool.url = "http://www.example.com/launch"
-        tool.use_1_3 = true
-        tool.developer_key = developer_key
-        tool.save!
-        tool
+        registration.deployments.first
+      end
+      let(:configuration_params) do
+        {
+          "domain" => "www.example.com",
+          "oidc_initiation_url" => "http://www.example.com/launch",
+          "target_link_uri" => "http://www.example.com/launch",
+          "placements" => [
+            {
+              "placement" => "course_navigation",
+              "target_link_uri" => "http://www.example.com/launch"
+            },
+            {
+              "placement" => "account_navigation",
+              "target_link_uri" => "http://www.example.com/launch"
+            }
+          ]
+        }
       end
 
       let(:decoded_jwt) do
@@ -1304,18 +1510,18 @@ describe ExternalToolsController do
       end
     end
 
-    it "passes prefer_1_1=false to find_external_tool by default when looking up by URL" do
+    it "passes prefer_1_1=false to tool finder by default when looking up by URL" do
       user_session(@teacher)
-      expect(ContextExternalTool).to receive(:find_external_tool).with(
-        anything, anything, anything, anything, anything, prefer_1_1: false
+      expect(Lti::ToolFinder).to receive(:from_url).with(
+        anything, anything, hash_including(prefer_1_1: false)
       )
       get "retrieve", params: { course_id: @course.id, url: "http://www.example.com/basic_lti" }
     end
 
-    it "passes prefer_1_1=false to find_external_tool only when the prefer_1_1 param is set" do
+    it "passes prefer_1_1=true to tool finder only when the prefer_1_1 param is set" do
       user_session(@teacher)
-      expect(ContextExternalTool).to receive(:find_external_tool).with(
-        anything, anything, anything, anything, anything, prefer_1_1: true
+      expect(Lti::ToolFinder).to receive(:from_url).with(
+        anything, anything, hash_including(prefer_1_1: true)
       )
       get "retrieve", params: { course_id: @course.id, url: "http://www.example.com/basic_lti", prefer_1_1: true }
     end
@@ -1473,7 +1679,6 @@ describe ExternalToolsController do
 
       before do
         user_session(@student)
-        Account.site_admin.enable_feature!(:lti_rce_postmessage_support)
       end
 
       it "renders the sibling forwarder frame once" do
@@ -1671,8 +1876,8 @@ describe ExternalToolsController do
                                                })
       end
 
-      let(:due_at) { "2021-07-29 08:26:56.000000000 +0000".to_datetime }
-      let(:due_at_diff) { "2021-07-30 08:26:56.000000000 +0000".to_datetime }
+      let(:due_at) { Time.zone.parse("2021-07-29 08:26:56.000000000 +0000") }
+      let(:due_at_diff) { Time.zone.parse("2021-07-30 08:26:56.000000000 +0000") }
 
       let(:retrieve_params) do
         {
@@ -1698,25 +1903,25 @@ describe ExternalToolsController do
         adhoc_override.save!
       end
 
-      it "generates a student launch with overriden params" do
+      it "generates a student launch with overridden params" do
         expect(assignment.due_at).to eq due_at
 
         user_session(@student)
         get :retrieve, params: retrieve_params
 
         expect(
-          assigns[:lti_launch].params["custom_canvas_assignment_due_at"].to_datetime
+          Time.zone.parse(assigns[:lti_launch].params["custom_canvas_assignment_due_at"])
         ).to eq due_at_diff
       end
 
-      it "generates an admin/teacher launch with overriden params" do
+      it "generates an admin/teacher launch with overridden params" do
         expect(assignment.due_at).to eq due_at
 
         user_session(@user)
         get :retrieve, params: retrieve_params
 
         expect(
-          assigns[:lti_launch].params["custom_canvas_assignment_due_at"].to_datetime
+          Time.zone.parse(assigns[:lti_launch].params["custom_canvas_assignment_due_at"])
         ).to eq due_at_diff
       end
 
@@ -1751,7 +1956,7 @@ describe ExternalToolsController do
         end
       end
 
-      context "when launching as a student but the assigment is unpublished" do
+      context "when launching as a student but the assignment is unpublished" do
         it "returns a 401" do
           user_session(@student)
           assignment.update! workflow_state: "unpublished"
@@ -1959,10 +2164,11 @@ describe ExternalToolsController do
 
       context "when tool is 1.3" do
         let(:tool) do
-          t = super()
-          t.use_1_3 = true
-          t.developer_key = DeveloperKey.create!
-          t.save
+          reg = lti_registration_with_tool(account: @course.account)
+          t = reg.new_external_tool(@course)
+          t.editor_button = { message_type:, icon_url: "http://example.com/icon" }
+          t.custom_fields = { contents: "$com.instructure.Editor.contents", selection: "$com.instructure.Editor.selection" }
+          t.save!
           t
         end
 
@@ -1988,6 +2194,18 @@ describe ExternalToolsController do
         context "during a deep linking launch" do
           let(:message_type) { "LtiDeepLinkingRequest" }
 
+          before do
+            tool.resource_selection = { message_type: "LtiDeepLinkingRequest" }
+            tool.save!
+            user_session(@teacher)
+          end
+
+          it "includes the deep_linking_cancel_url as the return_url" do
+            post "resource_selection", params: { course_id: @course.id, external_tool_id: tool.id, editor: true }
+            url = launch_params["post_payload"]["https://purl.imsglobal.org/spec/lti/claim/launch_presentation"]["return_url"]
+            expect(url).to include(deep_linking_cancel_path)
+          end
+
           it_behaves_like "includes editor variables" do
             let(:selection_launch_param) { launch_params["post_payload"].dig("https://purl.imsglobal.org/spec/lti/claim/custom", "selection") }
             let(:contents_launch_param) { launch_params["post_payload"].dig("https://purl.imsglobal.org/spec/lti/claim/custom", "contents") }
@@ -1995,9 +2213,6 @@ describe ExternalToolsController do
 
           context "when the parent_frame_context param is sent" do
             before do
-              tool.resource_selection = { message_type: "LtiDeepLinkingRequest" }
-              tool.save!
-              user_session(@teacher)
               post "resource_selection", params: { course_id: @course.id, external_tool_id: tool.id, parent_frame_context: tool.id, editor: true }
             end
 
@@ -2034,7 +2249,7 @@ describe ExternalToolsController do
         </cartridge_basiclti_link>
       XML
     end
-    let(:xml_response) { instance_double("Net::HTTPResponse", body: xml) }
+    let(:xml_response) { instance_double(Net::HTTPResponse, body: xml) }
 
     context "with client id" do
       subject do
@@ -2042,10 +2257,11 @@ describe ExternalToolsController do
         ContextExternalTool.find_by(id: tool_id)
       end
 
-      include_context "lti_1_3_spec_helper"
+      include_context "key_storage_helper"
 
       let(:tool_id) { (response.status == 200) ? response.parsed_body["id"] : -1 }
-      let(:developer_key) { dev_key_model_1_3(account:, settings:) }
+      let_once(:tool_configuration) { lti_tool_configuration_model(developer_key:) }
+      let_once(:developer_key) { lti_developer_key_model(account:) }
       let_once(:user) { account_admin_user(account:) }
       let_once(:account) { account_model }
       let(:params) do
@@ -2180,12 +2396,11 @@ describe ExternalToolsController do
       end
 
       context "create via client id" do
-        include_context "lti_1_3_spec_helper"
-        let(:developer_key) { dev_key_model_1_3(account: @course.account, settings:) }
+        let_once(:tool_configuration) { lti_tool_configuration_model(developer_key:) }
+        let_once(:developer_key) { lti_developer_key_model(account: @course.account) }
 
         before do
-          tool = developer_key.lti_registration.new_external_tool(@course)
-          tool.save!
+          developer_key.lti_registration.new_external_tool(@course)
           enable_developer_key_account_binding!(developer_key)
         end
 
@@ -2208,13 +2423,13 @@ describe ExternalToolsController do
       assert_status(401)
     end
 
-    it "does not create tool if user lacks create_tool_manually" do
+    it "does not create tool if user lacks add_tool_manually" do
       user_session(@student)
       post "create", params: { course_id: @course.id, external_tool: { name: "tool name", url: "http://example.com", consumer_key: "key", shared_secret: "secret" } }, format: "json"
-      assert_status(401)
+      assert_forbidden
     end
 
-    it "creates tool if user is granted create_tool_manually" do
+    it "creates tool if user is granted add_tool_manually" do
       user_session(@teacher)
       post "create", params: { course_id: @course.id, external_tool: { name: "tool name", url: "http://example.com", consumer_key: "key", shared_secret: "secret" } }, format: "json"
       assert_status(200)
@@ -2407,7 +2622,7 @@ describe ExternalToolsController do
             <cartridge_icon identifierref="BLTI001_Icon"/>
         </cartridge_basiclti_link>
       XML
-      obj = instance_double("Net::HTTPResponse", body: xml)
+      obj = instance_double(Net::HTTPResponse, body: xml)
       allow(CanvasHttp).to receive(:get).and_return(obj)
       post "create", params: { course_id: @course.id, external_tool: { name: "tool name", url: "http://example.com", consumer_key: "key", shared_secret: "secret", config_type: "by_url", config_url: "http://config.example.com" } }, format: "json"
 
@@ -2468,7 +2683,7 @@ describe ExternalToolsController do
     end
 
     context "navigation tabs caching" do
-      it "does not clear the navigation tabs cache for non navigtaion tools" do
+      it "does not clear the navigation tabs cache for non navigation tools" do
         enable_cache do
           user_session(@teacher)
           nav_cache = Lti::NavigationCache.new(@course.root_account)
@@ -2601,6 +2816,32 @@ describe ExternalToolsController do
         end
       end
     end
+
+    context "in a horizon course" do
+      before do
+        @course.update!(horizon_course: true)
+        account = @course.account
+        account.update!(horizon_account: true)
+        account.enable_feature!(:horizon_course_setting)
+      end
+
+      it "can set estimated duration" do
+        user_session(@teacher)
+        post "create",
+             params: {
+               course_id: @course.id,
+               external_tool: {
+                 name: "tool name",
+                 url: "http://example.com",
+                 consumer_key: "key",
+                 shared_secret: "secret",
+                 estimated_duration_attributes: { minutes: 5 }
+               }
+             },
+             format: "json"
+        expect(ContextExternalTool.last.estimated_duration.duration).to eq 5.minutes
+      end
+    end
   end
 
   describe "PUT 'update'" do
@@ -2688,6 +2929,36 @@ describe ExternalToolsController do
           format: "json"
       expect(response).to be_successful
       expect(@tool.reload.editor_button).to be_nil
+    end
+
+    context "in a horizon course" do
+      before do
+        @course.update!(horizon_course: true)
+        account = @course.account
+        account.update!(horizon_account: true)
+        account.enable_feature!(:horizon_course_setting)
+      end
+
+      it "can remove estimated duration" do
+        user_session(@teacher)
+        @tool = new_valid_tool(@course)
+        @tool.estimated_duration_attributes = { minutes: 5 }
+        @tool.save!
+
+        put :update,
+            params: {
+              course_id: @course.id,
+              external_tool_id: @tool.id,
+              external_tool: {
+                estimated_duration_attributes: {
+                  id: @tool.estimated_duration.id,
+                  _destroy: "true"
+                }
+              }
+            },
+            format: "json"
+        expect(@tool.reload.estimated_duration).to be_nil
+      end
     end
   end
 
@@ -2788,7 +3059,7 @@ describe ExternalToolsController do
         expect(tool_settings["resource_link_id"]).to eq opaque_id(@assignment.external_tool_tag)
         expect(tool_settings["resource_link_title"]).to eq "tool assignment"
 
-        expect(Time.parse(tool_settings["custom_assignment_due_at"])).to be_within(5.seconds).of due_at
+        expect(Time.zone.parse(tool_settings["custom_assignment_due_at"])).to be_within(5.seconds).of due_at
       end
 
       context "and the assignment has due date overrides" do
@@ -2808,7 +3079,7 @@ describe ExternalToolsController do
         it "sends the overridden due_at value in the launch parameters" do
           get :generate_sessionless_launch, params: { course_id: course.id, launch_type: "assessment", assignment_id: assignment.id }
 
-          expect(Time.parse(tool_settings["custom_assignment_due_at"])).to be_within(5.seconds).of(assignment_override.due_at)
+          expect(Time.zone.parse(tool_settings["custom_assignment_due_at"])).to be_within(5.seconds).of(assignment_override.due_at)
         end
       end
     end
@@ -2964,12 +3235,15 @@ describe ExternalToolsController do
     end
 
     context "with 1.3 tool" do
-      include_context "lti_1_3_spec_helper"
+      include_context "key_storage_helper"
 
+      let(:developer_key) do
+        lti_developer_key_model(account:).tap do |developer_key|
+          lti_tool_configuration_model(developer_key:, lti_registration: developer_key.lti_registration)
+        end
+      end
       let(:tool) do
-        t = developer_key.lti_registration.new_external_tool(@course)
-        t.save!
-        t
+        developer_key.lti_registration.new_external_tool(@course)
       end
       let(:rl) do
         Lti::ResourceLink.create!(
@@ -3062,9 +3336,7 @@ describe ExternalToolsController do
         specs_require_sharding
 
         let!(:tool) do
-          t = developer_key.lti_registration.new_external_tool(course)
-          t.save!
-          t
+          developer_key.lti_registration.new_external_tool(course)
         end
 
         let(:course) do
@@ -3075,7 +3347,7 @@ describe ExternalToolsController do
         end
 
         let(:user) { @shard2.activate { user_model(name: "cross-shard user") } }
-        let(:developer_key) { dev_key_model_1_3(account:) }
+        let(:developer_key) { lti_developer_key_model(account:).tap { |dk| lti_tool_configuration_model(developer_key: dk) } }
         let(:account) { Account.default }
         let(:tool_root_account) { account_model }
         let(:access_token) { pseudonym(user).user.access_tokens.create(purpose: "test") }
@@ -3111,9 +3383,7 @@ describe ExternalToolsController do
 
         context "when the context is not a course" do
           let!(:tool) do
-            t = developer_key.lti_registration.new_external_tool(course.account)
-            t.save!
-            t
+            developer_key.lti_registration.new_external_tool(course.account)
           end
 
           let(:params) { { account_id: course.account.global_id, id: tool.global_id, redirect: true } }
@@ -3275,9 +3545,9 @@ describe ExternalToolsController do
 
   def opaque_id(asset)
     if asset.respond_to?(:lti_context_id)
-      Lti::Asset.global_context_id_for(asset)
+      Lti::V1p1::Asset.global_context_id_for(asset)
     else
-      Lti::Asset.context_id_for(asset)
+      Lti::V1p1::Asset.context_id_for(asset)
     end
   end
 
@@ -3289,8 +3559,6 @@ describe ExternalToolsController do
         shared_secret: "secret1"
       )
       tool.url = "http://www.example.com/basic_lti"
-      tool.use_1_3 = true
-      tool.developer_key = DeveloperKey.create!
       tool.save!
       tool
     end

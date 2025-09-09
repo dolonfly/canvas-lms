@@ -40,7 +40,7 @@ module AccountReports
       @account_report = account_report
       @reports = SIS_CSV_REPORTS & @account_report.parameters.select { |_k, v| value_to_boolean(v) }.keys
       @sis_format = params[:sis_format]
-      @created_by_sis = @account_report.parameters["created_by_sis"]
+      @created_by_sis = value_to_boolean(@account_report.parameters["created_by_sis"])
       extra_text_term(@account_report)
       include_deleted_objects
       include_enrollment_filter
@@ -123,6 +123,9 @@ module AccountReports
         headers << "created_by_sis"
       end
       headers << "pronouns" if should_add_pronouns?
+
+      # Add after pronouns for backwards-compatibility
+      headers << "uuid" unless @sis_format
       headers
     end
 
@@ -138,11 +141,11 @@ module AccountReports
 
     def user_query
       root_account.shard.activate do
-        root_account.pseudonyms.except(:preload).joins(:user).select(
+        root_account.pseudonyms.not_instructure_identity.except(:preload).joins(:user).select(
           "pseudonyms.id, pseudonyms.sis_user_id, pseudonyms.user_id, pseudonyms.sis_batch_id,
            pseudonyms.integration_id,pseudonyms.authentication_provider_id,pseudonyms.unique_id,
            pseudonyms.workflow_state, users.sortable_name,users.updated_at AS user_updated_at,
-           users.name, users.short_name, users.pronouns AS db_pronouns"
+           users.name, users.short_name, users.pronouns AS db_pronouns, users.uuid"
         ).where("NOT EXISTS (SELECT user_id
                              FROM #{Enrollment.quoted_table_name} e
                              WHERE e.type = 'StudentViewEnrollment'
@@ -181,6 +184,7 @@ module AccountReports
       row << user.workflow_state
       row << user.sis_batch_id? unless @sis_format
       row << translate_pronouns(user.db_pronouns) if should_add_pronouns?
+      row << user.uuid unless @sis_format
       row
     end
 

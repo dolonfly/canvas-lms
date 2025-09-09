@@ -30,9 +30,9 @@ describe "account admin outcomes" do
   describe "course outcomes" do
     before do
       RoleOverride.create!(context: account,
-                           permission: "manage_courses",
+                           permission: "manage_courses_admin",
                            role: admin_role,
-                           enabled: false) # should not manage_courses permission
+                           enabled: false)
       course_with_admin_logged_in
     end
 
@@ -55,7 +55,7 @@ describe "account admin outcomes" do
       end
 
       it "validates decaying average_range", priority: "2" do
-        should_validate_decaying_average_range
+        should_validate_decaying_average_range "not a valid value for this calculation method"
       end
 
       it "validates n mastery_range", priority: "2" do

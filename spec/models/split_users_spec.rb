@@ -139,7 +139,11 @@ describe SplitUsers do
         UserMerge.from(restored_user).into(source_user)
         UserMerge.from(user3).into(source_user)
         UserMergeData.find_by(user_id: source_user).update(workflow_state: "failed")
-        expect_any_instance_of(SplitUsers).to receive(:split_users).once
+
+        double = double(SplitUsers)
+        allow(SplitUsers).to receive(:new).and_return(double)
+        expect(double).to receive(:split_users).once
+
         SplitUsers.split_db_users(source_user)
       end
 
@@ -156,7 +160,7 @@ describe SplitUsers do
       it "restores lti_id and uuid when these were overwritten by move_lti_ids" do
         restored_orig_lti_id = restored_user.lti_id
         restored_orig_uuid = restored_user.uuid
-        restored_lti_context_id = Lti::Asset.opaque_identifier_for(restored_user)
+        restored_lti_context_id = Lti::V1p1::Asset.opaque_identifier_for(restored_user)
         source_orig_lti_id = source_user.lti_id
         source_orig_uuid = source_user.uuid
         # (source_lti_context_id must be nil for this move to actually happen)
@@ -178,9 +182,9 @@ describe SplitUsers do
         merge_data = UserMergeData.active.splitable.find_by(user: source_user, from_user: restored_user)
         old_uuid = merge_data.items.where(item_type: "uuid").pick(:item)
         source_user.update!(uuid: old_uuid)
-        allow(InstStatsd::Statsd).to receive(:increment)
+        allow(InstStatsd::Statsd).to receive(:distributed_increment)
         expect { SplitUsers.split_db_users(source_user, merge_data) }.not_to raise_error
-        expect(InstStatsd::Statsd).to have_received(:increment).once.with("split_users.undo_move_lti_ids.unique_constraint_failure")
+        expect(InstStatsd::Statsd).to have_received(:distributed_increment).once.with("split_users.undo_move_lti_ids.unique_constraint_failure")
         expect(restored_user.reload).not_to be_deleted
         expect(source_user).not_to be_deleted
       end
@@ -237,7 +241,7 @@ describe SplitUsers do
       end
 
       it "handles access tokens" do
-        at = AccessToken.create!(user: restored_user, developer_key: DeveloperKey.default)
+        at = AccessToken.create!(user: restored_user, developer_key: DeveloperKey.default, purpose: "test")
         UserMerge.from(restored_user).into(source_user)
         expect(at.reload.user_id).to eq source_user.id
         SplitUsers.split_db_users(source_user)
@@ -564,7 +568,7 @@ describe SplitUsers do
       let!(:shard1_course) { shard1_account.courses.create! }
 
       it "handles access tokens" do
-        at = AccessToken.create!(user: restored_user, developer_key: DeveloperKey.default)
+        at = AccessToken.create!(user: restored_user, developer_key: DeveloperKey.default, purpose: "test")
         UserMerge.from(restored_user).into(shard1_source_user)
         expect(at.reload.user_id).to eq shard1_source_user.id
         SplitUsers.split_db_users(shard1_source_user)
@@ -665,6 +669,28 @@ describe SplitUsers do
 
         expect(real_submission.reload.user).to eq restored_user
         expect(unsubmitted_submission.reload.user).to eq shard1_source_user
+      end
+
+      it "retains unsubmitted/deleted submissions on conflict with the same assignment" do
+        course1.enroll_student(restored_user, enrollment_state: "active")
+        course1.enroll_student(source_user, enrollment_state: "active")
+
+        assignment = course1.assignments.create!(title: "test assignment", workflow_state: "published")
+
+        restore_user_submission = assignment.submissions.find_by!(user: restored_user)
+        source_user_submission = assignment.submissions.find_by!(user: source_user)
+
+        UserMerge.from(restored_user).into(source_user)
+
+        expect(restore_user_submission.reload).to be_deleted
+        expect(restore_user_submission.user).to eq restored_user
+        expect(source_user_submission.reload).to be_unsubmitted
+        expect(source_user_submission.user).to eq source_user
+
+        SplitUsers.split_db_users(shard1_source_user)
+
+        expect(restore_user_submission.reload.user).to eq restored_user
+        expect(source_user_submission.reload.user).to eq source_user
       end
 
       it "restores admins to the original state" do

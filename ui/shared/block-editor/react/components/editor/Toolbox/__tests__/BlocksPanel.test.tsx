@@ -28,8 +28,8 @@ import {testTemplates} from './testTemplates'
 const user = userEvent.setup()
 
 // from the View theme props
-const borderColorPrimary = '#c7cdd1'
-const borderColorWarning = '#fc5e13'
+const borderColorPrimary = '#d7dade'
+const borderColorWarning = '#cf4a00'
 
 const mockAddNodeTree = jest.fn()
 const mockCreate = jest.fn((_ref, cb) => {
@@ -93,17 +93,7 @@ const renderComponent = (props: Partial<BlocksPanelProps> = {}) => {
   return render(<BlocksPanel {...defaultProps} {...props} />)
 }
 
-const blockList = [
-  'Button',
-  'Text',
-  'RCE',
-  'Icon',
-  'Heading',
-  'Resource Card',
-  'Image',
-  'Group',
-  'Tabs',
-]
+const blockList = ['Button', 'Text', 'Icon', 'Image', 'Group', 'Tabs', 'Divider']
 
 describe('Toolbox', () => {
   afterEach(() => {
@@ -131,11 +121,11 @@ describe('Toolbox', () => {
 
       expect(getByText('A block template')).toBeInTheDocument()
       expect(getByText('A block template').closest('.toolbox-item')).toHaveStyle(
-        `border-color: ${borderColorPrimary}`
+        `border-color: ${borderColorPrimary}`,
       )
       expect(getByText('block template 2')).toBeInTheDocument()
       expect(getByText('block template 2').closest('.toolbox-item')).toHaveStyle(
-        `border-color: ${borderColorWarning}`
+        `border-color: ${borderColorWarning}`,
       )
     })
 

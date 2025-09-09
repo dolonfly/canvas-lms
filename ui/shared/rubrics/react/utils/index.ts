@@ -21,18 +21,21 @@ import type {
   Rubric,
   RubricAssessmentData,
   RubricAssociation,
+  RubricRating,
 } from '@canvas/rubrics/react/types/rubric'
 
 export type RubricUnderscoreType = {
   title: string
   criteria: RubricUnderscoreCriteria[]
   data?: RubricUnderscoreCriteria[]
+  hide_points: boolean
   id: string
   rating_order: string
   free_form_criterion_comments: boolean
   points_possible: number
   unassessed?: boolean
   workflow_state: string
+  can_update?: boolean
 }
 
 type RubricUnderscoreCriteria = {
@@ -73,12 +76,15 @@ export type RubricAssessmentDataUnderscore = {
 }
 export const mapRubricUnderscoredKeysToCamelCase = (
   rubric: RubricUnderscoreType,
-  rubricOutcomeData: RubricOutcomeUnderscore[] = []
+  rubricOutcomeData: RubricOutcomeUnderscore[] = [],
 ): Rubric => {
-  const rubricOutcomeMap = rubricOutcomeData.reduce((prev, curr) => {
-    prev[curr.id] = curr.display_name
-    return prev
-  }, {} as Record<string, string>)
+  const rubricOutcomeMap = rubricOutcomeData.reduce(
+    (prev, curr) => {
+      prev[curr.id] = curr.display_name
+      return prev
+    },
+    {} as Record<string, string>,
+  )
 
   const criteria = rubric.criteria ?? rubric.data ?? []
 
@@ -117,14 +123,16 @@ export const mapRubricUnderscoredKeysToCamelCase = (
     freeFormCriterionComments: rubric.free_form_criterion_comments,
     pointsPossible: rubric.points_possible,
     criteriaCount: criteria.length,
+    hidePoints: rubric.hide_points,
     id: rubric.id,
     unassessed: rubric.unassessed,
     workflowState: rubric.workflow_state,
+    canUpdateRubric: rubric.can_update,
   }
 }
 
 export const mapRubricAssessmentDataUnderscoredKeysToCamelCase = (
-  data: RubricAssessmentDataUnderscore[]
+  data: RubricAssessmentDataUnderscore[],
 ): RubricAssessmentData[] => {
   return data.map(assessment => {
     return {
@@ -139,7 +147,9 @@ export const mapRubricAssessmentDataUnderscoredKeysToCamelCase = (
   })
 }
 
-type RubricAssociationUnderscore = {
+export type RubricAssociationUnderscore = {
+  association_type: 'Assignment' | 'Account' | 'Course'
+  association_id: string
   id: string
   rubric_id: string
   use_for_grading: boolean
@@ -148,13 +158,35 @@ type RubricAssociationUnderscore = {
   hide_outcome_results: boolean
 }
 export const mapRubricAssociationUnderscoredKeysToCamelCase = (
-  underscoreAssociation: RubricAssociationUnderscore
+  underscoreAssociation: RubricAssociationUnderscore,
 ): RubricAssociation => {
   return {
+    associationType: underscoreAssociation.association_type,
+    associationId: underscoreAssociation.association_id,
     id: underscoreAssociation.id,
     hideOutcomeResults: underscoreAssociation.hide_outcome_results,
     hidePoints: underscoreAssociation.hide_points,
     hideScoreTotal: underscoreAssociation.hide_score_total,
     useForGrading: underscoreAssociation.use_for_grading,
   }
+}
+
+type ReorderProps = {
+  list: RubricRating[]
+  startIndex: number
+  endIndex: number
+}
+
+export const reorderRatingsAtIndex = ({list, startIndex, endIndex}: ReorderProps) => {
+  const result = Array.from(list)
+  const resultCopy = JSON.parse(JSON.stringify(list))
+
+  const [removed] = result.splice(startIndex, 1)
+  result.splice(endIndex, 0, removed)
+
+  result.forEach((item, index) => {
+    item.points = resultCopy[index].points
+  })
+
+  return result
 }

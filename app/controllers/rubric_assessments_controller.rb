@@ -128,7 +128,8 @@ class RubricAssessmentsController < ApplicationController
       begin
         ensure_adjudication_possible(provisional:) do
           @asset, @user = @association_object.find_asset_for_assessment(@association, user_id, opts)
-          unless @association.user_can_assess_for?(assessor: @current_user, assessee: @user)
+          assessment_type = params.dig(:rubric_assessment, :assessment_type)
+          unless @association.user_can_assess_for?(assessor: @current_user, assessee: @user, assessment_type:)
             return render_unauthorized_action
           end
 
@@ -212,12 +213,20 @@ class RubricAssessmentsController < ApplicationController
   def export
     return unless authorized_action(@context, @current_user, [:manage_grades, :view_all_grades])
 
-    rubric_association = Assignment.find(params[:assignment_id]).rubric_association
+    assignment = Assignment.find(params[:assignment_id])
+
+    if !assignment || !assignment.rubric_association
+      return render json: { message: I18n.t("Assignment not found or does not have a rubric association") }, status: :bad_request
+    end
+
+    if assignment.anonymize_students?
+      return render json: { message: I18n.t("Rubric export is not supported for assignments with anonymous grading") }, status: :bad_request
+    end
 
     options = { filter: params[:filter] }
 
     send_data(
-      RubricAssessmentExport.new(rubric_association:, user: @current_user, options:).generate_file,
+      RubricAssessmentExport.new(rubric_association: assignment.rubric_association, user: @current_user, options:).generate_file,
       type: "text/csv",
       filename: "export_rubric_assessments.csv",
       disposition: "attachment"

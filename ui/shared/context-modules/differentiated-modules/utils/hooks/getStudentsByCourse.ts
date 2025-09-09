@@ -16,11 +16,11 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import {executeQuery} from '@canvas/query/graphql'
-import {useScope as useI18nScope} from '@canvas/i18n'
-import gql from 'graphql-tag'
+import {executeQuery} from '@canvas/graphql'
+import {useScope as createI18nScope} from '@canvas/i18n'
+import {gql} from '@apollo/client'
 
-const I18n = useI18nScope('differentiated_modules')
+const I18n = createI18nScope('differentiated_modules')
 
 const QUERY = gql`
   query Selective_Release_GetStudentsQuery($courseId: ID!, $cursor: String) {
@@ -29,7 +29,11 @@ const QUERY = gql`
       ... on Course {
         id
         name
-        enrollmentsConnection(filter: {types: StudentEnrollment}, first: 100, after: $cursor) {
+        enrollmentsConnection(
+          filter: {types: StudentEnrollment, states: [invited, active]}
+          first: 100
+          after: $cursor
+        ) {
           edges {
             cursor
             node {
@@ -73,7 +77,7 @@ interface QueryResult {
 const fetchAllPages = async (
   courseId: string,
   cursor: string | null = null,
-  combinedResults: any[] = []
+  combinedResults: any[] = [],
 ): Promise<any[]> => {
   const result: QueryResult = await executeQuery(QUERY, {courseId, cursor})
 

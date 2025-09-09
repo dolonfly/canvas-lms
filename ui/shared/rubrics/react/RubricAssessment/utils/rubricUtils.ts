@@ -19,6 +19,9 @@
 import htmlEscape from '@instructure/html-escape'
 import type {RubricAssessmentData, RubricCriterion, RubricRating} from '../../types/rubric'
 
+import {useScope as createI18nScope} from '@canvas/i18n'
+const I18n = createI18nScope('enhanced-rubrics-assessment')
+
 export const htmlEscapeCriteriaLongDescription = (criteria: RubricCriterion) => {
   const {longDescription} = criteria
 
@@ -33,16 +36,38 @@ export const escapeNewLineText = (text?: string) => {
   }
 }
 
-export const rangingFrom = (ratings: RubricRating[], index: number, ratingOrder?: string) => {
+export const rangingFrom = (
+  ratings: RubricRating[],
+  index: number,
+  ratingOrder?: string,
+  includeZeroFrom?: boolean,
+) => {
   const previousRatingPoints = ratings[index - 1]?.points
   const previousPointModifier = getAdjustedDecimalRatingModifier(previousRatingPoints)
   const nextRatingPoints = ratings[index + 1]?.points
   const nextPointModifier = getAdjustedDecimalRatingModifier(nextRatingPoints)
+  const currentRatingPoints = ratings[index]?.points
 
   if (ratingOrder === 'ascending') {
+    if (currentRatingPoints === previousRatingPoints) {
+      return undefined
+    }
+
+    if (includeZeroFrom && index === 0) {
+      return 0
+    }
+
     return index > 0
       ? roundToTwoDecimalPlaces(previousRatingPoints + previousPointModifier)
       : undefined
+  }
+
+  if (currentRatingPoints === nextRatingPoints) {
+    return undefined
+  }
+
+  if (includeZeroFrom && index === ratings.length - 1) {
+    return 0
   }
 
   return index < ratings.length - 1
@@ -65,7 +90,7 @@ const roundToTwoDecimalPlaces = (num: number) => {
 export const findCriterionMatchingRatingIndex = (
   ratings: RubricRating[],
   points?: number,
-  criterionUseRange = false
+  criterionUseRange = false,
 ): number => {
   if (points == null) {
     return -1
@@ -78,7 +103,7 @@ export const findCriterionMatchingRatingIndex = (
 export const findCriterionMatchingRatingId = (
   ratings: RubricRating[],
   criterionUseRange: boolean,
-  rubricAssessmentData?: RubricAssessmentData
+  rubricAssessmentData?: RubricAssessmentData,
 ) => {
   const {id, points} = rubricAssessmentData || {}
   if (points == null) {
@@ -87,4 +112,20 @@ export const findCriterionMatchingRatingId = (
 
   return ratings.find(rating => rating.id === id && (criterionUseRange || rating.points === points))
     ?.id
+}
+
+export const rubricSelectedAriaLabel = (isSelected: boolean, isSelfAssessmentSelected: boolean) => {
+  if (isSelected && isSelfAssessmentSelected) {
+    return I18n.t('Selected and Self Assessment')
+  }
+
+  if (isSelected) {
+    return I18n.t('Selected')
+  }
+
+  if (isSelfAssessmentSelected) {
+    return I18n.t('Self Assessment')
+  }
+
+  return ''
 }

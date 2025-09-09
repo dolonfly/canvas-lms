@@ -19,27 +19,31 @@
 
 module SectionTabHelper
   # This should contain all the permissions that are checked in Course#uncached_tabs_available
-  PERMISSIONS_TO_PRECALCULATE = %i[
-    create_conferences
-    create_forum
-    manage_admin_users
-    manage_assignments
-    manage_assignments_add
-    manage_assignments_edit
-    manage_assignments_delete
-    manage_content
-    manage_files_add
-    manage_files_edit
-    manage_files_delete
-    manage_grades
-    manage_students
-    moderate_forum
-    post_to_forum
-    read_announcements
-    read_course_content
-    read_forum
-    read_roster
-    view_all_grades
+  PERMISSIONS_TO_PRECALCULATE = [
+    :create_conferences,
+    :create_forum,
+    :manage_assignments_add,
+    :manage_assignments_edit,
+    :manage_assignments_delete,
+    :manage_files_add,
+    :manage_files_edit,
+    :manage_files_delete,
+    :manage_grades,
+    :manage_students,
+    :moderate_forum,
+    :post_to_forum,
+    :read_announcements,
+    :read_course_content,
+    :read_forum,
+    :read_roster,
+    :view_all_grades,
+    *RoleOverride::GRANULAR_MANAGE_USER_PERMISSIONS
+  ].freeze
+
+  # if a tab depends on a Course FF, it should be included here so that the cache is busted
+  FLAGS_FOR_CACHE_KEY = [
+    :smart_search,
+    :youtube_migration
   ].freeze
 
   def available_section_tabs
@@ -139,8 +143,13 @@ module SectionTabHelper
         "section_tabs_hash",
         I18n.locale
       ]
-      if context.is_a?(Course) && context.elementary_homeroom_course?
-        k << "homeroom_course"
+      # need to include FF for courses in order to bust the cache
+      if context.is_a?(Course)
+        flag_states = FLAGS_FOR_CACHE_KEY.map { |flag| context.feature_enabled?(flag) }
+        k.concat(flag_states)
+        if context.elementary_homeroom_course?
+          k << "homeroom_course"
+        end
       end
 
       k.cache_key
@@ -196,13 +205,16 @@ module SectionTabHelper
     def a_attributes
       {
         href: @tab.path,
-        title: a_title,
+        id: "#{@tab.label.downcase.tr(" ", "-")}-link",
         "aria-label": a_aria_label,
         "aria-current": a_aria_current_page,
         class: a_classes
       }.tap do |h|
         h[:target] = @tab.target if @tab.target?
-        h["data-tooltip"] = "" if @tab.hide? || @tab.unused?
+        if @tab.hide? || @tab.unused?
+          h["data-tooltip"] = ""
+          h["data-html-tooltip-title"] = a_title
+        end
       end
     end
 
@@ -226,7 +238,7 @@ module SectionTabHelper
 
     # include the css_class of tabs here to show a "new" pill in the nav
     # hide the "new" pill by adding the css_class to the :visited_tabs user preference
-    NEW_TABS = %w[account_calendars].freeze
+    NEW_TABS = %w[account_calendars account_reports].freeze
 
     def indicate_new
       return unless NEW_TABS.include? @tab.css_class

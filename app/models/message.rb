@@ -37,8 +37,6 @@ class Message < ActiveRecord::Base
 
   extend TextHelper
 
-  MAX_TWITTER_MESSAGE_LENGTH = 140
-
   class QueuedNotFound < StandardError; end
 
   class Queued
@@ -141,7 +139,7 @@ class Message < ActiveRecord::Base
 
     state :sending do
       event :complete_dispatch, transitions_to: :sent do
-        self.sent_at ||= Time.now
+        self.sent_at ||= Time.zone.now
       end
       event :set_transmission_error, transitions_to: :transmission_error
       event :cancel, transitions_to: :cancelled
@@ -183,7 +181,7 @@ class Message < ActiveRecord::Base
     state :closed do
       event :set_transmission_error, transitions_to: :transmission_error
       event :send_message, transitions_to: :closed do
-        self.sent_at ||= Time.now
+        self.sent_at ||= Time.zone.now
       end
     end
   end
@@ -235,7 +233,7 @@ class Message < ActiveRecord::Base
 
   scope :in_state, ->(state) { where(workflow_state: Array(state).map(&:to_s)) }
 
-  scope :at_timestamp, ->(timestamp) { where(created_at: Time.at(timestamp.to_i)...Time.at(timestamp.to_i + 1)) }
+  scope :at_timestamp, ->(timestamp) { where(created_at: Time.zone.at(timestamp.to_i)...Time.zone.at(timestamp.to_i + 1)) }
 
   # an optimization for queries that would otherwise target the main table to
   # make them target the specific partition table. Naturally this only works if
@@ -569,7 +567,7 @@ class Message < ActiveRecord::Base
   def get_template(filename)
     path = Canvas::MessageHelper.find_message_path(filename)
 
-    unless (File.exist?(path) rescue false)
+    unless File.exist?(path)
       return false if filename.include?("slack")
 
       filename = notification.name.downcase.gsub(/\s/, "_") + ".email.erb"
@@ -578,7 +576,7 @@ class Message < ActiveRecord::Base
 
     @i18n_scope = "messages." + filename.delete_suffix(".erb")
 
-    if (File.exist?(path) rescue false)
+    if File.exist?(path)
       File.read(path)
     else
       false
@@ -594,7 +592,7 @@ class Message < ActiveRecord::Base
     notification.name.parameterize.underscore + "." + path_type + ".erb"
   end
 
-  # rubocop:disable Security/Eval ERB rendering
+  # rubocop:disable Security/Eval -- ERB rendering
   # Public: Apply an HTML email template to this message.
   #
   # Returns an HTML template (or nil).
@@ -732,7 +730,7 @@ self.user,
       logger.warn "Could not find a path type for #{inspect}"
       return nil
     end
-    logger.info "735 Delivering path_type: #{path_type}"
+
     if path_type == "slack" && !context_root_account.settings[:encrypted_slack_key]
       logger.warn("Could not send slack message without configured key")
       return nil
@@ -752,9 +750,9 @@ self.user,
       return skip_and_cancel
     end
 
-    InstStatsd::Statsd.increment("message.deliver.#{path_type}.#{notification_name}",
-                                 short_stat: "message.deliver",
-                                 tags: { path_type:, notification_name: })
+    InstStatsd::Statsd.distributed_increment("message.deliver.#{path_type}.#{notification_name}",
+                                             short_stat: "message.deliver",
+                                             tags: { path_type:, notification_name: })
 
     global_account_id = Shard.global_id_for(root_account_id, shard)
     InstStatsd::Statsd.increment("message.deliver.#{path_type}.#{global_account_id}",
@@ -769,15 +767,14 @@ self.user,
         logger.warn("Could not set delivery_method from #{path_type}")
         return nil
       end
-      logger.info(">> will delivery by delivery_method #{delivery_method}")
       send(delivery_method)
     end
   end
 
   def skip_and_cancel
-    InstStatsd::Statsd.increment("message.skip.#{path_type}.#{notification_name}",
-                                 short_stat: "message.skip",
-                                 tags: { path_type:, notification_name: })
+    InstStatsd::Statsd.distributed_increment("message.skip.#{path_type}.#{notification_name}",
+                                             short_stat: "message.skip",
+                                             tags: { path_type:, notification_name: })
     cancel
   end
 
@@ -788,9 +785,9 @@ self.user,
     targets = notification_targets
     if targets.empty?
       # Log no_targets_specified error to DataDog
-      InstStatsd::Statsd.increment("message.no_targets_specified",
-                                   short_stat: "message.no_targets_specified",
-                                   tags: { path_type: })
+      InstStatsd::Statsd.distributed_increment("message.no_targets_specified",
+                                               short_stat: "message.no_targets_specified",
+                                               tags: { path_type: })
 
       self.transmission_errors = "No notification targets specified"
       set_transmission_error
@@ -811,7 +808,7 @@ self.user,
       e,
       message: "Message delivery failed",
       to:,
-      object: inspect.to_s
+      object: inspect
     )
     error_string = "Exception: #{e.class}: #{e.message}\n\t#{e.backtrace.join("\n\t")}"
     self.transmission_errors = error_string
@@ -828,11 +825,6 @@ self.user,
       Mailer.create_message(self).to_s
     when "push"
       sns_json
-    when "twitter"
-      url = main_link || self.url
-      message_length = MAX_TWITTER_MESSAGE_LENGTH - url.length - 1
-      truncated_body = HtmlTextHelper.strip_and_truncate(body, max_length: message_length)
-      "#{truncated_body} #{url}"
     else
       if to =~ /^\+[0-9]+$/ || path_type == "slack"
         body
@@ -849,15 +841,6 @@ self.user,
     case path_type
     when "push"
       user.notification_endpoints.select("DISTINCT ON (token, arn) *").map(&:arn)
-    when "twitter"
-      twitter_service = user.user_services.where(service: "twitter").first
-      return [] unless twitter_service
-
-      [
-        "access_token" => twitter_service.token,
-        "access_token_secret" => twitter_service.secret,
-        "user_id" => twitter_service.service_user_id
-      ]
     when "slack"
       [
         "recipient" => to,
@@ -877,7 +860,7 @@ self.user,
   # Returns an array of dashboard messages.
   def self.dashboard_messages(messages)
     message_types = messages.inject({}) do |types, message|
-      type = message.notification.category rescue "Other"
+      type = message.notification&.category || "Other"
 
       if type.present?
         types[type] ||= []
@@ -1095,7 +1078,7 @@ self.user,
           @exception,
           message: "Message delivery failed",
           to:,
-          object: inspect.to_s
+          object: inspect
         )
       end
 
@@ -1163,7 +1146,7 @@ self.user,
           e,
           message: "SMS delivery failed",
           to:,
-          object: inspect.to_s,
+          object: inspect,
           tags: {
             type: :sms_message
           }

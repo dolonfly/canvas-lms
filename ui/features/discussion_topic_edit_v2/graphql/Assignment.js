@@ -15,10 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import gql from 'graphql-tag'
+import {gql} from '@apollo/client'
 import {arrayOf, bool, number, shape, string} from 'prop-types'
 import {AssignmentGroup} from './AssignmentGroup'
 import {AssignmentOverride} from './AssignmentOverride'
+import {LtiAssetProcessor} from './LtiAssetProcessor'
 
 export const Assignment = {
   fragment: gql`
@@ -70,9 +71,17 @@ export const Assignment = {
           }
         }
       }
+      hasSubmittedSubmissions
+      suppressAssignment
+      ltiAssetProcessorsConnection {
+        nodes {
+          ...LtiAssetProcessor
+        }
+      }
     }
     ${AssignmentGroup.fragment}
     ${AssignmentOverride.fragment}
+    ${LtiAssetProcessor.fragment}
   `,
 
   shape: shape({
@@ -108,8 +117,12 @@ export const Assignment = {
         onlyVisibleToOverrides: bool,
         pointsPossible: number,
         tag: string,
-      })
+      }),
     ),
+    hasSubmittedSubmissions: bool,
+    ltiAssetProcessorsConnection: shape({
+      nodes: arrayOf(LtiAssetProcessor.shape()),
+    }),
   }),
 
   mock: ({
@@ -130,6 +143,8 @@ export const Assignment = {
     assignmentOverrides = null,
     hasSubAssignments = false,
     checkpoints = [],
+    hasSubmittedSubmissions = false,
+    assetProcessors = [LtiAssetProcessor.mock()],
   } = {}) => ({
     id,
     _id,
@@ -148,6 +163,8 @@ export const Assignment = {
     assignmentOverrides,
     hasSubAssignments,
     checkpoints,
+    hasSubmittedSubmissions,
+    ltiAssetProcessorsConnection: {nodes: assetProcessors},
     __typename: 'Assignment',
   }),
 }

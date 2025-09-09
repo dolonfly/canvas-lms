@@ -46,10 +46,6 @@ describe GradingStandard do
   end
 
   describe "validations" do
-    it { is_expected.to belong_to(:context).required }
-    it { is_expected.to validate_presence_of(:data) }
-    it { is_expected.to serialize(:data) }
-
     describe "grading standard data" do
       let(:standard) { GradingStandard.new(context: @course) }
 
@@ -186,6 +182,14 @@ describe GradingStandard do
       expect(standards[0].id).to eq @standard.id
     end
 
+    it "returns standards that match the context when archive is requested" do
+      grading_standard_for @course
+
+      standards = GradingStandard.for(@course, include_archived: true)
+      expect(standards.length).to eq 1
+      expect(standards[0].id).to eq @standard.id
+    end
+
     it "includes standards made in the parent account" do
       grading_standard_for @course.root_account
 
@@ -208,6 +212,14 @@ describe GradingStandard do
       standards = GradingStandard.for(@course, include_archived: true)
       expect(standards.length).to eq 1
       expect(standards[0].id).to eq @standard.id
+    end
+
+    it "excludes deleted when the parameter is true for archived grading schemes" do
+      Account.site_admin.enable_feature!(:archived_grading_schemes)
+      grading_standard_for @course
+      @standard.destroy
+      standards = GradingStandard.for(@course, include_archived: true)
+      expect(standards.length).to eq 0
     end
   end
 
@@ -742,6 +754,14 @@ describe GradingStandard do
     end
 
     it "returns false if not used as an account or course default grading scheme" do
+      expect(@grading_standard.used_as_default?).to be false
+    end
+
+    it "returns false if it is used as an assignment grading scheme" do
+      @course.assignments.create!(title: "hi",
+                                  grading_type: "letter_grade",
+                                  grading_standard: @grading_standard,
+                                  submission_types: ["online_text_entry"])
       expect(@grading_standard.used_as_default?).to be false
     end
   end

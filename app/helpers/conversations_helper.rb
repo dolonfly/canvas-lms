@@ -131,11 +131,13 @@ module ConversationsHelper
     result
   end
 
-  def normalize_recipients(recipients: nil, context_code: nil, conversation_id: nil, current_user: @current_user, session: nil)
+  def normalize_recipients(recipients: nil, context_code: nil, conversation_id: nil, current_user: @current_user, session: nil, group_conversation: false, bulk_message: false)
     if defined?(params)
       recipients ||= params[:recipients]
       context_code ||= params[:context_code]
       conversation_id ||= params[:from_conversation_id]
+      group_conversation = params[:group_conversation]
+      bulk_message = params[:bulk_message]
     end
 
     return unless recipients
@@ -170,37 +172,26 @@ module ConversationsHelper
       known.concat(unknown_users.map { |id| MessageableUser.find(id) })
     end
 
-    contexts.each { |c| known.concat(current_user.address_book.known_in_context(c, include_concluded: false)) }
+    group_context_types = ["group", "differentiation_tag"]
+    contexts.each do |ctxt|
+      context_type, context_id = ctxt.match(MessageableUser::Calculator::CONTEXT_RECIPIENT).captures
+      if group_context_types.include?(context_type)
+        group = Group.find(context_id)
+        raise InsufficientPermissionsForDifferentiationTagsError if group&.non_collaborative? && !group.context.grants_any_right?(current_user, *RoleOverride::GRANULAR_MANAGE_TAGS_PERMISSIONS)
+        raise GroupConversationForDifferentiationTagsNotAllowedError if group.non_collaborative? && group_conversation && !bulk_message
+      end
+      known.concat(current_user.address_book.known_in_context(ctxt, include_concluded: false))
+    end
     @recipients = known.uniq(&:id)
     @recipients.reject! { |u| u.id == current_user.id } unless @recipients == [current_user] && recipients.count == 1
     @recipients
   end
 
   def get_invalid_recipients(context, recipients, current_user)
-    if context.is_a?(Course) && context.available? && !recipients.nil? && (context.user_is_student?(current_user) && !context.user_is_instructor?(current_user) && !context.user_is_admin?(current_user))
+    if context.is_a?(Course) && context.available? && !recipients.nil? && context.user_is_student?(current_user) && !context.user_is_instructor?(current_user) && !context.user_is_admin?(current_user)
       valid_student_recipients = context.current_users.pluck(:id, :name)
       recipients.map { |recipient| [recipient.id, recipient.name] } - valid_student_recipients
     end
-  end
-
-  def all_recipients_are_instructors?(context, recipients)
-    if context.is_a?(Course)
-      return recipients.inject(true) do |all_recipients_are_instructors, recipient|
-        all_recipients_are_instructors && context.user_is_instructor?(recipient)
-      end
-    end
-    false
-  end
-
-  def observer_to_linked_students(recipients)
-    observee_ids = @current_user.enrollments.where(type: "ObserverEnrollment").distinct.pluck(:associated_user_id)
-    return false if observee_ids.empty?
-
-    recipients.each do |recipient|
-      return false if observee_ids.exclude?(recipient.id)
-    end
-
-    true
   end
 
   def valid_context?(context)
@@ -307,11 +298,8 @@ module ConversationsHelper
   end
 
   def validate_context(context, recipients)
-    recipients_are_instructors = all_recipients_are_instructors?(context, recipients)
-
     if context.is_a?(Course) &&
-       !recipients_are_instructors &&
-       !observer_to_linked_students(recipients) &&
+       missing_right_to_send_any_recipient(recipients, context) &&
        !context.grants_right?(@current_user, session, :send_messages)
 
       raise InvalidContextPermissionsError
@@ -372,7 +360,8 @@ module ConversationsHelper
                                       root_account_ids: root_account_ids.map(&:to_s),
                                       start: settings.out_of_office_first_date).order("created_at DESC").first
 
-      next unless should_send_auto_response?(ooo_message_author, last_sent_ooo_response)
+      should_send = should_send_auto_response?(ooo_message_author, last_sent_ooo_response)
+      next unless should_send
 
       conversation = ooo_message_author.initiate_conversation(
         [author],
@@ -432,6 +421,22 @@ module ConversationsHelper
     !(active_non_student || (admin_user && !active_student))
   end
 
+  private
+
+  def missing_right_to_send_any_recipient(recipients, context)
+    recipients.find do |recipient|
+      !context.user_is_instructor?(recipient) && !recipient_is_observed_by_user(recipient)
+    end
+  end
+
+  def recipient_is_observed_by_user(recipient)
+    observee_ids_for_current_user.include?(recipient.id)
+  end
+
+  def observee_ids_for_current_user
+    @observee_ids_for_current_user ||= @current_user.enrollments.where(type: "ObserverEnrollment").distinct.pluck(:associated_user_id)
+  end
+
   class Error < StandardError
     attr_accessor :message, :status, :attribute
 
@@ -456,4 +461,8 @@ module ConversationsHelper
   class InvalidMessageForConversationError < StandardError; end
 
   class InvalidMessageParticipantError < StandardError; end
+
+  class GroupConversationForDifferentiationTagsNotAllowedError < StandardError; end
+
+  class InsufficientPermissionsForDifferentiationTagsError < StandardError; end
 end

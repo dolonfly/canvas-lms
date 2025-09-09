@@ -25,6 +25,30 @@ import {TextDecoder, TextEncoder} from 'util'
 global.TextEncoder = TextEncoder
 global.TextDecoder = TextDecoder
 
+// Add fetch polyfills for msw
+require('isomorphic-fetch')
+
+// Add BroadcastChannel polyfill for msw
+if (!globalThis.BroadcastChannel) {
+  globalThis.BroadcastChannel = class BroadcastChannel {
+    constructor() {}
+    postMessage() {}
+    close() {}
+    addEventListener() {}
+    removeEventListener() {}
+  }
+}
+
+// Add TransformStream polyfill for msw
+if (!globalThis.TransformStream) {
+  globalThis.TransformStream = class TransformStream {
+    constructor() {
+      this.readable = {}
+      this.writable = {}
+    }
+  }
+}
+
 /**
  * We want to ensure errors and warnings get appropriate eyes. If
  * you are seeing an exception from here, it probably means you
@@ -59,6 +83,7 @@ const ignoredErrors = [
   /Warning: findDOMNode is deprecated and will be removed in the next major release. Instead, add a ref directly to the element you want to reference. Learn more about using refs safely here: https:\/\/reactjs.org\/link\/strict-mode-find-node/,
   /Warning: %s uses the legacy childContextTypes API which is no longer supported and will be removed in the next major release. Use React.createContext\(\) instead/,
   /Warning: %s uses the legacy contextTypes API which is no longer supported and will be removed in the next major release. Use React.createContext\(\) with static contextType instead./,
+  /Warning: Unknown event handler property `%s`. It will be ignored.%s/,
 ]
 const globalWarn = global.console.warn
 const ignoredWarnings = [
@@ -78,7 +103,7 @@ global.console = {
     }
     globalError(error)
     throw new Error(
-      `Looks like you have an unhandled error. Keep our test logs clean by handling or filtering it. ${error}`
+      `Looks like you have an unhandled error. Keep our test logs clean by handling or filtering it. ${error}`,
     )
   },
   warn: warning => {
@@ -87,7 +112,7 @@ global.console = {
     }
     globalWarn(warning)
     throw new Error(
-      `Looks like you have an unhandled warning. Keep our test logs clean by handling or filtering it. ${warning}`
+      `Looks like you have an unhandled warning. Keep our test logs clean by handling or filtering it. ${warning}`,
     )
   },
   info: console.info,

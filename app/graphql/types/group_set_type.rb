@@ -65,12 +65,14 @@ module Types
 
     field :groups_connection, GroupType.connection_type, null: true
 
+    field :non_collaborative, Boolean, null: true
+
     def groups_connection
       Loaders::AssociationLoader.for(GroupCategory, :context).load(set).then do
         # this permission matches the REST api, but is probably too strict.
         # students are able to see groups in the canvas ui, so probably should
         # be able to see them here too
-        if set.context.grants_any_right?(current_user, :manage_groups, *RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS)
+        if set.context.grants_any_right?(current_user, *RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS)
           set.groups.active.by_name
         else
           nil
@@ -86,7 +88,7 @@ module Types
         # this permission matches the REST api, but is probably too strict.
         # students are able to see groups in the canvas ui, so probably should
         # be able to see them here too
-        if set.context.grants_any_right?(current_user, :manage_groups, *RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS)
+        if set.context.grants_any_right?(current_user, *RoleOverride::GRANULAR_MANAGE_GROUPS_PERMISSIONS)
           set.groups.active.by_name
         else
           nil
@@ -107,5 +109,7 @@ module Types
         set.sis_source_id if root_account.grants_any_right?(current_user, :read_sis, :manage_sis)
       end
     end
+
+    field :single_tag, Boolean, null: false, method: :single_tag?
   end
 end

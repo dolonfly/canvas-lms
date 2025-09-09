@@ -17,10 +17,29 @@
  */
 
 export type FilterItem = {
-  id: string
-  name: string
+  id?: string
+  name?: string
 }
 
 export type LtiFilters = {
   [key: string]: Array<FilterItem>
+}
+
+export type TagGroups = {
+  id: string
+  name: string
+  tags: Array<FilterItem>
+}
+
+export type LpFilters = {
+  id: string
+  name: string
+  description: string
+  tag_groups: Array<TagGroups>
+}
+
+export type OrganizationFiltes = {
+  organization_filters: [LpFilters]
+  approval_status: [FilterItem]
+  privacy_status: [FilterItem]
 }

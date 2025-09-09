@@ -27,10 +27,17 @@ const renderBlock = (props: Partial<ImageBlockProps> = {}) => {
       <Frame>
         <ImageBlock {...props} />
       </Frame>
-    </Editor>
+    </Editor>,
   )
 }
 describe('ImageBlock', () => {
+  beforeEach(() => {
+    fetchMock.get('*', 200)
+  })
+  afterEach(() => {
+    fetchMock.reset()
+  })
+
   it('should render with default props', () => {
     const {container} = renderBlock()
     const block = container.querySelector('.image-block.empty')
@@ -74,7 +81,7 @@ describe('ImageBlock', () => {
         height: 201,
       })
       const img = container.querySelector('.image-block') as HTMLElement
-      expect(img).toHaveStyle({height: '201%', width: '101%'})
+      expect(img).toHaveStyle({width: '101%', height: '201px'})
     })
 
     it('should render %width and auto height with "percent" sizeVariant and maintainAspectRatio', () => {
@@ -86,8 +93,7 @@ describe('ImageBlock', () => {
         maintainAspectRatio: true,
       })
       const img = container.querySelector('.image-block') as HTMLElement
-      expect(img).toHaveStyle({height: 'auto'})
-      expect(img.style.width).toMatch(/%$/)
+      expect(img).toHaveStyle({width: '101%', height: 'auto'})
     })
   })
 
@@ -121,7 +127,12 @@ describe('ImageBlock', () => {
 
   describe('svg handling', () => {
     beforeEach(() => {
-      fetchMock.get('some-image.svg', '<svg></svg>')
+      fetchMock.reset()
+      fetchMock.get('some-image.svg', {
+        status: 201,
+        body: '<svg></svg>',
+        headers: {'Content-type': 'image/svg+xml'},
+      })
     })
 
     it('renders the svg inline', async () => {

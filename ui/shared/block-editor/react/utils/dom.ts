@@ -76,6 +76,7 @@ export function isElementOfStyle(property: string, value: string, elem: Element 
   let currentElem: Element | null = elem
   while (currentElem) {
     const computedStyle = window.getComputedStyle(currentElem)
+    // @ts-expect-error
     if (computedStyle[property] === value) {
       return true
     }
@@ -87,7 +88,7 @@ export function isElementOfStyle(property: string, value: string, elem: Element 
 export function scrollIntoViewWithCallback(
   element: HTMLElement | null,
   scrollIntoViewOpts: any,
-  callback: () => void
+  callback: () => void,
 ) {
   if (!element) return
 
@@ -102,7 +103,7 @@ export function scrollIntoViewWithCallback(
         observer.disconnect()
       }
     },
-    {threshold: 1.0}
+    {threshold: 1.0},
   )
 
   // Observe the target element
@@ -116,11 +117,22 @@ export function mountNode(): HTMLElement {
   return document.querySelector('.block-editor-editor') as HTMLElement
 }
 
-// export function validateSVG(svg: string): boolean {
-//   const parser = new DOMParser()
-//   const doc = parser.parseFromString(svg, 'image/svg+xml')
-//   if (doc.documentElement.childElementCount !== 1 || doc.querySelector('svg') === null) {
-//     return false
-//   }
-//   return true
-// }
+const focusableSelector = `
+  a[href],
+  button,
+  input:not([type="hidden"]),
+  select,
+  textarea,
+  [tabindex]:not([tabindex="-1"]),
+  summary
+`
+
+function isFocusable(element: HTMLElement): boolean {
+  return typeof element.focus === 'function' && !element.hasAttribute('disabled')
+}
+export function firstFocusableElement(parent?: HTMLElement): HTMLElement | undefined {
+  if (!parent) return undefined
+  const focusableElements = Array.from(parent.querySelectorAll(focusableSelector)) as HTMLElement[]
+  const firstFocusable = focusableElements.find(isFocusable)
+  return firstFocusable
+}

@@ -27,7 +27,7 @@ shared_context "advantage services context" do
 
   let(:tool_context) { root_account }
   let!(:tool) do
-    ContextExternalTool.create!(
+    tool = ContextExternalTool.create!(
       context: tool_context,
       consumer_key: "key",
       shared_secret: "secret",
@@ -37,6 +37,14 @@ shared_context "advantage services context" do
       lti_version: "1.3",
       workflow_state: "public"
     )
+    control = tool.context_controls.new(registration: tool.developer_key.lti_registration, available: true)
+    if tool_context.is_a?(Course)
+      control.course = tool_context
+    else
+      control.account = tool_context
+    end
+    control.save!
+    tool
   end
   let(:course_account) do
     root_account
@@ -62,16 +70,11 @@ shared_context "advantage services context" do
   end
 
   def send_http
-    if request_method == :get
-      get action, params: params_overrides
-    elsif request_method == :post
-      post action, params: params_overrides, body: body_overrides
-    elsif request_method == :put
-      put action, params: params_overrides, body: body_overrides
-    elsif request_method == :delete
-      delete action, params: params_overrides
-    else
-      raise "Unsupported request method"
+    case request_method
+    when :get, :delete
+      send request_method, action, params: params_overrides
+    when :post, :put
+      send request_method, action, params: (body_overrides || {}).merge(params_overrides)
     end
   end
 

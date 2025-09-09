@@ -17,7 +17,7 @@
  */
 
 import React from 'react'
-import type {Product} from '../../models/Product'
+import type {OrganizationProduct, Product} from '../../models/Product'
 import {Link} from '@instructure/ui-link'
 import {Flex} from '@instructure/ui-flex'
 import {Img} from '@instructure/ui-img'
@@ -26,31 +26,32 @@ import {View} from '@instructure/ui-view'
 import {Tag} from '@instructure/ui-tag'
 import {TruncateText} from '@instructure/ui-truncate-text'
 import TruncateWithTooltip from '../common/TruncateWithTooltip'
-import {ZAccountId} from '../../models/AccountId'
+import {productRoute} from '../../utils/routes'
 
 type ProductCardProps = {
-  product: Product
+  product: Product | OrganizationProduct
 }
 
 const ProductCard = (props: ProductCardProps) => {
   const {product} = props
-  const accountId = ZAccountId.parse(window.location.pathname.split('/')[2])
 
   return (
     <Flex.Item>
       <View
         key={product.id}
         as="div"
-        height={200}
-        width={350}
+        height={225}
+        width={390}
         borderColor="primary"
         borderRadius="medium"
         borderWidth="small"
         padding="mediumSmall"
         onClick={() => {
-          window.location.href = `/accounts/${accountId}/apps/product_detail/${product.global_product_id}`
+          window.location.href = productRoute(product.global_product_id)
         }}
         cursor="pointer"
+        role="group"
+        aria-label={product.name}
       >
         <Flex direction="column" height="100%">
           <Flex gap="small" margin="0 0 medium 0">
@@ -67,7 +68,7 @@ const ProductCard = (props: ProductCardProps) => {
                   <Link
                     isWithinText={false}
                     themeOverride={{fontWeight: 700, color: 'black'}}
-                    href={`/accounts/${accountId}/apps/product_detail/${product.global_product_id}`}
+                    href={productRoute(product.global_product_id)}
                   >
                     {product?.name}
                   </Link>
@@ -90,9 +91,31 @@ const ProductCard = (props: ProductCardProps) => {
           </View>
           <View as="div" margin="auto 0 0 0">
             {product?.tags?.slice(0, 1).map(tag => (
-              <Tag key={tag.name} text={tag.name} size="small" margin="0 xx-small 0 0" />
+              <Tag
+                key={tag.name}
+                text={tag.name}
+                size="small"
+                margin="0 xx-small 0 0"
+                themeOverride={{maxWidth: 'none'}}
+              />
             ))}
           </View>
+          {'organization_tool' in product && product.organization_tool.product_status && (
+            <View as="div" margin="auto 0 0 0">
+              <Tag
+                key="1"
+                text={product.organization_tool.product_status?.name}
+                size="medium"
+                margin="0 xx-small 0 0"
+                themeOverride={{
+                  defaultBackground: 'white',
+                  defaultColor: product.organization_tool.product_status?.color,
+                  defaultBorderColor: product.organization_tool.product_status?.color,
+                  maxWidth: 'none',
+                }}
+              />
+            </View>
+          )}
         </Flex>
       </View>
     </Flex.Item>

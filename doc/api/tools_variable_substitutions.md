@@ -541,7 +541,7 @@ returns the root account's sis source id for the current context.
 ## Canvas.externalTool.global_id
 returns the global ID for the external tool that was launched. Only available for LTI 1.
 
-**Availability**: *always and when in an LTI 1*  
+**Availability**: *when in an LTI 1*  
 
 
 ```
@@ -559,7 +559,7 @@ returns the URL for the external tool that was launched. Only available for LTI 
 ## com.instructure.brandConfigJSON.url
 returns the URL to retrieve the brand config JSON for the launching context.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -568,7 +568,7 @@ returns the URL to retrieve the brand config JSON for the launching context.
 ## com.instructure.brandConfigJSON
 returns the brand config JSON itself for the launching context.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -580,7 +580,7 @@ This URL should be used as the src attribute for a script tag on the external to
 provider's web page. It is configured to be used with the [instructure-ui node module](https://github.com/instructure/instructure-ui).
 More information on on how to use instructure ui react components can be found [here](http://instructure.github.io/instructure-ui/).
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -589,7 +589,7 @@ More information on on how to use instructure ui react components can be found [
 ## Canvas.css.common
 returns the URL for the common css file.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1006,6 +1006,15 @@ Returns the users preference for high contrast colors (an accessibility feature)
 ```
 false
 ```
+## Canvas.user.prefersDyslexicFont
+Returns the users preference for using a dyslexia friendly font (an accessibility feature).
+
+**Availability**: *when launched by a logged in user*  
+
+
+```
+false
+```
 ## com.instructure.Course.groupIds
 returns the Canvas ids of all active groups in the current course.
 
@@ -1165,7 +1174,7 @@ Returns the logout service url for the user.
 This is the pseudonym the user is actually logged in as.
 It may not hold all the sis info needed in other launch substitutions.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1308,6 +1317,26 @@ from a group assignment.
 ```
 "Group One"
 ```
+## com.instructure.Tag.id
+Returns the Canvas id of the differentiation tag the current user is assigned to
+for the current assignment context.
+
+**Availability**: *when launched by a logged in user and when launched as an assignment*  
+**Launch Parameter**: *com_instructure_tag_id*  
+
+```
+123
+```
+## com.instructure.Tag.name
+Returns the name of the differentiation tag the current user is assigned to
+for the current assignment context.
+
+**Availability**: *when launched by a logged in user and when launched as an assignment*  
+**Launch Parameter**: *com_instructure_tag_name*  
+
+```
+"Advanced Students"
+```
 ## Canvas.assignment.title
 Returns the title of the assignment that was launched.
 
@@ -1319,6 +1348,8 @@ Returns the title of the assignment that was launched.
 ```
 ## Canvas.assignment.pointsPossible
 Returns the points possible of the assignment that was launched.
+
+This is an alias of `LineItem.resultValue.max`.
 
 **Availability**: *when launched as an assignment*  
 
@@ -1475,7 +1506,7 @@ Returns the number of submission attempts which the student did.
 Returns the endpoint url for accessing link-level tool settings
 Only available for LTI 2.0.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1485,7 +1516,7 @@ Only available for LTI 2.0.
 Returns the endpoint url for accessing context-level tool settings
 Only available for LTI 2.0.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1505,7 +1536,7 @@ Only available for LTI 2.0.
 Returns the [Tool Consumer Profile](https://www.imsglobal.org/specs/ltiv2p0/implementation-guide#toc-46) url for the tool.
 Only available for LTI 2.0.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1603,7 +1634,7 @@ Value is a comma-separated array of one or more values of: ["assignment", "assig
 Only functional when `com_instructure_course_accept_canvas_resource_types` is included as a query param
 in Canvas-side GET request that triggers the LTI launch.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1622,7 +1653,7 @@ Value is the largest logical unit of the page. Possible values are: ["assignment
 Only functional when `com_instructure_course_canvas_resource_type` is included as a query param
 in Canvas-side GET request that triggers the LTI launch.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1633,7 +1664,7 @@ Returns the target resource id for the current page, forwarded from the request.
 `com_instructure_course_canvas_resource_type` is included as a query param. Currently, this is not
 supported generally, and is only implemented for specific use cases.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1646,7 +1677,7 @@ True for Modules page and Assignment Groups page. False for other content index 
 Only functional when `com_instructure_course_allow_canvas_resource_selection` is included as a query param
 in Canvas-side GET request that triggers the LTI launch.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1660,7 +1691,7 @@ Empty value if com.instructure.Course.allow_canvas_resource_selection is false.
 Only functional when `com_instructure_course_available_canvas_resources` is included as a query param
 in Canvas-side GET request that triggers the LTI launch.
 
-**Availability**: *always*  
+**Availability**: *when a tool is launched (excludes background messages like PNS notices)*  
 
 
 ```
@@ -1673,3 +1704,58 @@ in Canvas-side GET request that triggers the LTI launch.
 
 
 
+## com.instructure.user.lti_1_1_id.history
+Returns a comma-separated list of historical `lti_context_id` of a user in chronological order including the current id.
+The `lti_context_id` of a user is the same that is sent as `user_id` in 1.1 launches.
+This variable helps tools handle the merged user's history.
+
+**Availability**: *when launched by a logged in user*  
+
+
+```
+123,456,789
+```
+## LineItem.resultValue.max
+Returns the points possible of the assignment that was launched.
+For other LineItem properties, use the LTI 1.3 <a href="file.assignment_tools.html">Assignments and Grade Services</a>
+
+This is an alias of `Canvas.assignment.pointsPossible`.
+
+**Availability**: *when launched as an assignment*  
+
+
+```
+100
+```
+## Canvas.account.decimal_separator
+Returns the decimal separator for the current context account.
+This is used to have custom formatting on numbers, independent from the account's locale.
+If the account does not have a decimal separator set, it will return "$Canvas.account.decimal_separator".
+
+**Availability**: *when launched in a course (or a Group within a course)*  
+
+
+```
+"comma"
+```
+## Canvas.account.thousand_separator
+Returns the thousand separator for the current context account.
+This is used to have custom formatting on numbers, independent from the account's locale.
+If the account does not have a thousand separator set, it will return "$Canvas.account.thousand_separator".
+
+**Availability**: *when launched in a course (or a Group within a course)*  
+
+
+```
+"period"
+```
+## Canvas.course.aiQuizGeneration
+Returns true if the AI quiz generation feature is enabled for the course.
+This is used to determine whether to display the "Generate With AI" button in the UI.
+
+**Availability**: *when launched in a course (or a Group within a course)*  
+
+
+```
+true
+```

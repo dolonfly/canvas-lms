@@ -26,6 +26,7 @@ describe Api::V1::PlannerItem do
     teacher_in_course active_all: true
     @reviewer = student_in_course(course: @course, active_all: true).user
     @student = student_in_course(course: @course, active_all: true).user
+    @account = @course.root_account
     for_course = { course: @course }
 
     assignment_quiz [], for_course
@@ -50,6 +51,10 @@ describe Api::V1::PlannerItem do
 
       def course_assignment_submission_url(*)
         "course_assignment_submission_url"
+      end
+
+      def course_assignment_url(*)
+        "course_assignment_url"
       end
 
       def calendar_url_for(*); end
@@ -215,7 +220,7 @@ describe Api::V1::PlannerItem do
         expect(json[:plannable][:todo_date]).to eq submission.cached_due_date
       end
 
-      it "includes the submission url" do
+      it "includes the assignment url if the student has not submitted their assignment" do
         submission = @assignment.submit_homework(@student, body: "the stuff")
         assessor_submission = @assignment.find_or_create_submission(@reviewer)
         @peer_review = AssessmentRequest.create!(
@@ -225,14 +230,28 @@ describe Api::V1::PlannerItem do
           user: @student
         )
         json = api.planner_item_json(@peer_review, @reviewer, session)
-        expected_url = "/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}"
+        expected_url = "course_assignment_url"
+        expect(json[:html_url]).to eq expected_url
+      end
+
+      it "includes the submission url if the student has submitted their assignment" do
+        assessor_submission = @assignment.submit_homework(@reviewer, body: "reviewer submission")
+        submission = @assignment.submit_homework(@student, body: "the stuff")
+        @peer_review = AssessmentRequest.create!(
+          assessor: @reviewer,
+          assessor_asset: assessor_submission,
+          asset: submission,
+          user: @student
+        )
+        json = api.planner_item_json(@peer_review, @reviewer, session)
+        expected_url = "/courses/#{@assignment.course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}"
         expect(json[:html_url]).to eq expected_url
       end
 
       it "includes the anonymized submission url when anonymous peer reviews" do
         @assignment.update!(anonymous_peer_reviews: true)
+        assessor_submission = @assignment.submit_homework(@reviewer, body: "reviewer submission")
         submission = @assignment.submit_homework(@student, body: "the stuff")
-        assessor_submission = @assignment.find_or_create_submission(@reviewer)
         @peer_review = AssessmentRequest.create!(
           assessor: @reviewer,
           assessor_asset: assessor_submission,
@@ -243,11 +262,31 @@ describe Api::V1::PlannerItem do
         expected_url = "/courses/#{@course.id}/assignments/#{@assignment.id}/anonymous_submissions/#{submission.anonymous_id}"
         expect(json[:html_url]).to eq expected_url
       end
+
+      context "assignments_2_student feature flag" do
+        before do
+          @course.enable_feature!(:assignments_2_student)
+        end
+
+        it "returns enhanced peer review url when feature flag is enabled" do
+          submission = @assignment.submit_homework(@student, body: "the stuff")
+          assessor_submission = @assignment.find_or_create_submission(@reviewer)
+          @peer_review = AssessmentRequest.create!(
+            assessor: @reviewer,
+            assessor_asset: assessor_submission,
+            asset: submission,
+            user: @student
+          )
+          json = api.planner_item_json(@peer_review, @reviewer, session)
+          expected_url = "course_assignment_url"
+          expect(json[:html_url]).to eq expected_url
+        end
+      end
     end
 
     context "dicussion checkpoints" do
       before :once do
-        @course.root_account.enable_feature!(:discussion_checkpoints)
+        @course.account.enable_feature!(:discussion_checkpoints)
         course_with_student(active_all: true)
         @checkpoint_topic, @checkpoint_entry = graded_discussion_topic_with_checkpoints(context: @course)
       end
@@ -477,7 +516,7 @@ describe Api::V1::PlannerItem do
         before do
           course_with_student(active_all: true)
           course_with_teacher(course: @course, active_all: true)
-          @course.root_account.enable_feature!(:discussion_checkpoints)
+          @course.account.enable_feature!(:discussion_checkpoints)
           @reply_to_topic, @reply_to_entry = graded_discussion_topic_with_checkpoints(context: @course, title: "Discussion with Checkpoints")
         end
 
@@ -585,7 +624,7 @@ describe Api::V1::PlannerItem do
       before do
         course_with_student(active_all: true)
         course_with_teacher(course: @course, active_all: true)
-        @course.root_account.enable_feature!(:discussion_checkpoints)
+        @course.account.enable_feature!(:discussion_checkpoints)
         @reply_to_topic, @reply_to_entry = graded_discussion_topic_with_checkpoints(context: @course, title: "Discussion with Checkpoints")
       end
 
@@ -637,7 +676,7 @@ describe Api::V1::PlannerItem do
     end
 
     it "links to a graded discussion with checkpoints submission if appropriate" do
-      @course.root_account.enable_feature!(:discussion_checkpoints)
+      @course.account.enable_feature!(:discussion_checkpoints)
       @checkpoint_topic, _checkpoint_entry = graded_discussion_topic_with_checkpoints(context: @course)
       expect(api.planner_item_json(@checkpoint_topic, @student, session)[:html_url]).to eq "named_context_url"
       graded_submission_model(assignment: @checkpoint_topic, user: @student).update(score: 5)

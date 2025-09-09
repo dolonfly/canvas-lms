@@ -182,7 +182,7 @@ module AttachmentFu # :nodoc:
       end
 
       def sanitize_filename(filename)
-        if respond_to?(:root_attachment) && root_attachment && root_attachment.filename
+        if respond_to?(:root_attachment) && root_attachment&.filename
           root_attachment.filename
         else
           Attachment.truncate_filename(filename, 255) do |component, len|
@@ -268,9 +268,11 @@ module AttachmentFu # :nodoc:
       def authenticated_s3_url(*args)
         thumbnail = args.first.is_a?(String) ? args.first : nil
         options   = args.last.is_a?(Hash)    ? args.last  : {}
+        options.delete(:user)
         if !options[:expires_in].nil? && options[:expires_in].is_a?(ActiveSupport::Duration)
           options[:expires_in] = options[:expires_in].to_i
         end
+
         s3object(thumbnail).presigned_url(:get, options)
       end
 

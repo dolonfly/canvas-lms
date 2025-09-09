@@ -312,13 +312,13 @@ describe ConversationMessage do
 
   context "log_conversation_message_metrics" do
     it "logs inbox.message.created.react" do
-      allow(InstStatsd::Statsd).to receive(:increment)
+      allow(InstStatsd::Statsd).to receive(:distributed_increment)
 
       course_with_teacher(active_all: true)
       student1 = student_in_course(active_all: true).user
       conversation = @teacher.initiate_conversation([student1])
       conversation.add_message("hello", root_account_id: Account.default.id)
-      expect(InstStatsd::Statsd).to have_received(:increment).with("inbox.message.created.react").at_least(:once)
+      expect(InstStatsd::Statsd).to have_received(:distributed_increment).with("inbox.message.created.react").at_least(:once)
     end
   end
 
@@ -553,6 +553,24 @@ describe ConversationMessage do
           expect(ConversationMessage.last.body).to eq("Out of Office")
         end
       end
+    end
+  end
+
+  describe "set_policy" do
+    before do
+      course_with_teacher(active_all: true)
+      @student_with_access = student_in_course(active_all: true).user
+      @student_without_access = student_in_course(active_all: true).user
+      @conversation = @teacher.initiate_conversation([@student_with_access])
+      @attachment = attachment_model(context: @teacher)
+      @conversation.add_message("test", attachment_ids: [@attachment.id])
+    end
+
+    it "allow read access if the user can view the attachment when user participant is available for the convo" do
+      conversation_message = @conversation.conversation.conversation_messages.last
+      expect(conversation_message.grants_right?(@student_with_access, :read)).to be_truthy
+      expect(conversation_message.grants_right?(@teacher, :read)).to be_truthy
+      expect(conversation_message.grants_right?(@student_without_access, :read)).to be_falsey
     end
   end
 

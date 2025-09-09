@@ -78,45 +78,53 @@ describe ContentExportsApiController, type: :request do
                        { controller: "content_exports_api", action: "index", format: "json", course_id: t_course.to_param },
                        {},
                        {},
-                       { expected_status: 401 })
+                       { expected_status: 403 })
     end
 
-    it "returns the correct data" do
-      @my_zip_export = past_export(t_course, t_teacher, "zip")
-      @other_zip_export = past_export(t_course, t_student, "zip")
-      @past = past_export
-      @pending = pending_export
-      @cc = course_copy_export
-      json = api_call_as_user(t_teacher,
-                              :get,
-                              "/api/v1/courses/#{t_course.id}/content_exports",
-                              { controller: "content_exports_api", action: "index", format: "json", course_id: t_course.to_param })
+    context "with disable_adding_uuid_verifier_in_api ff" do
+      before do
+        @my_zip_export = past_export(t_course, t_teacher, "zip")
+        @other_zip_export = past_export(t_course, t_student, "zip")
+        @past = past_export
+        @pending = pending_export
+        @cc = course_copy_export
+        @attachment = Attachment.last
+      end
 
-      expect(json.size).to be 3
-      expect(json[0]["id"]).to eql @pending.id
-      expect(json[0]["workflow_state"]).to eql "created"
-      expect(json[0]["export_type"]).to eql "qti"
-      expect(json[0]["course_id"]).to eql t_course.id
-      expect(json[0]["created_at"]).to eql @pending.created_at.as_json
-      expect(json[0]["progress_url"]).to include "/progress/#{@pending.job_progress.id}"
+      double_testing_with_disable_adding_uuid_verifier_in_api_ff do
+        it "returns the correct data" do
+          json = api_call_as_user(t_teacher,
+                                  :get,
+                                  "/api/v1/courses/#{t_course.id}/content_exports",
+                                  { controller: "content_exports_api", action: "index", format: "json", course_id: t_course.to_param })
 
-      expect(json[1]["id"]).to eql @past.id
-      expect(json[1]["workflow_state"]).to eql "exported"
-      expect(json[1]["export_type"]).to eql "common_cartridge"
-      expect(json[1]["course_id"]).to eql t_course.id
-      expect(json[1]["created_at"]).to eql @past.created_at.as_json
-      expect(json[1]["user_id"]).to eql t_teacher.id
-      expect(json[1]["progress_url"]).to include "/progress/#{@past.job_progress.id}"
-      expect(json[1]["attachment"]["url"]).to include "/files/#{@past.attachment.id}/download?download_frd=1&verifier=#{@past.attachment.uuid}"
+          expect(json.size).to be 3
+          expect(json[0]["id"]).to eql @pending.id
+          expect(json[0]["workflow_state"]).to eql "created"
+          expect(json[0]["export_type"]).to eql "qti"
+          expect(json[0]["course_id"]).to eql t_course.id
+          expect(json[0]["created_at"]).to eql @pending.created_at.as_json
+          expect(json[0]["progress_url"]).to include "/progress/#{@pending.job_progress.id}"
 
-      expect(json[2]["id"]).to eql @my_zip_export.id
-      expect(json[2]["workflow_state"]).to eql "exported"
-      expect(json[2]["export_type"]).to eql "zip"
-      expect(json[2]["course_id"]).to eql t_course.id
-      expect(json[2]["created_at"]).to eql @my_zip_export.created_at.as_json
-      expect(json[2]["user_id"]).to eql t_teacher.id
-      expect(json[2]["progress_url"]).to include "/progress/#{@my_zip_export.job_progress.id}"
-      expect(json[2]["attachment"]["url"]).to include "/files/#{@my_zip_export.attachment.id}/download?download_frd=1&verifier=#{@my_zip_export.attachment.uuid}"
+          expect(json[1]["id"]).to eql @past.id
+          expect(json[1]["workflow_state"]).to eql "exported"
+          expect(json[1]["export_type"]).to eql "common_cartridge"
+          expect(json[1]["course_id"]).to eql t_course.id
+          expect(json[1]["created_at"]).to eql @past.created_at.as_json
+          expect(json[1]["user_id"]).to eql t_teacher.id
+          expect(json[1]["progress_url"]).to include "/progress/#{@past.job_progress.id}"
+          expect(json[1]["attachment"]["url"]).to include "/files/#{@past.attachment.id}/download?download_frd=1#{"&verifier=#{@past.attachment.uuid}" unless disable_adding_uuid_verifier_in_api}"
+
+          expect(json[2]["id"]).to eql @my_zip_export.id
+          expect(json[2]["workflow_state"]).to eql "exported"
+          expect(json[2]["export_type"]).to eql "zip"
+          expect(json[2]["course_id"]).to eql t_course.id
+          expect(json[2]["created_at"]).to eql @my_zip_export.created_at.as_json
+          expect(json[2]["user_id"]).to eql t_teacher.id
+          expect(json[2]["progress_url"]).to include "/progress/#{@my_zip_export.job_progress.id}"
+          expect(json[2]["attachment"]["url"]).to include "/files/#{@my_zip_export.attachment.id}/download?download_frd=1#{"&verifier=#{@my_zip_export.attachment.uuid}" unless disable_adding_uuid_verifier_in_api}"
+        end
+      end
     end
 
     it "paginates" do
@@ -194,7 +202,7 @@ describe ContentExportsApiController, type: :request do
       expect(json["new_quizzes_export_state"]).to eql "completed"
     end
 
-    it "returns status 401 if the request is not from a site admin user" do
+    it "returns status 403 if the request is not from a site admin user" do
       @past = past_export
       api_call_as_user(t_teacher,
                        :put,
@@ -202,7 +210,7 @@ describe ContentExportsApiController, type: :request do
                        { controller: "content_exports_api", action: "update", format: "json", course_id: t_course.to_param, id: @past.to_param },
                        { new_quizzes_export_url: "https://some.url", new_quizzes_export_state: "completed" },
                        {},
-                       { expected_status: 401 })
+                       { expected_status: 403 })
     end
 
     context "when the new_quizzes_export_state param is set to 'failed'" do
@@ -249,7 +257,7 @@ describe ContentExportsApiController, type: :request do
                        { controller: "content_exports_api", action: "show", format: "json", course_id: t_course.to_param, id: @past.to_param },
                        {},
                        {},
-                       { expected_status: 401 })
+                       { expected_status: 403 })
     end
 
     it "returns the correct data" do
@@ -264,7 +272,7 @@ describe ContentExportsApiController, type: :request do
       expect(json["course_id"]).to eql t_course.id
       expect(json["created_at"]).to eql @past.created_at.as_json
       expect(json["user_id"]).to eql t_teacher.id
-      expect(json["attachment"]["url"]).to include "/files/#{@past.attachment.id}/download?download_frd=1&verifier=#{@past.attachment.uuid}"
+      expect(json["attachment"]["url"]).to include "/files/#{@past.attachment.id}/download?download_frd=1"
     end
 
     it "does not find course copy exports" do
@@ -286,7 +294,7 @@ describe ContentExportsApiController, type: :request do
                        { controller: "content_exports_api", action: "show", format: "json", course_id: t_course.to_param, id: @zip_export.to_param },
                        {},
                        {},
-                       { expected_status: 401 })
+                       { expected_status: 403 })
     end
   end
 
@@ -298,7 +306,7 @@ describe ContentExportsApiController, type: :request do
                        { controller: "content_exports_api", action: "create", format: "json", course_id: t_course.to_param, export_type: "qti" },
                        {},
                        {},
-                       { expected_status: 401 })
+                       { expected_status: 403 })
     end
 
     it "requires an export_type parameter" do
@@ -574,6 +582,7 @@ describe ContentExportsApiController, type: :request do
       let_once :page_to_copy do
         page_to_copy = t_course.wiki_pages.create!(title: "other page")
         page_to_copy.body = "<p><a href=\"/courses/#{t_course.id}/files/#{att_to_copy.id}/preview\">hey look a link</a></p>"
+        page_to_copy.saving_user = t_teacher
         page_to_copy.save!
         page_to_copy
       end
@@ -1207,7 +1216,7 @@ describe ContentExportsApiController, type: :request do
                            { controller: "content_exports_api", action: "show", format: "json", course_id: t_course.to_param, id: cc_export.to_param },
                            {},
                            {},
-                           { expected_status: 401 })
+                           { expected_status: 403 })
         end
 
         it "excludes locked, deleted, and hidden folders and files from archive" do
@@ -1254,7 +1263,7 @@ describe ContentExportsApiController, type: :request do
                            { controller: "content_exports_api", action: "create", format: "json", course_id: t_course.to_param, export_type: "common_cartridge" },
                            {},
                            {},
-                           { expected_status: 401 })
+                           { expected_status: 403 })
         end
       end
     end
@@ -1273,7 +1282,7 @@ describe ContentExportsApiController, type: :request do
                          { controller: "content_exports_api", action: "create", format: "json", group_id: t_group.to_param, export_type: "zip" },
                          {},
                          {},
-                         { expected_status: 401 })
+                         { expected_status: 403 })
       end
 
       it "creates a group file export" do
@@ -1326,7 +1335,7 @@ describe ContentExportsApiController, type: :request do
                          { controller: "content_exports_api", action: "create", format: "json", user_id: t_student.to_param, export_type: "zip" },
                          {},
                          {},
-                         { expected_status: 401 })
+                         { expected_status: 403 })
       end
 
       it "creates a user file export" do
@@ -1352,6 +1361,7 @@ describe ContentExportsApiController, type: :request do
       end
 
       it "lists exports created by the user" do
+        Attachment.current_root_account = @course.root_account
         zip_export = past_export(t_student, t_student, "zip")
         past_export(t_student, t_teacher, "zip")
         json = api_call_as_user(t_student,
@@ -1362,6 +1372,7 @@ describe ContentExportsApiController, type: :request do
       end
 
       it "shows an export" do
+        Attachment.current_root_account = @course.root_account
         zip_export = past_export(t_student, t_student, "zip")
         json = api_call_as_user(t_student,
                                 :get,
@@ -1379,7 +1390,7 @@ describe ContentExportsApiController, type: :request do
                          { controller: "content_exports_api", action: "show", format: "json", user_id: t_student.to_param, id: zip_export.to_param },
                          {},
                          {},
-                         expected_status: 401)
+                         expected_status: 403)
       end
     end
   end

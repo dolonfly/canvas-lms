@@ -16,100 +16,70 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
 import {render, screen} from '@testing-library/react'
-import {mockRegistration} from './helpers'
-import {createRegistrationOverlayStore} from '../../registration_wizard/registration_settings/RegistrationOverlayState'
+import {mockRegistration, mockToolConfiguration} from './helpers'
+import {createDynamicRegistrationOverlayStore} from '../DynamicRegistrationOverlayState'
 import {PrivacyConfirmationWrapper} from '../components/PrivacyConfirmationWrapper'
 import {LtiScopes} from '@canvas/lti/model/LtiScope'
 import {i18nLtiPrivacyLevel, i18nLtiPrivacyLevelDescription} from '../../model/i18nLtiPrivacyLevel'
 import userEvent from '@testing-library/user-event'
 
+// Mock showFlashAlert to prevent React rendering issues during static initialization
+jest.mock('@canvas/alerts/react/FlashAlert', () => ({
+  showFlashAlert: jest.fn(),
+  showFlashError: jest.fn(),
+  showFlashSuccess: jest.fn(),
+  showFlashWarning: jest.fn(),
+  destroyContainer: jest.fn(),
+}))
+
 describe('PrivacyConfirmationWrapper', () => {
   it('renders the privacy confirmation window', () => {
     const registration = mockRegistration({
-      scopes: [LtiScopes.AccessPageContent],
-      client_name: 'Test App',
+      configuration: mockToolConfiguration({
+        scopes: [LtiScopes.AccessPageContent],
+      }),
+      name: 'Test App',
     })
-    const overlayStore = createRegistrationOverlayStore(registration.client_name, registration)
+    const overlayStore = createDynamicRegistrationOverlayStore(registration.name, registration)
 
-    render(
-      <PrivacyConfirmationWrapper overlayStore={overlayStore} toolName={registration.client_name} />
-    )
+    render(<PrivacyConfirmationWrapper overlayStore={overlayStore} toolName={registration.name} />)
 
     expect(screen.getByText('Data Sharing')).toBeInTheDocument()
   })
 
   it("let's the user select a privacy level", async () => {
-    const registration = mockRegistration(
-      {
+    const registration = mockRegistration({
+      configuration: mockToolConfiguration({
         scopes: [LtiScopes.AccessPageContent],
-        client_name: 'Test App',
-        lti_tool_configuration: {
-          'https://canvas.instructure.com/lti/privacy_level': 'public',
-          claims: [],
-          domain: 'example.com',
-          messages: [],
-          target_link_uri: 'https://example.com',
-        },
-      },
-      {
-        extensions: [
-          {
-            platform: 'canvas.instructure.com',
-            privacy_level: 'public',
-            settings: {
-              placements: [],
-            },
-          },
-        ],
-      }
-    )
-    const overlayStore = createRegistrationOverlayStore(registration.client_name, registration)
-    render(
-      <PrivacyConfirmationWrapper overlayStore={overlayStore} toolName={registration.client_name} />
-    )
+        privacy_level: 'public',
+      }),
+      name: 'Test App',
+    })
+    const overlayStore = createDynamicRegistrationOverlayStore(registration.name, registration)
+    render(<PrivacyConfirmationWrapper overlayStore={overlayStore} toolName={registration.name} />)
     expect(screen.getByLabelText(/User Data Shared With This App/i)).toHaveValue(
-      i18nLtiPrivacyLevel('public')
+      i18nLtiPrivacyLevel('public'),
     )
 
     await userEvent.click(screen.getByLabelText(/User Data Shared With This App/i))
     await userEvent.click(screen.getByText(i18nLtiPrivacyLevel('public')))
 
     expect(screen.getByLabelText(/User Data Shared With This App/i)).toHaveValue(
-      i18nLtiPrivacyLevel('public')
+      i18nLtiPrivacyLevel('public'),
     )
   })
 
   it('renders a description of what information is included', () => {
-    const registration = mockRegistration(
-      {
+    const registration = mockRegistration({
+      configuration: mockToolConfiguration({
         scopes: [LtiScopes.AccessPageContent],
-        client_name: 'Test App',
-        lti_tool_configuration: {
-          'https://canvas.instructure.com/lti/privacy_level': 'public',
-          claims: [],
-          domain: 'example.com',
-          messages: [],
-          target_link_uri: 'https://example.com',
-        },
-      },
-      {
-        extensions: [
-          {
-            platform: 'canvas.instructure.com',
-            privacy_level: 'public',
-            settings: {
-              placements: [],
-            },
-          },
-        ],
-      }
-    )
-    const overlayStore = createRegistrationOverlayStore(registration.client_name, registration)
-    render(
-      <PrivacyConfirmationWrapper overlayStore={overlayStore} toolName={registration.client_name} />
-    )
+        privacy_level: 'public',
+      }),
+      name: 'Test App',
+    })
+    const overlayStore = createDynamicRegistrationOverlayStore(registration.name, registration)
+    render(<PrivacyConfirmationWrapper overlayStore={overlayStore} toolName={registration.name} />)
 
     expect(screen.getByText(i18nLtiPrivacyLevelDescription('public'))).toBeInTheDocument()
   })

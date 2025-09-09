@@ -152,6 +152,7 @@ describe('WikiPageView', () => {
       view.render()
       view.$('.al-trigger').simulate('click')
       view.$('.direct-share-send-to-menu-item').simulate('click')
+
       const props = ReactDOM.render.mock.calls[0][0].props
       expect(props.open).toBe(true)
       expect(props.sourceCourseId).toBe('123')
@@ -170,11 +171,13 @@ describe('WikiPageView', () => {
       view.render()
       view.$('.al-trigger').simulate('click')
       view.$('.direct-share-copy-to-menu-item').simulate('click')
+
       const props = ReactDOM.render.mock.calls[0][0].props
       expect(props.open).toBe(true)
       expect(props.sourceCourseId).toBe('123')
       expect(props.contentSelection).toEqual({pages: ['42']})
       props.onDismiss()
+
       expect(ReactDOM.render.mock.lastCall[0].props.open).toBe(false)
     })
   })

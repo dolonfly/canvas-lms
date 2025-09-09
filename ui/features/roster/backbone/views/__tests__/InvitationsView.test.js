@@ -21,27 +21,37 @@ import 'jquery-migrate'
 import InvitationsView from '../InvitationsView'
 import RosterUser from '../../models/RosterUser'
 import {isAccessible} from '@canvas/test-utils/jestAssertions'
-import sinon from 'sinon'
+import {http, HttpResponse} from 'msw'
+import {setupServer} from 'msw/node'
+import fakeENV from '@canvas/test-utils/fakeENV'
 
 const equal = x => expect(x).toEqual(true)
 const strictEqual = (x, y) => expect(x).toEqual(y)
 
+const server = setupServer()
+
 describe('InvitationsView', () => {
+  beforeAll(() => {
+    server.listen()
+  })
+
+  afterAll(() => {
+    server.close()
+  })
+
   beforeEach(() => {
-    ENV = {
-      FEATURES: {
-        granular_permissions_manage_users: true,
-      },
+    fakeENV.setup({
       permissions: {
         active_granular_enrollment_permissions: ['StudentEnrollment'],
       },
-    }
+    })
   })
 
   afterEach(() => {
-    ENV = {}
+    server.resetHandlers()
+    fakeENV.teardown()
     $('.ui-tooltip').remove()
-    return $('.ui-dialog').remove()
+    $('.ui-dialog').remove()
   })
 
   const buildView = function (enrollments) {
@@ -58,7 +68,10 @@ describe('InvitationsView', () => {
       },
     ]
     const view = buildView(enrollments)
-    isAccessible(view, done, {a11yReport: true})
+    isAccessible(view, done, {
+      a11yReport: true,
+      ignores: ['document-title', 'html-has-lang'],
+    })
   })
 
   test('knows when invitation is pending', () => {
@@ -73,7 +86,7 @@ describe('InvitationsView', () => {
     equal(view.invitationIsPending(), true)
   })
 
-  test('calls the re-send api when the enrollment type is included in the active granular enrollment permissions', () => {
+  test('calls the re-send api when the enrollment type is included in the active granular enrollment permissions', async () => {
     const enrollments = [
       {
         id: 1,
@@ -84,17 +97,26 @@ describe('InvitationsView', () => {
     ]
     const view = buildView(enrollments)
     const event = {
-      preventDefault: sinon.stub(),
+      preventDefault: jest.fn(),
     }
-    const previousAjaxJson = $.ajaxJSON
-    const ajaxStub = sinon.stub()
-    $.ajaxJSON = ajaxStub
+
+    let apiCalled = false
+    server.use(
+      http.post('/confirmations/*/re_send', () => {
+        apiCalled = true
+        return new HttpResponse('', {status: 200})
+      }),
+    )
+
     view.resend(event)
-    strictEqual($.ajaxJSON.callCount, 1)
-    $.ajaxJSON = previousAjaxJson
+
+    // Wait for async operations to complete
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    strictEqual(apiCalled, true)
   })
 
-  test('does not call the re-send api when the enrollment type is not in the active granular enrollment permissions', () => {
+  test('does not call the re-send api when the enrollment type is not in the active granular enrollment permissions', async () => {
     const enrollments = [
       {
         id: 1,
@@ -105,13 +127,22 @@ describe('InvitationsView', () => {
     ]
     const view = buildView(enrollments)
     const event = {
-      preventDefault: sinon.stub(),
+      preventDefault: jest.fn(),
     }
-    const previousAjaxJson = $.ajaxJSON
-    const ajaxStub = sinon.stub()
-    $.ajaxJSON = ajaxStub
+
+    let apiCalled = false
+    server.use(
+      http.post('/confirmations/*/re_send', () => {
+        apiCalled = true
+        return new HttpResponse('', {status: 200})
+      }),
+    )
+
     view.resend(event)
-    strictEqual($.ajaxJSON.callCount, 0)
-    $.ajaxJSON = previousAjaxJson
+
+    // Wait for async operations to complete
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    strictEqual(apiCalled, false)
   })
 })

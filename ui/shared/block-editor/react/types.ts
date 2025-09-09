@@ -18,6 +18,9 @@
 
 import {type SerializedNode} from '@craftjs/core'
 
+// A custom type constraint that enforces at least one key is present
+export type AtLeastOne<T, U = {[K in keyof T]: Pick<T, K>}> = Partial<T> & U[keyof U]
+
 export type CanEditTemplates = {
   can_edit: boolean
   can_edit_global: boolean
@@ -33,9 +36,11 @@ export enum TemplateEditor {
   GLOBAL = 2,
 }
 
+export type NodeTreeNodes = Record<string, SerializedNode>
+
 export type TemplateNodeTree = {
   rootNodeId: string
-  nodes: Record<string, SerializedNode>
+  nodes: NodeTreeNodes
 }
 
 export type TemplateCategory = 'global' | 'local'
@@ -62,6 +67,7 @@ export type BlockTemplateGridItemProps = {
 }
 
 export type ChooseEditorModalProps = {
+  editorFeature: EditorFeatures
   createPageAction: any
   onClose: any
 }
@@ -76,6 +82,8 @@ export const dispatchTemplateEvent = (event: CustomEvent) => {
 }
 
 export type EditorTypes = 'rce' | 'block_editor' | ''
+export type EditorFeatures = 'block_content_editor' | 'block_editor' | null
 export type EditorPrefEnv = {
   text_editor_preference: EditorTypes
+  EDITOR_FEATURE: EditorFeatures
 }

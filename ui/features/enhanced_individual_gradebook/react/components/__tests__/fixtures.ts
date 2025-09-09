@@ -325,172 +325,207 @@ export const GRADEBOOK_SECTIONS_QUERY_MOCK_RESPONSE = {
 }
 
 const GRADEBOOK_STUDENT_QUERY_MOCK_RESPONSE = {
-  course: {
-    usersConnection: {
-      nodes: [
-        {
-          enrollments: [
+  pages: [
+    {
+      course: {
+        usersConnection: {
+          nodes: [
             {
-              id: '7',
-              grades: {
-                unpostedCurrentGrade: 'D-',
-                unpostedCurrentScore: 61.0,
-                unpostedFinalGrade: 'F',
-                unpostedFinalScore: 58.1,
-              },
-              section: {
-                id: '2',
-                name: 'English',
-              },
+              enrollments: [
+                {
+                  id: '7',
+                  grades: {
+                    unpostedCurrentGrade: 'D-',
+                    unpostedCurrentScore: 61.0,
+                    unpostedFinalGrade: 'F',
+                    unpostedFinalScore: 58.1,
+                  },
+                  section: {
+                    id: '2',
+                    name: 'English',
+                  },
+                },
+              ],
+              id: '5',
+              loginId: 'rohanchugh',
+              name: 'Rohan Chugh',
             },
           ],
-          id: '5',
-          loginId: 'rohanchugh',
-          name: 'Rohan Chugh',
         },
-      ],
+        submissionsConnection: {
+          nodes: [
+            {
+              grade: '68',
+              id: '13',
+              score: 68.0,
+              enteredScore: 68.0,
+              assignmentId: '1',
+              submissionType: 'online_text_entry',
+              submittedAt: '2023-06-01T00:19:23-06:00',
+              state: 'submitted',
+              proxySubmitter: null,
+              excused: false,
+              late: true,
+              latePolicyStatus: null,
+              missing: false,
+              userId: '5',
+              cachedDueDate: '2023-05-12T23:59:59-06:00',
+              gradingPeriodId: '1',
+              deductedPoints: null,
+              enteredGrade: '68%',
+              gradeMatchesCurrentSubmission: true,
+              customGradeStatus: null,
+              subAssignmentSubmissions: [
+                {
+                  grade: null,
+                  score: null,
+                  publishedGrade: null,
+                  publishedScore: null,
+                  enteredGrade: null,
+                  enteredScore: null,
+                  assignmentId: '1',
+                  subAssignmentTag: 'reply_to_topic',
+                  gradeMatchesCurrentSubmission: true,
+                  excused: false,
+                },
+                {
+                  grade: null,
+                  score: null,
+                  publishedGrade: null,
+                  publishedScore: null,
+                  enteredGrade: null,
+                  enteredScore: null,
+                  assignmentId: '1',
+                  subAssignmentTag: 'reply_to_entry',
+                  gradeMatchesCurrentSubmission: true,
+                  excused: false,
+                },
+              ],
+            },
+            {
+              grade: '2',
+              id: '14',
+              score: 2.0,
+              enteredScore: 2.0,
+              assignmentId: '2',
+              submissionType: 'online_text_entry',
+              submittedAt: '2023-06-02T00:19:23-06:00',
+              state: 'submitted',
+              proxySubmitter: null,
+              excused: false,
+              late: true,
+              latePolicyStatus: null,
+              missing: false,
+              userId: '5',
+              cachedDueDate: '2023-05-13T23:59:59-06:00',
+              gradingPeriodId: '1',
+              deductedPoints: null,
+              enteredGrade: '2%',
+              gradeMatchesCurrentSubmission: true,
+              customGradeStatus: null,
+              subAssignmentSubmissions: [
+                {
+                  grade: null,
+                  score: null,
+                  publishedGrade: null,
+                  publishedScore: null,
+                  enteredGrade: null,
+                  enteredScore: null,
+                  assignmentId: '1',
+                  subAssignmentTag: 'reply_to_topic',
+                  gradeMatchesCurrentSubmission: true,
+                  excused: false,
+                },
+                {
+                  grade: null,
+                  score: null,
+                  publishedGrade: null,
+                  publishedScore: null,
+                  enteredGrade: null,
+                  enteredScore: null,
+                  assignmentId: '1',
+                  subAssignmentTag: 'reply_to_entry',
+                  gradeMatchesCurrentSubmission: true,
+                  excused: false,
+                },
+              ],
+            },
+          ],
+          pageInfo: {
+            hasNextPage: false,
+            endCursor: 'sk9ghM',
+          },
+        },
+      },
     },
-    submissionsConnection: {
-      nodes: [
-        {
-          grade: '68',
-          id: '13',
-          score: 68.0,
-          enteredScore: 68.0,
-          assignmentId: '1',
-          submissionType: 'online_text_entry',
-          submittedAt: '2023-06-01T00:19:23-06:00',
-          state: 'submitted',
-          proxySubmitter: null,
-          excused: false,
-          late: true,
-          latePolicyStatus: null,
-          missing: false,
-          userId: '5',
-          cachedDueDate: '2023-05-12T23:59:59-06:00',
-          gradingPeriodId: '1',
-          deductedPoints: null,
-          enteredGrade: '68%',
-          gradeMatchesCurrentSubmission: true,
-          customGradeStatus: null,
-          subAssignmentSubmissions: [
-            {
-              grade: null,
-              score: null,
-              publishedGrade: null,
-              publishedScore: null,
-              enteredGrade: null,
-              enteredScore: null,
-              assignmentId: '1',
-              subAssignmentTag: 'reply_to_topic',
-              gradeMatchesCurrentSubmission: true,
-              excused: false,
-            },
-            {
-              grade: null,
-              score: null,
-              publishedGrade: null,
-              publishedScore: null,
-              enteredGrade: null,
-              enteredScore: null,
-              assignmentId: '1',
-              subAssignmentTag: 'reply_to_entry',
-              gradeMatchesCurrentSubmission: true,
-              excused: false,
-            },
-          ],
-        },
-        {
-          grade: '2',
-          id: '14',
-          score: 2.0,
-          enteredScore: 2.0,
-          assignmentId: '2',
-          submissionType: 'online_text_entry',
-          submittedAt: '2023-06-02T00:19:23-06:00',
-          state: 'submitted',
-          proxySubmitter: null,
-          excused: false,
-          late: true,
-          latePolicyStatus: null,
-          missing: false,
-          userId: '5',
-          cachedDueDate: '2023-05-13T23:59:59-06:00',
-          gradingPeriodId: '1',
-          deductedPoints: null,
-          enteredGrade: '2%',
-          gradeMatchesCurrentSubmission: true,
-          customGradeStatus: null,
-          subAssignmentSubmissions: [
-            {
-              grade: null,
-              score: null,
-              publishedGrade: null,
-              publishedScore: null,
-              enteredGrade: null,
-              enteredScore: null,
-              assignmentId: '1',
-              subAssignmentTag: 'reply_to_topic',
-              gradeMatchesCurrentSubmission: true,
-              excused: false,
-            },
-            {
-              grade: null,
-              score: null,
-              publishedGrade: null,
-              publishedScore: null,
-              enteredGrade: null,
-              enteredScore: null,
-              assignmentId: '1',
-              subAssignmentTag: 'reply_to_entry',
-              gradeMatchesCurrentSubmission: true,
-              excused: false,
-            },
-          ],
-        },
-      ],
+  ],
+}
+
+export const GRADEBOOK_COURSE_OUTCOME_MASTERY_SCALES_QUERY_MOCK_RESPONSE = {
+  course: {
+    outcomeCalculationMethod: {
+      _id: '1',
+      calculationInt: 5,
+      calculationMethod: 'n_mastery',
+    },
+    outcomeProficiency: {
+      masteryPoints: 5,
     },
   },
 }
 
 export const setupCanvasQueries = () => {
-  queryClient.setQueryData(
-    ['individual-gradebook-student', '1', '5'],
-    GRADEBOOK_STUDENT_QUERY_MOCK_RESPONSE
-  )
+  // Set up infinite query data with proper structure
+  queryClient.setQueryData(['individual-gradebook-student', '1', '5'], {
+    pages: [GRADEBOOK_STUDENT_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
+
+  queryClient.setQueryData(['individual-gradebook-student', '1', '1'], {
+    pages: [GRADEBOOK_STUDENT_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
+
+  queryClient.setQueryData(['individual-gradebook-submissions', '1'], {
+    pages: [GRADEBOOK_SUBMISSIONS_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
+
+  queryClient.setQueryData(['individual-gradebook-enrollments', '1'], {
+    pages: [GRADEBOOK_ENROLLMENTS_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
+
+  queryClient.setQueryData(['individual-gradebook-assignmentGroups', '1'], {
+    pages: [GRADEBOOK_ASSIGNMENT_GROUPS_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
+
+  queryClient.setQueryData(['individual-gradebook-assignments', '1'], {
+    pages: [GRADEBOOK_ASSIGNMENTS_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
+
+  queryClient.setQueryData(['individual-gradebook-outcomes', '1'], {
+    pages: [GRADEBOOK_OUTCOMES_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
+
+  queryClient.setQueryData(['individual-gradebook-sections', '1'], {
+    pages: [GRADEBOOK_SECTIONS_QUERY_MOCK_RESPONSE.pages[0]],
+    pageParams: [''],
+  })
 
   queryClient.setQueryData(
-    ['individual-gradebook-student', '1', '1'],
-    GRADEBOOK_STUDENT_QUERY_MOCK_RESPONSE
+    ['individual-gradebook-course-outcome-mastery-scales', '1'],
+    GRADEBOOK_COURSE_OUTCOME_MASTERY_SCALES_QUERY_MOCK_RESPONSE,
   )
 
-  queryClient.setQueryData(
-    ['individual-gradebook-submissions', '1'],
-    GRADEBOOK_SUBMISSIONS_QUERY_MOCK_RESPONSE
-  )
-  queryClient.setQueryData(
-    ['individual-gradebook-enrollments', '1'],
-    GRADEBOOK_ENROLLMENTS_QUERY_MOCK_RESPONSE
-  )
-  queryClient.setQueryData(
-    ['individual-gradebook-assignmentGroups', '1'],
-    GRADEBOOK_ASSIGNMENT_GROUPS_QUERY_MOCK_RESPONSE
-  )
-  queryClient.setQueryData(
-    ['individual-gradebook-assignments', '1'],
-    GRADEBOOK_ASSIGNMENTS_QUERY_MOCK_RESPONSE
-  )
-  queryClient.setQueryData(
-    ['individual-gradebook-outcomes', '1'],
-    GRADEBOOK_OUTCOMES_QUERY_MOCK_RESPONSE
-  )
-  queryClient.setQueryData(
-    ['individual-gradebook-sections', '1'],
-    GRADEBOOK_SECTIONS_QUERY_MOCK_RESPONSE
-  )
   queryClient.setQueryData(['individual-gradebook-student-comments', '1', '1'], {})
   queryClient.setQueryData(['individual-gradebook-student-comments', '1', '13'], {})
   queryClient.setQueryData(['individual-gradebook-student-comments', '1', '14'], {})
+
+  queryClient.setQueryData(['fetch-outcome-result-1'], OUTCOME_ROLLUP_QUERY_RESPONSE)
 
   queryClient.setQueryDefaults(['individual-gradebook-sections'], {
     refetchOnMount: false,
@@ -513,6 +548,10 @@ export const setupCanvasQueries = () => {
     staleTime: 1000,
   })
   queryClient.setQueryDefaults(['individual-gradebook-submissions'], {
+    refetchOnMount: false,
+    staleTime: 1000,
+  })
+  queryClient.setQueryDefaults(['individual-gradebook-course-outcome-mastery-scales'], {
     refetchOnMount: false,
     staleTime: 1000,
   })

@@ -17,13 +17,14 @@
  */
 
 // manage groups is for the add_group_category dialog
-import ready from '@instructure/ready'
+import {useEffect} from 'react'
 import Assignment from '@canvas/assignments/backbone/models/Assignment'
 import EditHeaderView from './backbone/views/EditHeaderView'
 import EditView from './backbone/views/EditView'
 import SectionCollection from '@canvas/sections/backbone/collections/SectionCollection'
 import DueDateList from '@canvas/due-dates/backbone/models/DueDateList'
 import DueDateOverride from '@canvas/due-dates'
+import MasteryPathToggle from '@canvas/mastery-path-toggle'
 import AssignmentGroupSelector from '@canvas/assignments/backbone/views/AssignmentGroupSelector'
 import GradingTypeSelector from '@canvas/assignments/backbone/views/GradingTypeSelector'
 import GroupCategorySelector from '@canvas/groups/backbone/views/GroupCategorySelector'
@@ -31,8 +32,21 @@ import PeerReviewsSelector from '@canvas/assignments/backbone/views/PeerReviewsS
 import '@canvas/grading-standards'
 import LockManager from '@canvas/blueprint-courses/react/components/LockManager/index'
 import renderEditAssignmentsApp from './react/index'
+import {renderEnhancedRubrics} from './react/AssignmentRubric'
+import {renderPeerReviewDetails} from './react/PeerReviewDetails'
 
-ready(() => {
+function loadBackboneComponents() {
+  function maybeScrollToTarget() {
+    const params = new URLSearchParams(window.location.search)
+    const targetId = params.get('scrollTo')
+    const target = document.getElementById(targetId)
+
+    if (target) target.scrollIntoView({behavior: 'smooth'})
+  }
+
+  if (document.readyState === 'complete') maybeScrollToTarget()
+  else window.addEventListener('load', maybeScrollToTarget, {once: true})
+
   if (ENV.ASSIGNMENT_EDIT_ENHANCEMENTS_TEACHER_VIEW) {
     const div = document.createElement('div')
     renderEditAssignmentsApp(document.getElementById('content').appendChild(div))
@@ -41,9 +55,10 @@ ready(() => {
     lockManager.init({itemType: 'assignment', page: 'edit'})
     const lockedItems = lockManager.isChildContent() ? lockManager.getItemLocks() : {}
 
-    ENV.ASSIGNMENT.assignment_overrides = ENV.ASSIGNMENT_OVERRIDES
+    if (ENV.ASSIGNMENT) ENV.ASSIGNMENT.assignment_overrides = ENV.ASSIGNMENT_OVERRIDES
 
     const userIsAdmin = ENV.current_user_is_admin
+    const canEditGrades = ENV.PERMISSIONS?.can_edit_grades ?? false
 
     const assignment = new Assignment(ENV.ASSIGNMENT)
     assignment.urlRoot = ENV.URL_ROOT
@@ -52,7 +67,7 @@ ready(() => {
     const dueDateList = new DueDateList(
       assignment.get('assignment_overrides'),
       sectionList,
-      assignment
+      assignment,
     )
 
     const assignmentGroupSelector = new AssignmentGroupSelector({
@@ -64,13 +79,14 @@ ready(() => {
       parentModel: assignment,
       preventNotGraded: assignment.submissionTypesFrozen(),
       lockedItems,
-      canEditGrades: ENV.PERMISSIONS.can_edit_grades,
+      canEditGrades,
     })
     const groupCategorySelector = new GroupCategorySelector({
       parentModel: assignment,
       groupCategories:
         (typeof ENV !== 'undefined' && ENV !== null ? ENV.GROUP_CATEGORIES : undefined) || [],
       inClosedGradingPeriod: assignment.inClosedGradingPeriod(),
+      showNewErrors: true,
     })
     const peerReviewsSelector = new PeerReviewsSelector({
       parentModel: assignment,
@@ -81,8 +97,8 @@ ready(() => {
       model: assignment,
       assignmentGroupSelector,
       gradingTypeSelector,
-      groupCategorySelector,
-      peerReviewsSelector,
+      ...(!ENV.horizon_course && {groupCategorySelector}),
+      ...(!ENV.horizon_course && {peerReviewsSelector}),
       views: {
         'js-assignment-overrides': new DueDateOverride({
           model: dueDateList,
@@ -93,11 +109,14 @@ ready(() => {
           inPacedCourse: assignment.inPacedCourse(),
           isModuleItem: ENV.IS_MODULE_ITEM,
           courseId: assignment.courseID(),
-          groupCategorySelector,
+          ...(!ENV.horizon_course && {groupCategorySelector}),
+        }),
+        'js-assignment-overrides-mastery-path': new MasteryPathToggle({
+          model: dueDateList,
         }),
       },
       lockedItems: assignment.id ? lockedItems : {}, // if no id, creating a new assignment
-      canEditGrades: ENV.PERMISSIONS.can_edit_grades || !assignment.gradedSubmissionsExist(),
+      canEditGrades: canEditGrades || !assignment.gradedSubmissionsExist(),
     })
 
     const editHeaderView = new EditHeaderView({
@@ -109,5 +128,17 @@ ready(() => {
       },
     })
     editHeaderView.render()
+    renderPeerReviewDetails(assignment)
+    renderEnhancedRubrics()
   }
-})
+}
+
+export function Component() {
+  useEffect(() => {
+    // Need to make sure the DOM has settled down before loading the Backbone
+    // stuff, because it in turn wants to render stuff into the DOM and we need
+    // to make sure everything is in place before that happens.
+    requestAnimationFrame(loadBackboneComponents)
+  }, [])
+  return null
+}

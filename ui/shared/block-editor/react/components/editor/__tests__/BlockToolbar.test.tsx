@@ -53,7 +53,7 @@ let nodeCustomData: any = {
 const dummyBlockToolbar = () => {
   return <div>Dummy Block Toolbar</div>
 }
-let blockOwnToolbar: React.ReactNode | null = dummyBlockToolbar
+let blockOwnToolbar: React.ReactNode | null = dummyBlockToolbar()
 
 const nodeDomNode = document.createElement('div')
 nodeDomNode.id = 'nodeid'
@@ -83,6 +83,9 @@ jest.mock('@craftjs/core', () => {
                   id,
                   dom: {
                     focus: mockFocus,
+                  },
+                  data: {
+                    parent: undefined,
                   },
                 }
               },
@@ -141,6 +144,7 @@ describe('BlockToolbar', () => {
     downNode = {
       id: 'upnode',
     }
+    // @ts-expect-error
     blockOwnToolbar = dummyBlockToolbar
     nodeCustomData = {
       noToolbar: customNoToolbar,
@@ -242,7 +246,7 @@ describe('BlockToolbar', () => {
       expect(firstButton.getAttribute('tabindex')).toEqual('0')
     })
 
-    it('should wrap around on left arrow from the first butotn', async () => {
+    it('should wrap around on left arrow from the first button', async () => {
       isSaveable = false
       const {getByText} = renderBlockToolbar()
       const firstButton = getByText('Go up').closest('button') as HTMLButtonElement

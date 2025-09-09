@@ -46,7 +46,7 @@ it('includes course_id in call loadItems prop on mount', () => {
   const fakeLoadItems = jest.fn()
   const course_id = '17'
   render(
-    <ToDoSidebar {...defaultProps} sidebarLoadInitialItems={fakeLoadItems} forCourse={course_id} />
+    <ToDoSidebar {...defaultProps} sidebarLoadInitialItems={fakeLoadItems} forCourse={course_id} />,
   )
   expect(fakeLoadItems).toHaveBeenCalled()
   expect(fakeLoadItems.mock.calls[0][1]).toEqual(course_id)
@@ -68,7 +68,7 @@ it('renders out ToDoItems for each item', () => {
     },
   ]
   const {container, getAllByText} = render(<ToDoSidebar {...defaultProps} items={items} />)
-  expect(container.querySelectorAll('.ToDoSidebarItem').length).toBe(items.length)
+  expect(container.querySelectorAll('.ToDoSidebarItem')).toHaveLength(items.length)
   expect(getAllByText(items[0].title).length).toBeGreaterThan(0)
   expect(getAllByText(items[1].title).length).toBeGreaterThan(0)
 })
@@ -147,7 +147,7 @@ it('invokes change dashboard view when link is clicked', async () => {
     },
   ]
   const {getByText} = render(
-    <ToDoSidebar {...defaultProps} items={items} changeDashboardView={changeDashboardView} />
+    <ToDoSidebar {...defaultProps} items={items} changeDashboardView={changeDashboardView} />,
   )
   const link = getByText('Show All')
   await userEvent.click(link)
@@ -178,8 +178,21 @@ it('does not render out items that are completed', () => {
 
 it('can handles no items', () => {
   // suppress Show All button and display "Nothing for now" instead of list
-  const wrapper = render(<ToDoSidebar {...defaultProps} changeDashboardView={null} />)
-  expect(wrapper).toMatchSnapshot()
+  const {getByTestId, getByText, queryByText} = render(
+    <ToDoSidebar {...defaultProps} changeDashboardView={null} />,
+  )
+
+  // Should render the ToDoSidebar container
+  expect(getByTestId('ToDoSidebar')).toBeInTheDocument()
+
+  // Should render the To Do header
+  expect(getByText('To Do')).toBeInTheDocument()
+
+  // Should display "Nothing for now" when there are no items
+  expect(getByText('Nothing for now')).toBeInTheDocument()
+
+  // Should not display "Show All" button when changeDashboardView is null
+  expect(queryByText('Show All')).not.toBeInTheDocument()
 })
 
 it('renders an error message when loading fails', () => {

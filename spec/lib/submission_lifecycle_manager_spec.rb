@@ -106,7 +106,7 @@ describe SubmissionLifecycleManager do
 
     context "discussion_checkpoints" do
       before do
-        Account.site_admin.enable_feature!(:discussion_checkpoints)
+        @course.account.enable_feature!(:discussion_checkpoints)
         topic = DiscussionTopic.create_graded_topic!(course: @course, title: "checkpointed discussion")
         @c1 = Checkpoints::DiscussionCheckpointCreatorService.call(
           discussion_topic: topic,
@@ -291,7 +291,7 @@ describe SubmissionLifecycleManager do
       let!(:student_1) { @student }
       let(:student_2) { student_in_course(course: @course) }
       let(:student_ids) { [student_1.id, student_2.id] }
-      let(:instance) { instance_double("SubmissionLifecycleManager", recompute: nil) }
+      let(:instance) { instance_double(SubmissionLifecycleManager, recompute: nil) }
 
       it "delegates to an instance" do
         expect(SubmissionLifecycleManager).to receive(:new).and_return(instance)
@@ -395,7 +395,7 @@ describe SubmissionLifecycleManager do
     let(:other_student) { User.create! }
     let(:course) { Course.create! }
     let(:assignment) { course.assignments.create!(title: "hi") }
-    let(:instance) { instance_double("SubmissionLifecycleManager", recompute: nil) }
+    let(:instance) { instance_double(SubmissionLifecycleManager, recompute: nil) }
 
     it "accepts a User" do
       expect do
@@ -1207,6 +1207,15 @@ describe SubmissionLifecycleManager do
         expect(LatePolicyApplicator).to receive(:for_assignment).with(@assignment)
 
         cacher.recompute
+      end
+
+      it "kicks off LatePolicyApplicator job on the course when told to do so with multiple assignments" do
+        @assignment1 = @assignment
+        @assignment2 = assignment_model(course: @course)
+
+        expect(LatePolicyApplicator).to receive(:for_course).with(@course, [@assignment1.id, @assignment2.id])
+
+        SubmissionLifecycleManager.new(@course, [@assignment1, @assignment2], run_late_policy_applicator_for_course: true).recompute
       end
 
       it "does not kick off a LatePolicyApplicator job when called with multiple assignments" do

@@ -16,36 +16,42 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, {useCallback} from 'react'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {Alert} from '@instructure/ui-alerts'
 import {CloseButton} from '@instructure/ui-buttons'
 import {Flex} from '@instructure/ui-flex'
 import {Heading} from '@instructure/ui-heading'
 import {Spinner} from '@instructure/ui-spinner'
 import {View} from '@instructure/ui-view'
+import React, {useCallback} from 'react'
 import {useAUPContent} from '../hooks/useAUPContent'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {assignLocation} from '@canvas/util/globalUtils'
+import {useLocation, useNavigate, useNavigationType} from 'react-router-dom'
 
 // @ts-expect-error
 import styles from './AcceptableUsePolicy.module.css'
 
-const I18n = useI18nScope('acceptable_use_policy')
+const I18n = createI18nScope('acceptable_use_policy')
 
 const AcceptableUsePolicy = () => {
   const {content, loading, error} = useAUPContent()
+  const navigate = useNavigate()
+  const navigationType = useNavigationType()
+  const location = useLocation()
 
   const handleClose = useCallback(() => {
-    if (window.history.length > 1) {
-      window.history.back()
+    if (navigationType === 'PUSH' && location.key !== 'default') {
+      navigate(-1)
     } else {
-      window.location.assign('/login/canvas')
+      // if no meaningful history then redirect to branded login entry point
+      assignLocation('/login')
     }
-  }, [])
+  }, [location.key, navigate, navigationType])
 
   const alertTermsUnavailable = () => (
     <Alert variant="error" transition="none" margin="none" hasShadow={false}>
       {I18n.t(
-        'Unable to load the Acceptable Use Policy. Please try again later or contact support if the issue persists.'
+        'Unable to load the Acceptable Use Policy. Please try again later or contact support if the issue persists.',
       )}
     </Alert>
   )
@@ -53,7 +59,7 @@ const AcceptableUsePolicy = () => {
   const alertNoTerms = () => (
     <Alert variant="info" transition="none" margin="none" hasShadow={false}>
       {I18n.t(
-        'The Acceptable Use Policy is currently unavailable. Please check back later or contact support if you need further assistance.'
+        'The Acceptable Use Policy is currently unavailable. Please check back later or contact support if you need further assistance.',
       )}
     </Alert>
   )
@@ -74,6 +80,7 @@ const AcceptableUsePolicy = () => {
             padding="0 large medium 0"
           >
             <CloseButton
+              data-testid="close-acceptable-use-policy"
               onClick={handleClose}
               placement="end"
               offset="none"

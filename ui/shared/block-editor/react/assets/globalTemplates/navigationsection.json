@@ -2,6 +2,7 @@
   "name": "Navigation Section",
   "description": "Course navigation with four buttons",
   "workflow_state": "active",
+  "editor_version": "0.3",
   "node_tree": {
     "rootNodeId": "yue4mpUChN",
     "nodes": {
@@ -38,9 +39,7 @@
         },
         "parent": "yue4mpUChN",
         "hidden": false,
-        "nodes": [
-          "13kQFSc-L3"
-        ],
+        "nodes": ["13kQFSc-L3"],
         "linkedNodes": {}
       },
       "13kQFSc-L3": {
@@ -87,12 +86,7 @@
         },
         "parent": "13kQFSc-L3",
         "hidden": false,
-        "nodes": [
-          "lDKe-fJfGy",
-          "JwS1ab5Ylg",
-          "CV9ftqN8l9",
-          "u3ntJFci_x"
-        ],
+        "nodes": ["lDKe-fJfGy", "JwS1ab5Ylg", "CV9ftqN8l9", "u3ntJFci_x"],
         "linkedNodes": {}
       },
       "lDKe-fJfGy": {
@@ -104,8 +98,7 @@
           "text": "Announcements",
           "href": "",
           "size": "medium",
-          "variant": "condensed",
-          "color": "primary-inverse",
+          "variant": "text",
           "iconName": ""
         },
         "displayName": "Button",
@@ -126,8 +119,7 @@
           "text": "Modules",
           "href": "",
           "size": "medium",
-          "variant": "condensed",
-          "color": "primary-inverse",
+          "variant": "text",
           "iconName": ""
         },
         "displayName": "Button",
@@ -148,8 +140,7 @@
           "text": "Resources",
           "href": "",
           "size": "medium",
-          "variant": "condensed",
-          "color": "primary-inverse",
+          "variant": "text",
           "iconName": ""
         },
         "displayName": "Button",
@@ -170,8 +161,7 @@
           "text": "Support",
           "href": "",
           "size": "medium",
-          "variant": "condensed",
-          "color": "primary-inverse",
+          "variant": "text",
           "iconName": ""
         },
         "displayName": "Button",

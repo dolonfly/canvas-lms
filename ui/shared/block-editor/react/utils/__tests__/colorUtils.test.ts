@@ -19,7 +19,9 @@
 import {
   getContrastingColor,
   getContrastingButtonColor,
-  isTransparent,
+  getColorsInUse,
+  getEffectiveBackgroundColor,
+  getEffectiveColor,
   white,
   black,
 } from '../colorUtils'
@@ -46,29 +48,132 @@ describe('colorUtils', () => {
     })
   })
 
-  describe('isTransparent', () => {
-    it('should return true when the color is transparent', () => {
-      expect(isTransparent('transparent')).toBe(true)
+  describe('getColorsInUse', () => {
+    it('returns the colors in use', () => {
+      const query = {
+        getSerializedNodes: () => ({
+          node1: {
+            type: {resolvedName: 'Node1'},
+            props: {color: '#000000', background: '#FFFFFF'},
+            parent: null,
+            hidden: false,
+            displayName: 'Node1',
+            nodes: [],
+            custom: {},
+            isCanvas: false,
+            linkedNodes: {} as Record<string, string>,
+          },
+          node2: {
+            type: {resolvedName: 'Node2'},
+            props: {color: '#abcdef', background: '#12345600'},
+            parent: null,
+            hidden: false,
+            displayName: 'Node2',
+            nodes: [],
+            custom: {},
+            isCanvas: false,
+            linkedNodes: {} as Record<string, string>,
+          },
+          node3: {
+            type: {resolvedName: 'Node3'},
+            props: {color: '#abcdef'},
+            parent: null,
+            hidden: false,
+            displayName: 'Node3',
+            nodes: [],
+            custom: {},
+            isCanvas: false,
+            linkedNodes: {} as Record<string, string>,
+          },
+          node4: {
+            type: {resolvedName: 'Node4'},
+            props: {},
+            parent: null,
+            hidden: false,
+            displayName: 'Node4',
+            nodes: [],
+            custom: {},
+            isCanvas: false,
+            linkedNodes: {} as Record<string, string>,
+          },
+          node5: {
+            type: {resolvedName: 'Node5'},
+            props: {background: '#ababab'},
+            parent: null,
+            hidden: false,
+            displayName: 'Node5',
+            nodes: [],
+            custom: {},
+            isCanvas: false,
+            linkedNodes: {} as Record<string, string>,
+          },
+          node6: {
+            type: {resolvedName: 'Node6'},
+            props: {color: 'var(--ic-brand-font-color-dark)', background: 'transparent'},
+            parent: null,
+            hidden: false,
+            displayName: 'Node6',
+            nodes: [],
+            custom: {},
+            isCanvas: false,
+            linkedNodes: {} as Record<string, string>,
+          },
+          node7: {
+            type: {resolvedName: 'Node7'},
+            props: {color: '#ff0000'},
+            parent: null,
+            hidden: false,
+            displayName: 'Node7',
+            nodes: [],
+            custom: {},
+            isCanvas: false,
+            linkedNodes: {} as Record<string, string>,
+          },
+        }),
+      }
+
+      const colors = getColorsInUse(query)
+      expect(colors).toEqual({
+        foreground: ['#ff0000', '#abcdef'],
+        background: ['#ababab'],
+        border: [],
+      })
+    })
+  })
+
+  describe('getEffectiveBackgroundColor', () => {
+    it('returns white if given no element', () => {
+      expect(getEffectiveBackgroundColor(null)).toBe('#ffffff')
     })
 
-    it('should retun true when a hex color is transparent', () => {
-      expect(isTransparent('#AABBCC00')).toBe(true)
+    it('returns the elements background color', () => {
+      const elem = document.createElement('div')
+      elem.style.backgroundColor = 'rgb(255, 0, 0)'
+      expect(getEffectiveBackgroundColor(elem)).toBe('#ff0000')
     })
 
-    it('should return true when an rgba color is transparent', () => {
-      expect(isTransparent('rgba(10, 20, 30, 0)')).toBe(true)
+    it('returns the first ancestor with a non-transparent background color', () => {
+      const elem = document.createElement('div')
+      const parent = document.createElement('div')
+      parent.style.backgroundColor = 'transparent'
+      parent.appendChild(elem)
+      const grandparent = document.createElement('div')
+      grandparent.style.backgroundColor = 'rgb(255, 0, 0)'
+      grandparent.appendChild(parent)
+      expect(getEffectiveBackgroundColor(elem)).toBe('#ff0000')
+    })
+  })
+
+  describe('getEffectiveColor', () => {
+    it('returns black if given no element', () => {
+      // @ts-expect-error
+      expect(getEffectiveColor(null)).toBe('#000000')
     })
 
-    it('should return false when the color is invalid', () => {
-      expect(isTransparent('invalid')).toBe(false)
-    })
-
-    it('should return false when a hex color is not transparent', () => {
-      expect(isTransparent('#AABBCCDD')).toBe(false)
-    })
-
-    it('should return false when an rgba color is not transparent', () => {
-      expect(isTransparent('rgba(10, 20, 30, .5)')).toBe(false)
+    it('returns the elements color', () => {
+      const elem = document.createElement('div')
+      elem.style.color = 'rgb(255, 0, 0)'
+      expect(getEffectiveColor(elem)).toBe('#ff0000')
     })
   })
 })

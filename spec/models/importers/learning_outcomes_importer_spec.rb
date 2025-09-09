@@ -43,24 +43,14 @@ describe "Importing Learning Outcomes" do
     expect(log.child_outcome_links.detect { |link| link.content == lo2 }).not_to be_nil
   end
 
-  context "selectable_outcomes_in_course_copy enabled" do
-    before do
-      @context.root_account.enable_feature!(:selectable_outcomes_in_course_copy)
-    end
-
-    after do
-      @context.root_account.disable_feature!(:selectable_outcomes_in_course_copy)
-    end
-
-    it "imports group" do
-      migration = ContentMigration.create!(context: @context)
-      migration.migration_ids_to_import = { copy: {} }
-      data = [{ type: "learning_outcome_group", title: "hey", migration_id: "x" }.with_indifferent_access]
-      data = { "learning_outcomes" => data }
-      expect do
-        Importers::LearningOutcomeImporter.process_migration(data, migration)
-      end.to change { LearningOutcomeGroup.count }.by 1
-    end
+  it "imports group" do
+    migration = ContentMigration.create!(context: @context)
+    migration.migration_ids_to_import = { copy: {} }
+    data = [{ type: "learning_outcome_group", title: "hey", migration_id: "x" }.with_indifferent_access]
+    data = { "learning_outcomes" => data }
+    expect do
+      Importers::LearningOutcomeImporter.process_migration(data, migration)
+    end.to change { LearningOutcomeGroup.count }.by 1
   end
 
   it "does not fail when passing an outcome that already exists" do
@@ -131,7 +121,7 @@ describe "Importing Learning Outcomes" do
 
   it "change calculation method, calculation int and rubric criterion" do
     existing_outcome = LearningOutcome.where(migration_id: "bdf6dc13-5d8f-43a8-b426-03380c9b6781").first
-    expect(existing_outcome.calculation_method).to eq "decaying_average"
+    expect(existing_outcome.calculation_method).to eq "standard_decaying_average"
     expect(existing_outcome.calculation_int).to eq 65
     expect(existing_outcome.data).to be_nil
     identifier = existing_outcome.migration_id

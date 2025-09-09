@@ -23,10 +23,10 @@ import {Group} from '../../../../graphql/Group'
 import HeaderInputs from '../HeaderInputs'
 import {responsiveQuerySizes} from '../../../../util/utils'
 import React from 'react'
-import {mswServer} from '../../../../../../shared/msw/mswServer'
+import {setupServer} from 'msw/node'
 import {handlers} from '../../../../graphql/mswHandlers'
-import {mswClient} from '../../../../../../shared/msw/mswClient'
-import {ApolloProvider} from '@apollo/react-common'
+import {mswClient} from '@canvas/msw/mswClient'
+import {ApolloProvider} from '@apollo/client'
 
 jest.mock('../../../../util/utils', () => ({
   ...jest.requireActual('../../../../util/utils'),
@@ -34,7 +34,7 @@ jest.mock('../../../../util/utils', () => ({
 }))
 
 describe('HeaderInputs', () => {
-  const server = mswServer(handlers)
+  const server = setupServer(...handlers)
   const defaultProps = props => ({
     courses: {
       favoriteGroupsConnection: {
@@ -85,9 +85,63 @@ describe('HeaderInputs', () => {
     return render(
       <ApolloProvider client={mswClient}>
         <HeaderInputs {...props} />
-      </ApolloProvider>
+      </ApolloProvider>,
     )
   }
+
+  describe('when restrict_student_access feature is enabled', () => {
+    beforeAll(() => {
+      window.ENV.FEATURES ||= {}
+      window.ENV.FEATURES.restrict_student_access = true
+    })
+
+    afterAll(() => {
+      delete window.ENV.FEATURES.restrict_student_access
+    })
+
+    describe('when user is a teacher', () => {
+      beforeAll(() => {
+        window.ENV.current_user_has_teacher_enrollment = true
+      })
+
+      afterAll(() => {
+        delete window.ENV.current_user_has_teacher_enrollment
+      })
+
+      it('does not render checkbox for individual message to each recipient', () => {
+        jest.useFakeTimers()
+        const props = defaultProps({addressBookContainerOpen: true})
+        const {queryByText} = setup(props)
+        expect(queryByText('Send an individual message to each recipient')).not.toBeInTheDocument()
+      })
+    })
+
+    describe('when user is a student', () => {
+      beforeAll(() => {
+        window.ENV.current_user_roles = ['student']
+      })
+
+      afterAll(() => {
+        delete window.ENV.current_user_roles
+      })
+
+      it('does render checkbox for individual message to each recipient', () => {
+        jest.useFakeTimers()
+        const props = defaultProps({addressBookContainerOpen: true})
+        const {getByText} = setup(props)
+        expect(getByText('Send an individual message to each recipient')).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('when restrict_student_access feature is disabled', () => {
+    it('does render checkbox for individual message to each recipient', () => {
+      jest.useFakeTimers()
+      const props = defaultProps({addressBookContainerOpen: true})
+      const {getByText} = setup(props)
+      expect(getByText('Send an individual message to each recipient')).toBeInTheDocument()
+    })
+  })
 
   it('calls onSelectedIdsChange when using the Address Book component', async () => {
     jest.useFakeTimers()

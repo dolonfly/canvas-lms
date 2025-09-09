@@ -132,6 +132,186 @@ describe AccountsController do
         expect(@user.associated_accounts.map(&:id)).to_not include(@account.id)
       end
     end
+
+    describe "bulk user removal" do
+      before :once do
+        @account.enable_feature!(:horizon_bulk_api_permission)
+      end
+
+      it "removes multiple users from the account" do
+        course_factory(active_all: true)
+
+        account_admin_user
+        user_session(@admin)
+
+        @u1 = User.create!(name: "Alice")
+        @u2 = User.create!(name: "Bob")
+        @u3 = User.create!(name: "Clement")
+        @account.account_users.create(user: @u1)
+        @account.account_users.create(user: @u2)
+        @account.account_users.create(user: @u3)
+
+        delete "remove_users", params: { account_id: @account.id, user_ids: [@u1.id, @u2.id] }
+
+        expect(response).to be_successful
+        response_body = json_parse(response.body)
+
+        progress = Progress.find(response_body["id"])
+        expect(progress.workflow_state).to eq "queued"
+        expect(@account.users.size).to eq 5
+        run_jobs
+        expect(@account.users.size).to eq 3
+        expect(progress.reload.workflow_state).to eq "completed"
+      end
+
+      it "return 403 if feature flag is turned off" do
+        @account.disable_feature!(:horizon_bulk_api_permission)
+        user_session(@admin)
+
+        delete "remove_users", params: { account_id: @account.id, user_ids: [5, 6] }
+
+        expect(response).to be_unauthorized
+      end
+
+      it "blocks role without correct permissions" do
+        course_with_teacher_logged_in(active_all: true)
+
+        delete "remove_users", params: { account_id: @account.id, user_ids: [5, 6] }
+
+        expect(response).to be_unauthorized
+      end
+
+      it "explicitly removes user permission for admin" do
+        account_admin_user_with_role_changes(account: @account, role_changes: { manage_users_in_bulk: false })
+
+        delete "remove_users", params: { account_id: @account.id, user_ids: [5, 6] }
+
+        expect(response).to be_unauthorized
+      end
+
+      it "collects errors for nonexistent users" do
+        course_factory(active_all: true)
+
+        account_admin_user
+        user_session(@admin)
+
+        @u1 = User.create!(name: "Alice")
+        @u2 = User.create!(name: "Bob")
+        @u3 = User.create!(name: "Clement")
+        @account.account_users.create(user: @u1)
+        @account.account_users.create(user: @u2)
+        @account.account_users.create(user: @u3)
+
+        delete "remove_users", params: { account_id: @account.id, user_ids: [@u1.id, 9999] }
+
+        expect(response).to be_successful
+        response_body = json_parse(response.body)
+
+        progress = Progress.find(response_body["id"])
+        expect(progress.workflow_state).to eq "queued"
+        run_jobs
+        expect(progress.reload.workflow_state).to eq "completed"
+        expect(progress.results[:errors]).to have_key("9999")
+        expect(@account.reload.users.find_by(name: "Alice")).to be_nil
+        expect(@account.reload.users.find_by(name: "Bob")).to_not be_nil
+      end
+
+      it "returns bad request if user_ids are over the limit" do
+        user_session(@admin)
+
+        delete "remove_users", params: { account_id: @account.id, user_ids: (1..101).to_a }
+
+        expect(response).to be_bad_request
+      end
+    end
+
+    describe "user bulk edit" do
+      before :once do
+        @account.enable_feature!(:horizon_bulk_api_permission)
+        @u1 = user_with_pseudonym(account: @account, name: "Alice", workflow_state: "active")
+        @u2 = user_with_pseudonym(account: @account, name: "Bob", workflow_state: "active")
+        @u3 = user_with_pseudonym(account: @account, name: "Clement", workflow_state: "active")
+        @account.account_users.create(user: @u1)
+        @account.account_users.create(user: @u2)
+        @account.account_users.create(user: @u3)
+        @account = Account.default
+      end
+
+      it "return 403 if feature flag is turned off" do
+        @account.disable_feature!(:horizon_bulk_api_permission)
+        user_session(@admin)
+        put :update_users, params: { account_id: @account.id, user_ids: [@u1.id, @u2.id], user: { event: "suspend" } }, format: :json
+        expect(response).to be_forbidden
+      end
+
+      it "suspends multiple users" do
+        user_session(@admin)
+        put :update_users, params: { account_id: @account.id, user_ids: [@u1.id, @u2.id], user: { event: "suspend" } }, format: :json
+        expect(response).to be_successful
+        response_body = json_parse(response.body)
+        progress = Progress.find(response_body["id"])
+        expect(progress.workflow_state).to eq "queued"
+        run_jobs
+        progress.reload
+        expect(progress.workflow_state).to eq "completed"
+        expect(@u1.pseudonym.reload).to be_suspended
+        expect(@u2.pseudonym.reload).to be_suspended
+      end
+
+      it "unsuspends multiple users" do
+        user_session(@admin)
+        put :update_users, params: { account_id: @account.id, user_ids: [@u1.id, @u2.id], user: { event: "suspend" } }, format: :json
+        expect(response).to be_successful
+        response_body = json_parse(response.body)
+        progress = Progress.find(response_body["id"])
+        expect(progress.workflow_state).to eq "queued"
+        run_jobs
+        progress.reload
+        expect(progress.workflow_state).to eq "completed"
+        expect(@u1.pseudonym.reload).to be_suspended
+        expect(@u2.pseudonym.reload).to be_suspended
+
+        put :update_users, params: { account_id: @account.id, user_ids: [@u1.id, @u2.id], user: { event: "unsuspend" } }, format: :json
+        run_jobs
+        expect(@u1.pseudonym.reload).to be_active
+        expect(@u2.pseudonym.reload).to be_active
+      end
+
+      it "returns an error for non-existent users" do
+        user_session(@admin)
+        put :update_users, params: { account_id: @account.id, user_ids: [@u1.id, 9999], user: { event: "suspend" } }, format: :json
+        expect(response).to be_successful
+        response_body = json_parse(response.body)
+        progress = Progress.find(response_body["id"])
+        expect(progress.workflow_state).to eq "queued"
+        run_jobs
+        progress.reload
+        expect(progress.workflow_state).to eq "completed"
+        expect(progress.results[:errors]).to have_key("9999")
+        expect(@u1.pseudonym.reload).to be_suspended
+      end
+
+      it "does not fail if one of the users are not found" do
+        user_session(@admin)
+        put :update_users, params: { account_id: @account.id, user_ids: [@u1, 9999, @u3], user: { event: "suspend" } }, format: :json
+        expect(response).to be_successful
+        response_body = json_parse(response.body)
+        progress = Progress.find(response_body["id"])
+        expect(progress.workflow_state).to eq "queued"
+        run_jobs
+        progress.reload
+        expect(progress.workflow_state).to eq "completed"
+        expect(progress.results[:errors]).to have_key("9999")
+        expect(@u1.pseudonym.reload).to be_suspended
+        expect(@u3.pseudonym.reload).to be_suspended
+      end
+
+      it "returns bad request if enrollments are over the limit" do
+        user_session(@admin)
+        put :update_users, params: { account_id: @account.id, user_ids: [@u1.id] * 101, user: { event: "suspend" } }, format: :json
+        expect(response).to be_bad_request
+      end
+    end
   end
 
   context "restore_user" do
@@ -153,7 +333,7 @@ describe AccountsController do
     it "does not allow users without login permissions to restore deleted users" do
       account_admin_user_with_role_changes(user: @admin, role_changes: { manage_user_logins: false })
       put "restore_user", params: { account_id: @account.id, user_id: @deleted_user.id }, format: "json"
-      expect(response).to be_unauthorized
+      expect(response).to be_forbidden
     end
 
     it "404s for non-existent users" do
@@ -182,6 +362,14 @@ describe AccountsController do
 
       put "restore_user", params: { account_id: @account.id, user_id: @active_user.id }
       expect(response).to be_bad_request
+    end
+
+    it "restores the most recently deleted pseudonym" do
+      pseudonym = @deleted_user.pseudonym_for_restoration_in(@account)
+
+      expect do
+        put "restore_user", params: { account_id: @account.id, user_id: @deleted_user.id }
+      end.to change { pseudonym.reload.workflow_state }.from("deleted").to("active")
     end
   end
 
@@ -289,7 +477,6 @@ describe AccountsController do
           manage_lti_add: false,
           manage_lti_edit: false,
           manage_lti_delete: false,
-          lti_add_edit: false,
         }
       end
 
@@ -309,24 +496,6 @@ describe AccountsController do
                                  } }
         @account.reload
         expect(@account.settings[:app_center_access_token]).to be_nil
-      end
-
-      context "with flag disabled" do
-        before do
-          @account.disable_feature!(:require_permission_for_app_center_token)
-        end
-
-        it "updates 'app_center_access_token'" do
-          access_token = SecureRandom.uuid
-          post "update", params: { id: @account.id,
-                                   account: {
-                                     settings: {
-                                       app_center_access_token: access_token
-                                     }
-                                   } }
-          @account.reload
-          expect(@account.settings[:app_center_access_token]).to eq access_token
-        end
       end
     end
 
@@ -407,6 +576,72 @@ describe AccountsController do
       )
       @account.reload
       expect(@account.settings[:show_sections_in_course_tray]).to be true
+    end
+
+    describe "allow_assign_to_differentiation_tags" do
+      it "allows for setting to be updated on an account" do
+        account_with_admin_logged_in
+        post(
+          :update,
+          params: {
+            id: @account.id,
+            account: {
+              settings: {
+                allow_assign_to_differentiation_tags: { value: false, locked: false }
+              }
+            }
+          }
+        )
+        @account.reload
+        expect(@account.settings[:allow_assign_to_differentiation_tags][:value]).to be_falsey
+        expect(@account.settings[:allow_assign_to_differentiation_tags][:locked]).to be_falsey
+
+        post(
+          :update,
+          params: {
+            id: @account.id,
+            account: {
+              settings: {
+                allow_assign_to_differentiation_tags: { value: true, locked: true }
+              }
+            }
+          }
+        )
+        @account.reload
+        expect(@account.settings[:allow_assign_to_differentiation_tags][:value]).to be_truthy
+        expect(@account.settings[:allow_assign_to_differentiation_tags][:locked]).to be_truthy
+      end
+
+      it "allows updating setting in child account after updating from inheritable value" do
+        account_with_admin_logged_in
+        root_account = @account.sub_accounts.create!
+        subaccount = root_account.sub_accounts.create!
+
+        post "update", params: { id: subaccount.id, account: { allow_assign_to_differentiation_tags: {} } }
+        expect(subaccount.reload.settings[:allow_assign_to_differentiation_tags]).to be_nil
+        expect(subaccount.allow_assign_to_differentiation_tags[:value]).to be false
+
+        post "update", params: { id: root_account.id,
+                                 account: { settings: {
+                                   allow_assign_to_differentiation_tags: { value: true }
+                                 } } }
+        expect(subaccount.reload.settings[:allow_assign_to_differentiation_tags]).to be_nil
+        expect(subaccount.allow_assign_to_differentiation_tags[:value]).to be true
+
+        post "update", params: { id: subaccount.id,
+                                 account: { settings: {
+                                   allow_assign_to_differentiation_tags: { value: false }
+                                 } } }
+        expect(subaccount.reload.settings[:allow_assign_to_differentiation_tags][:value]).to be false
+        expect(subaccount.allow_assign_to_differentiation_tags[:value]).to be false
+
+        post "update", params: { id: subaccount.id,
+                                 account: { settings: {
+                                   allow_assign_to_differentiation_tags: { value: true }
+                                 } } }
+        expect(subaccount.reload.settings[:allow_assign_to_differentiation_tags]).to be_nil
+        expect(subaccount.allow_assign_to_differentiation_tags[:value]).to be true
+      end
     end
 
     it "allows admins to set the sis_source_id on sub accounts" do
@@ -963,7 +1198,6 @@ describe AccountsController do
     context "course_template_id" do
       before do
         account_with_admin_logged_in
-        @account.enable_feature!(:course_templates)
       end
 
       let(:template) { @account.courses.create!(template: true) }
@@ -1040,16 +1274,22 @@ describe AccountsController do
       @controller.instance_variable_set(:@domain_root_account, @account)
     end
 
-    it "returns a successful HTML response" do
+    it "returns a successful HTML response and disables custom CSS/JS and headers" do
       get "acceptable_use_policy", format: :html
       expect(response).to be_successful
       expect(response.content_type).to eq "text/html; charset=utf-8"
+      expect(assigns(:exclude_account_css)).to be(true)
+      expect(assigns(:exclude_account_js)).to be(true)
+      expect(assigns(:headers)).to be(false)
     end
 
-    it "returns a successful JSON response" do
+    it "returns a successful JSON response and does not set custom CSS/JS variables or headers" do
       get "acceptable_use_policy", format: :json
       expect(response).to be_successful
       expect(response.content_type).to eq "application/json; charset=utf-8"
+      expect(assigns(:exclude_account_css)).to be_nil
+      expect(assigns(:exclude_account_js)).to be_nil
+      expect(assigns(:headers)).to be_nil
     end
   end
 
@@ -1232,20 +1472,100 @@ describe AccountsController do
       c1.save
     end
 
-    it "returns the terms of service content" do
-      @account.update_terms_of_service(terms_type: "custom", content: "custom content")
-
+    it "manages the attachment associations when an attachment is added" do
       admin_logged_in(@account)
+      aa_test_data = AttachmentAssociationsSpecHelper.new(@account, @user)
+
+      @account.update_terms_of_service({ terms_type: "custom", content: aa_test_data.base_html }, @user)
+
+      aas = AttachmentAssociation.where(context_type: "TermsOfServiceContent",
+                                        context_id: @account.terms_of_service_content.id)
+      expect(aas.count).to eq 1
+      expect(aas.first.attachment_id).to eq aa_test_data.attachment1.id
+    end
+
+    it "removes the attachment associations when an attachment is removed" do
+      admin_logged_in(@account)
+      aa_test_data = AttachmentAssociationsSpecHelper.new(@account, @user)
+
+      @account.update_terms_of_service({ terms_type: "custom", content: aa_test_data.added_html }, @user)
+      @account.update_terms_of_service({ terms_type: "custom", content: aa_test_data.removed_html }, @user)
+
+      aas = AttachmentAssociation.where(context_type: "TermsOfServiceContent",
+                                        context_id: @account.terms_of_service_content.id)
+      expect(aas.count).to eq 0
+    end
+
+    it "returns the terms of service content" do
+      admin_logged_in(@account)
+      @account.update_terms_of_service({ terms_type: "custom", content: "custom content" }, @user)
+
       get "terms_of_service", params: { account_id: @account.id }
 
       expect(response).to be_successful
       expect(response.body).to match(/"content":"custom content"/)
     end
 
-    it "returns the terms of service content as teacher" do
-      @account.update_terms_of_service(terms_type: "custom", content: "custom content")
+    context "attachments to terms of service with location tagging" do
+      before do
+        @aa_test_data = AttachmentAssociationsSpecHelper.new(@account, @user)
+        @account.update_terms_of_service({ terms_type: "custom", content: @aa_test_data.added_html }, @user)
+        @old_controller = @controller
+        @controller = FilesController.new
+      end
 
+      after do
+        @controller = @old_controller
+      end
+
+      it "fetches the attachment for logged in user" do
+        admin_logged_in(@account)
+        get "show",
+            params: {
+              user_id: @user.id,
+              id: @aa_test_data.attachment1.id,
+              download: 1,
+              location: "terms_of_service_content_#{@account.terms_of_service_content.id}"
+            },
+            format: "json"
+        expect(response).to have_http_status(:found)
+        expect(response.headers["location"]).to include("download_frd")
+      end
+
+      it "fetches the attachment for unrelated users" do
+        unrelated_user = user_factory
+        user_session(unrelated_user)
+        get "show",
+            params: {
+              user_id: @user.id,
+              id: @aa_test_data.attachment1.id,
+              download: 1,
+              location: "terms_of_service_content_#{@account.terms_of_service_content.id}"
+            },
+            format: "json"
+        expect(response).to have_http_status(:found)
+        expect(response.headers["location"]).to include("download_frd")
+      end
+
+      it "fetches the attachment for anonymous users" do
+        remove_user_session
+        get "show",
+            params: {
+              user_id: @user.id,
+              id: @aa_test_data.attachment1.id,
+              download: 1,
+              location: "terms_of_service_content_#{@account.terms_of_service_content.id}"
+            },
+            format: "json"
+        expect(response).to have_http_status(:found)
+        expect(response.headers["location"]).to include("download_frd")
+      end
+    end
+
+    it "returns the terms of service content as teacher" do
       user_session(@teacher)
+      @account.update_terms_of_service({ terms_type: "custom", content: "custom content" }, @teacher)
+
       get "terms_of_service", params: { account_id: @account.id }
 
       expect(response).to be_successful
@@ -1253,9 +1573,9 @@ describe AccountsController do
     end
 
     it "returns the terms of service content as student" do
-      @account.update_terms_of_service(terms_type: "custom", content: "custom content")
-
       user_session(@student)
+      @account.update_terms_of_service({ terms_type: "custom", content: "custom content" }, @student)
+
       get "terms_of_service", params: { account_id: @account.id }
 
       expect(response).to be_successful
@@ -1263,7 +1583,7 @@ describe AccountsController do
     end
 
     it "returns default self_registration_type" do
-      @account.update_terms_of_service(terms_type: "custom", content: "custom content")
+      @account.update_terms_of_service({ terms_type: "custom", content: "custom content" }, @teacher)
 
       remove_user_session
       get "terms_of_service", params: { account_id: @account.id }
@@ -1273,7 +1593,8 @@ describe AccountsController do
     end
 
     it "returns other self_registration_type" do
-      @account.update_terms_of_service(terms_type: "custom", content: "custom content")
+      user_session(@teacher)
+      @account.update_terms_of_service({ terms_type: "custom", content: "custom content" }, @teacher)
       @account.canvas_authentication_provider.update_attribute(:self_registration, "observer")
 
       remove_user_session
@@ -1949,6 +2270,56 @@ describe AccountsController do
         expect(res.detect { |r| r["id"] == @c2.global_id }["total_students"]).to eq(1)
       end
     end
+
+    context "copied assets" do
+      it "is able to filter courses by a copied page" do
+        @c1 = course_factory(account: @account, course_name: "source course")
+        asset = @c1.wiki_pages.create!(title: "My Asset")
+        @c2 = course_factory(account: @account, course_name: "copied course")
+        migration_id = CC::CCHelper.create_key(asset, global: true)
+        @c2.wiki_pages.create!(title: "My Page", migration_id:)
+        admin_logged_in(@account)
+
+        get "courses_api", params: { account_id: @account.id, copied_asset: "page_#{asset.id}" }
+        expect(response.body).to match(/"name":"copied course"/)
+      end
+
+      it "is able to filter courses by a copied assignment" do
+        @c1 = course_factory(account: @account, course_name: "source course")
+        asset = @c1.assignments.create!(title: "My Asset")
+        @c2 = course_factory(account: @account, course_name: "copied course")
+        migration_id = CC::CCHelper.create_key(asset, global: true)
+        @c2.assignments.create!(title: "My Page", migration_id:)
+        admin_logged_in(@account)
+
+        get "courses_api", params: { account_id: @account.id, copied_asset: "assignment_#{asset.id}" }
+        expect(response.body).to match(/"name":"copied course"/)
+      end
+
+      it "is able to filter courses by a copied external tool" do
+        @c1 = course_factory(account: @account, course_name: "source course")
+        asset = @c1.context_external_tools.create!(name: "a", url: "http://www.google.com", consumer_key: "12345", shared_secret: "secret")
+        @c2 = course_factory(account: @account, course_name: "copied course")
+        migration_id = CC::CCHelper.create_key(asset, global: true)
+        @c2.context_external_tools.create!(name: "a", url: "http://www.google.com", consumer_key: "12345", shared_secret: "secret", migration_id:)
+        admin_logged_in(@account)
+
+        get "courses_api", params: { account_id: @account.id, copied_asset: "external_tool_#{asset.id}" }
+        expect(response.body).to match(/"name":"copied course"/)
+      end
+
+      it "is able to filter courses by a copied attachment" do
+        @c1 = course_factory(account: @account, course_name: "source course")
+        asset = @c1.attachments.create!(filename: "coolpdf.pdf", uploaded_data: StringIO.new("test"))
+        @c2 = course_factory(account: @account, course_name: "copied course")
+        migration_id = CC::CCHelper.create_key(asset, global: true)
+        @c2.attachments.create!(filename: "coolpdf.pdf", uploaded_data: StringIO.new("test"), migration_id:)
+        admin_logged_in(@account)
+
+        get "courses_api", params: { account_id: @account.id, copied_asset: "file_#{asset.id}" }
+        expect(response.body).to match(/"name":"copied course"/)
+      end
+    end
   end
 
   describe "#eportfolio_moderation" do
@@ -2044,21 +2415,7 @@ describe AccountsController do
       expect(accounts[2]["name"]).to eq "Account 2"
     end
 
-    it "does not include accounts where admin doesn't have manage_courses or create_courses permissions" do
-      Account.default.disable_feature!(:granular_permissions_manage_courses)
-      account3 = Account.create!(name: "Account 3", root_account: Account.default)
-      account_admin_user_with_role_changes(account: account3, user: @admin1, role_changes: { manage_courses: false, create_courses: false })
-      user_session @admin1
-      get "manageable_accounts"
-      accounts = json_parse(response.body)
-      expect(accounts.length).to be 3
-      accounts.each do |a|
-        expect(a["name"]).not_to eq "Account 3"
-      end
-    end
-
-    it "does not include accounts where admin doesn't have manage_courses_admin or create_courses permissions (granular permissions)" do
-      Account.default.enable_feature!(:granular_permissions_manage_courses)
+    it "does not include accounts where admin doesn't have manage_courses_admin or create_courses permissions" do
       account3 = Account.create!(name: "Account 3", root_account: Account.default)
       account_admin_user_with_role_changes(
         account: account3,
@@ -2181,6 +2538,37 @@ describe AccountsController do
         expect(response).to be_successful
         expect(json_parse(response.body).pluck("name")).to match_array(["Default Account", "Manually-Created Courses"])
       end
+
+      context "enhanced_course_creation_account_fetching enabled" do
+        before :once do
+          @user = user_factory(active_all: true)
+          Account.site_admin.enable_feature!(:enhanced_course_creation_account_fetching)
+        end
+
+        it "adminable flag is returned for accounts where the user has manage_courses_admin permission" do
+          # sub account admin with creation rights
+          Account.create!(name: "Sub Account", parent_account: Account.default).account_users.create!(user: @user)
+
+          Account.create!(name: "Teacher Creator #2").update(settings: { teachers_can_create_courses: true, students_can_create_courses: true })
+          course_with_teacher(user: @user, active_all: true, account: Account.last)
+
+          Account.create!(name: "Teacher Creator #3").update(settings: { teachers_can_create_courses: true, students_can_create_courses: true })
+          course_with_teacher(user: @user, active_all: true, account: Account.last)
+
+          user_session @user
+          get "course_creation_accounts"
+          expect(response).to be_successful
+          accounts = json_parse(response.body)
+
+          adminable_account = accounts.find { |a| a["name"] == "Sub Account" }
+          expect(adminable_account["adminable"]).to be true
+
+          not_adminable_account = accounts.filter { |a| a["name"] != "Sub Account" }
+          not_adminable_account.each do |account|
+            expect(account["adminable"]).to be false
+          end
+        end
+      end
     end
   end
 
@@ -2217,12 +2605,12 @@ describe AccountsController do
     end
 
     it "emits account_calendars.settings.visit to statsd" do
-      allow(InstStatsd::Statsd).to receive(:increment)
+      allow(InstStatsd::Statsd).to receive(:distributed_increment)
       account_admin_user(account: @account)
       user_session(@user)
       get "account_calendar_settings", params: { account_id: @account.id }
 
-      expect(InstStatsd::Statsd).to have_received(:increment).once.with("account_calendars.settings.visit")
+      expect(InstStatsd::Statsd).to have_received(:distributed_increment).once.with("account_calendars.settings.visit")
     end
   end
 end

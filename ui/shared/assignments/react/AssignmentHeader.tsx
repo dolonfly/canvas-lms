@@ -35,15 +35,11 @@ import ItemAssignToTray from '@canvas/context-modules/differentiated-modules/rea
 import OptionsMenu from './OptionsMenu'
 import {type Breakpoints} from '@canvas/with-breakpoints'
 import type {TeacherAssignmentType} from '../graphql/teacher/AssignmentTeacherTypes'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
+import {ASSIGNMENT_VIEW_TYPES} from './AssignmentTypes'
+import SubmissionGradingProgress from './SubmissionGradingProgress'
 
-const I18n = useI18nScope('assignment_teacher_header')
-
-export const ASSIGNMENT_VIEW_TYPES = {
-  SAVED: 'saved',
-  EDIT: 'edit',
-  CREATE: 'create',
-}
+const I18n = createI18nScope('assignment_teacher_header')
 
 interface HeaderProps {
   type: string
@@ -73,8 +69,8 @@ const AssignmentHeader: React.FC<HeaderProps> = ({type, assignment, breakpoints}
             {type === ASSIGNMENT_VIEW_TYPES.EDIT
               ? I18n.t('Edit Assignment')
               : type === ASSIGNMENT_VIEW_TYPES.CREATE
-              ? I18n.t('Create Assignment')
-              : assignment.name}
+                ? I18n.t('Create Assignment')
+                : assignment.name}
           </Heading>
           <Flex id="submission-status">
             {isSavedView && assignment.hasSubmittedSubmissions && (
@@ -91,6 +87,14 @@ const AssignmentHeader: React.FC<HeaderProps> = ({type, assignment, breakpoints}
               </Pill>
             )}
           </Flex>
+          {isSavedView && (
+            <View data-testid="submission-grading-progress" margin="x-small none" tabIndex={0}>
+              <SubmissionGradingProgress
+                totalSubmissions={assignment.totalSubmissions || 0}
+                totalGradedSubmissions={assignment.totalGradedSubmissions || 0}
+              />
+            </View>
+          )}
         </Flex>
         <View
           display={isMobile ? 'block' : 'flex'}
@@ -101,6 +105,7 @@ const AssignmentHeader: React.FC<HeaderProps> = ({type, assignment, breakpoints}
           {isSavedView && !assignment.hasSubmittedSubmissions && (
             <AssignmentPublishButton
               isPublished={assignment.state === 'published'}
+              // @ts-expect-error
               assignmentLid={assignment.lid}
               breakpoints={breakpoints}
             />
@@ -165,6 +170,7 @@ const AssignmentHeader: React.FC<HeaderProps> = ({type, assignment, breakpoints}
         onDismiss={() => {
           setAssignToTray(false)
           if (returnFocusTo.current) {
+            // @ts-expect-error
             returnFocusTo.current.focus()
           }
         }}
@@ -173,6 +179,7 @@ const AssignmentHeader: React.FC<HeaderProps> = ({type, assignment, breakpoints}
         locale={ENV.LOCALE || 'env'}
         timezone={ENV.TIMEZONE || 'UTC'}
         courseId={assignment.course?.lid}
+        // @ts-expect-error
         itemName={assignment.name}
         itemContentId={assignment?.lid}
         pointsPossible={assignment.pointsPossible as number}

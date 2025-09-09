@@ -39,11 +39,16 @@ export function getBaseThemeVars() {
    * used as the `fontFamily` value in the `Text` component as well as the
    * `h1FontFamily` value in the `Heading` component.
    */
+  let userFont = typography.fontFamily
+  if (!ENV.USE_CLASSIC_FONT) {
+    userFont = `"Balsamiq Sans", ${typography.fontFamily}`
+  }
+  if (ENV.use_dyslexic_font) {
+    userFont = `OpenDyslexic, ${userFont}`
+  }
   const baseFont = {
     typography: {
-      fontFamily: ENV.USE_CLASSIC_FONT
-        ? typography.fontFamily
-        : `"Balsamiq Sans", ${typography.fontFamily}`,
+      fontFamily: userFont,
     },
   }
   const base = {
@@ -91,8 +96,8 @@ export const getK5ThemeOverrides = () => {
       secondaryFontSize: '1rem',
     },
     [PlannerItem.componentId]: {
-      iconColor: colors.licorice,
-      secondaryColor: colors.licorice,
+      iconColor: colors.contrasts.grey125125,
+      secondaryColor: colors.contrasts.grey125125,
     },
     'Table.Cell': {
       padding: '1rem 0.75rem',
@@ -117,16 +122,16 @@ export const getPlannerTheme = () => {
 
   return {
     ToggleDetails: {
-      iconColor: colors.brand,
-      textColor: colors.textBrand,
+      iconColor: colors.contrasts.blue4570,
+      textColor: colors.contrasts.blue4570,
     },
   }
 }
 
-export const useK5Theme = (
+export const registerK5Theme = (
   options: {
     fontOnly?: boolean
-  } = {}
+  } = {},
 ) => {
   const {baseTheme, base, baseFont} = getBaseThemeVars()
   const fontOnly = options?.fontOnly || false

@@ -20,6 +20,7 @@ import React from 'react'
 import {render, screen, waitFor} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import IndexHeader from '../IndexHeader'
+import fakeENV from '@canvas/test-utils/fakeENV'
 
 function makeProps() {
   return {
@@ -53,7 +54,7 @@ describe('"Add Announcement" button', () => {
     expect(
       screen.getByRole('link', {
         name: /add announcement/i,
-      })
+      }),
     ).toBeInTheDocument()
   })
 
@@ -64,7 +65,7 @@ describe('"Add Announcement" button', () => {
     expect(
       screen.queryByRole('link', {
         name: /add announcement/i,
-      })
+      }),
     ).not.toBeInTheDocument()
   })
 })
@@ -82,13 +83,25 @@ describe('searching announcements', () => {
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
           term: 'foo',
-        })
+        }),
       )
     })
   })
 })
 
 describe('"Announcement Filter" select', () => {
+  beforeEach(() => {
+    fakeENV.setup({
+      FEATURES: {
+        instui_nav: false,
+      },
+    })
+  })
+
+  afterEach(() => {
+    fakeENV.teardown()
+  })
+
   test('includes two options in the filter select component', async () => {
     const props = makeProps()
     render(<IndexHeader {...props} />)
@@ -97,8 +110,30 @@ describe('"Announcement Filter" select', () => {
 
     await userEvent.click(filterDDown)
 
-    expect(screen.getByText('All')).toBeInTheDocument()
-    expect(screen.getByText('Unread')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('All')).toBeInTheDocument()
+      expect(screen.getByText('Unread')).toBeInTheDocument()
+    })
+  })
+
+  test('includes two options in the filter select component with instui_nav enabled', async () => {
+    fakeENV.setup({
+      FEATURES: {
+        instui_nav: true,
+      },
+    })
+
+    const props = makeProps()
+    render(<IndexHeader {...props} />)
+
+    const filterButton = screen.getByRole('button', {name: 'Announcement Filter'})
+
+    await userEvent.click(filterButton)
+
+    await waitFor(() => {
+      expect(screen.getByText('All Announcements')).toBeInTheDocument()
+      expect(screen.getByText('Unread Announcements')).toBeInTheDocument()
+    })
   })
 
   test('calls the searchAnnouncements prop when selecting a filter option with the selected value', async () => {
@@ -117,7 +152,7 @@ describe('"Announcement Filter" select', () => {
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
           filter: 'unread',
-        })
+        }),
       )
     })
   })
@@ -211,7 +246,7 @@ describe('"Delete Selected Announcements" button', () => {
     expect(
       screen.getByRole('heading', {
         name: /confirm delete/i,
-      })
+      }),
     ).toBeInTheDocument()
   })
 })

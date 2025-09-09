@@ -16,12 +16,11 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
-  bundler (~> 2.2)
   canvas_color!
   rake
 
 RUBY VERSION
-   ruby 3.3.3p89
+   ruby 3.4.1p0
 
 BUNDLED WITH
-   2.5.10
+   2.6.7

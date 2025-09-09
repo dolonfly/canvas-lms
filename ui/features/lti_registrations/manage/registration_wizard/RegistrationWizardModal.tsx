@@ -15,9 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import React from 'react'
+import React, {useCallback} from 'react'
+import {Alert} from '@instructure/ui-alerts'
 import {Modal} from '@instructure/ui-modal'
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import {RadioInput, RadioInputGroup} from '@instructure/ui-radio-input'
 import {
   useRegistrationModalWizardState,
@@ -27,12 +28,11 @@ import {
 } from './RegistrationWizardModalState'
 import {SimpleSelect} from '@instructure/ui-simple-select'
 import {TextInput} from '@instructure/ui-text-input'
-import {Button, CloseButton} from '@instructure/ui-buttons'
+import {Button} from '@instructure/ui-buttons'
 import {View} from '@instructure/ui-view'
-import {Heading} from '@instructure/ui-heading'
-import {ProgressBar} from '@instructure/ui-progress'
+import {Text} from '@instructure/ui-text'
 import {DynamicRegistrationWizard} from '../dynamic_registration_wizard/DynamicRegistrationWizard'
-import {type AccountId} from '../model/AccountId'
+import type {AccountId} from '../model/AccountId'
 import type {DynamicRegistrationWizardService} from '../dynamic_registration_wizard/DynamicRegistrationWizardService'
 import {isValidHttpUrl} from '../../common/lib/validators/isValidHttpUrl'
 import {RegistrationModalBody} from './RegistrationModalBody'
@@ -45,8 +45,11 @@ import {TextArea} from '@instructure/ui-text-area'
 import {isValidJson} from '../../common/lib/validators/isValidJson'
 import type {FormMessage} from '@instructure/ui-form-field'
 import type {Lti1p3RegistrationWizardService} from '../lti_1p3_registration_form/Lti1p3RegistrationWizardService'
+import {EditLti1p3RegistrationWizard} from '../lti_1p3_registration_form/EditLti1p3RegistrationWizard'
+import {ResponsiveWrapper} from '../registration_wizard_forms/ResponsiveWrapper'
+import {Header} from '../registration_wizard_forms/Header'
 
-const I18n = useI18nScope('lti_registrations')
+const I18n = createI18nScope('lti_registrations')
 
 export const MODAL_BODY_HEIGHT = '50vh'
 
@@ -69,42 +72,45 @@ export type RegistrationWizardModalProps = {
 export const RegistrationWizardModal = (props: RegistrationWizardModalProps) => {
   const state = useRegistrationModalWizardState(s => s)
 
-  const label = state.ltiImsRegistrationId ? I18n.t('Edit App') : I18n.t('Install App')
+  const label = state.existingRegistrationId ? I18n.t('Edit App') : I18n.t('Install App')
+
+  /**
+   * Handles the dismissal of the modal.
+   * @returns Returns true if the user wants to close the modal, false otherwise
+   */
+  const onDismiss = useCallback(() => {
+    const confirmationMessage = state.existingRegistrationId
+      ? I18n.t('Are you sure you want to stop editing? Any changes will be lost.')
+      : I18n.t('Are you sure you want to stop registering? Any progress will be lost.')
+
+    const shouldClose = !state.registering || window.confirm(confirmationMessage)
+    if (shouldClose) {
+      state.close()
+    }
+    return shouldClose
+  }, [state])
 
   return (
-    <Modal label={label} open={state.open} size="medium">
-      <Modal.Header>
-        <CloseButton
-          placement="end"
-          offset="medium"
-          onClick={state.close}
-          screenReaderLabel={I18n.t('Close')}
-        />
-        <Heading>{label}</Heading>
-      </Modal.Header>
-      {!state.registering ? (
-        <ProgressBar
-          meterColor="info"
-          shouldAnimate={true}
-          size="x-small"
-          screenReaderLabel={I18n.t('Installation Progress')}
-          valueNow={0}
-          valueMax={100}
-          themeOverride={{
-            trackBottomBorderWidth: '0',
-          }}
-          margin="0 0 small"
-        />
-      ) : null}
-
-      <ModalBodyWrapper
-        state={state}
-        accountId={props.accountId}
-        dynamicRegistrationWizardService={props.dynamicRegistrationWizardService}
-        lti1p3RegistrationWizardService={props.lti1p3RegistrationWizardService}
-        jsonUrlWizardService={props.jsonUrlWizardService}
-      />
-    </Modal>
+    <ResponsiveWrapper
+      render={modalProps => (
+        <Modal
+          id="registration-wizard-modal"
+          label={label}
+          open={state.open}
+          size={modalProps?.size || 'medium'}
+          onDismiss={onDismiss}
+        >
+          <ModalBodyWrapper
+            state={state}
+            accountId={props.accountId}
+            dynamicRegistrationWizardService={props.dynamicRegistrationWizardService}
+            lti1p3RegistrationWizardService={props.lti1p3RegistrationWizardService}
+            jsonUrlWizardService={props.jsonUrlWizardService}
+            onDismiss={onDismiss}
+          />
+        </Modal>
+      )}
+    />
   )
 }
 
@@ -114,12 +120,14 @@ const ModalBodyWrapper = ({
   dynamicRegistrationWizardService,
   lti1p3RegistrationWizardService,
   jsonUrlWizardService,
+  onDismiss,
 }: {
   state: RegistrationWizardModalState & RegistrationWizardModalStateActions
   accountId: AccountId
   dynamicRegistrationWizardService: DynamicRegistrationWizardService
   lti1p3RegistrationWizardService: Lti1p3RegistrationWizardService
   jsonUrlWizardService: JsonUrlWizardService
+  onDismiss: () => boolean
 }) => {
   if (state.registering) {
     if (
@@ -137,7 +145,7 @@ const ModalBodyWrapper = ({
             state.close()
             state.onSuccessfulInstallation?.()
           }}
-          unregister={state.unregister}
+          onDismiss={onDismiss}
         />
       )
     } else if (state.method === 'dynamic_registration') {
@@ -147,17 +155,31 @@ const ModalBodyWrapper = ({
           dynamicRegistrationUrl={state.dynamicRegistrationUrl}
           accountId={accountId}
           unifiedToolId={state.unifiedToolId}
-          unregister={state.unregister}
-          registrationId={state.ltiImsRegistrationId}
+          onDismiss={onDismiss}
+          registrationId={state.existingRegistrationId}
           onSuccessfulRegistration={() => {
             state.close()
             showFlashSuccess(
-              state.ltiImsRegistrationId
+              state.existingRegistrationId
                 ? I18n.t('App updated successfully!')
-                : I18n.t('App installed successfully!')
+                : I18n.t('App installed successfully!'),
             )()
             state.onSuccessfulInstallation?.()
           }}
+        />
+      )
+    } else if (state.method === 'manual' && state.existingRegistrationId) {
+      return (
+        <EditLti1p3RegistrationWizard
+          accountId={accountId}
+          onSuccessfulRegistration={() => {
+            state.close()
+            state.onSuccessfulInstallation?.()
+          }}
+          registrationId={state.existingRegistrationId}
+          service={lti1p3RegistrationWizardService}
+          onDismiss={onDismiss}
+          unifiedToolId={state.unifiedToolId}
         />
       )
     } else if (state.method === 'manual') {
@@ -166,6 +188,8 @@ const ModalBodyWrapper = ({
           accountId={accountId}
           service={lti1p3RegistrationWizardService}
           internalConfiguration={{
+            description: '',
+            launch_settings: {},
             title: state.manualAppName.trim(),
             target_link_uri: '',
             scopes: [],
@@ -177,12 +201,12 @@ const ModalBodyWrapper = ({
             state.close()
             state.onSuccessfulInstallation?.()
           }}
-          unregister={state.unregister}
+          onDismiss={onDismiss}
         />
       )
     } else {
       return (
-        <InitializationModalBody
+        <InitializationModal
           state={state}
           accountId={accountId}
           jsonUrlWizardService={jsonUrlWizardService}
@@ -191,7 +215,7 @@ const ModalBodyWrapper = ({
     }
   } else {
     return (
-      <InitializationModalBody
+      <InitializationModal
         state={state}
         accountId={accountId}
         jsonUrlWizardService={jsonUrlWizardService}
@@ -210,13 +234,12 @@ const renderDebugMessage = (jsonUrlFetch: JsonFetchStatus) => {
   if (jsonUrlFetch._tag === 'loaded' && jsonUrlFetch.result._type === 'ApiError') {
     const result = z.object({errors: z.array(z.string())}).safeParse(jsonUrlFetch.result.body)
     if (result.success) {
-      // eslint-disable-next-line react/no-array-index-key
       return result.data.errors.map((err, i) => <div key={i}>{err}</div>)
     }
   }
 }
 
-const InitializationModalBody = (props: InitializationModalBodyProps) => {
+const InitializationModal = (props: InitializationModalBodyProps) => {
   const [debugging, setDebugging] = React.useState(false)
 
   React.useEffect(() => {
@@ -231,9 +254,28 @@ const InitializationModalBody = (props: InitializationModalBodyProps) => {
     }
   })
 
+  const blankConfigurationMessage = props.state.isInstructureTool
+    ? I18n.t(
+        'A configuration is not available for this tool. Please reach out to your CSM for more information on how to install it.',
+      )
+    : I18n.t(
+        'A configuration is not available for this tool. Please reach out to the tool provider for more information on how to install it.',
+      )
+
   return (
     <>
+      <Header onClose={props.state.close} editing={!!props.state.existingRegistrationId} />
       <RegistrationModalBody>
+        {props.state.showBlankConfigurationMessage && (
+          <Alert
+            variant="info"
+            margin="0 0 medium"
+            hasShadow={false}
+            variantScreenReaderLabel="Information, "
+          >
+            {blankConfigurationMessage}
+          </Alert>
+        )}
         <View display="block" margin="0 0 medium 0">
           <RadioInputGroup
             description={I18n.t('Select LTI Version')}
@@ -241,25 +283,24 @@ const InitializationModalBody = (props: InitializationModalBodyProps) => {
               if (value === '1p3' || value === '1p1') {
                 props.state.updateLtiVersion(value)
               } else {
-                // eslint-disable-next-line no-console
                 console.warn(`Invalid value for lti_version: ${value}`)
               }
             }}
-            name="example1"
-            defaultValue="1p3"
+            name="LTI Version"
+            defaultValue={props.state.lti_version || '1p3'}
           >
-            <RadioInput value="1p3" label="1.3" />
-            <RadioInput value="1p1" label="1.1" data-heap="lti-registration-1p1-interest" />
+            <RadioInput value="1p3" label="1.3" data-pendo="lti-registration-1p3-install" />
+            <RadioInput value="1p1" label="1.1" data-pendo="lti-registration-1p1-interest" />
           </RadioInputGroup>
         </View>
         {props.state.lti_version === '1p3' && (
           <>
             <View display="block" margin="medium 0">
               <SimpleSelect
+                id="lti-registration-install-method-selector"
                 renderLabel={I18n.t('Install Method')}
                 assistiveText="Use arrow keys to navigate options."
                 value={props.state.method}
-                disabled={!window.ENV.FEATURES.lti_registrations_next}
                 onChange={(_e, {value}) => {
                   if (value === 'dynamic_registration') {
                     props.state.updateMethod('dynamic_registration')
@@ -277,23 +318,17 @@ const InitializationModalBody = (props: InitializationModalBodyProps) => {
                 <SimpleSelect.Option id="dynamic_registration" value="dynamic_registration">
                   {I18n.t('Dynamic Registration')}
                 </SimpleSelect.Option>
-                {window.ENV.FEATURES.lti_registrations_next && (
-                  <SimpleSelect.Option id="json_url" value="json_url">
-                    {I18n.t('Enter URL')}
-                  </SimpleSelect.Option>
-                )}
+                <SimpleSelect.Option id="json_url" value="json_url">
+                  {I18n.t('Enter URL')}
+                </SimpleSelect.Option>
 
-                {window.ENV.FEATURES.lti_registrations_next && (
-                  <SimpleSelect.Option id="json" value="json">
-                    {I18n.t('JSON')}
-                  </SimpleSelect.Option>
-                )}
+                <SimpleSelect.Option id="json" value="json">
+                  {I18n.t('JSON')}
+                </SimpleSelect.Option>
 
-                {window.ENV.FEATURES.lti_registrations_next && (
-                  <SimpleSelect.Option id="manual" value="manual">
-                    {I18n.t('Manual')}
-                  </SimpleSelect.Option>
-                )}
+                <SimpleSelect.Option id="manual" value="manual">
+                  {I18n.t('Manual')}
+                </SimpleSelect.Option>
               </SimpleSelect>
             </View>
             {props.state.method === 'dynamic_registration' && (
@@ -347,6 +382,23 @@ const InitializationModalBody = (props: InitializationModalBodyProps) => {
             {debugging && renderDebugMessage(props.state.jsonFetch)}
           </>
         )}
+        {props.state.lti_version === '1p1' && (
+          <View display="block" margin="medium 0" padding="small" background="secondary">
+            <Text
+              dangerouslySetInnerHTML={{
+                __html: I18n.t(
+                  'Thank you for your interest in 1.1. We are exploring the possibility of enabling 1.1 installs from the new apps page in future releases. For now, you can install 1.1 tools from the *%{legacyAppPage}*.',
+                  {
+                    legacyAppPage: 'legacy apps page',
+                    wrappers: [
+                      `<a href=/accounts/${props.accountId}/settings/configurations#tab-tools>$1</a>`,
+                    ],
+                  },
+                ),
+              }}
+            />
+          </View>
+        )}
       </RegistrationModalBody>
 
       <Modal.Footer>
@@ -366,7 +418,7 @@ const InitializationModalBody = (props: InitializationModalBodyProps) => {
                       lti_configuration: JSON.parse(props.state.jsonCode),
                     }
                   : {url: props.state.jsonUrl}
-              // eslint-disable-next-line promise/catch-or-return
+
               props.jsonUrlWizardService
                 .fetchThirdPartyToolConfiguration(body, props.accountId)
                 .then(result => {
@@ -406,11 +458,11 @@ const validForm = (state: RegistrationWizardModalState) => {
 }
 
 const dynamicRegistrationUrlInputMessages = (
-  state: RegistrationWizardModalState
+  state: RegistrationWizardModalState,
 ): Array<FormMessage> => {
   const defaultMessage: FormMessage = {
     text: I18n.t(
-      'You can locate this URL on the integration page of the tool if it supports this method'
+      'You can locate this URL on the integration page of the tool if it supports this method',
     ),
     type: 'hint',
   }
@@ -435,7 +487,7 @@ const jsonUrlInputMessages = (state: RegistrationWizardModalState): Array<FormMe
       ? [
           {
             text: I18n.t(
-              'You can locate this URL on the integration page of the tool if it supports this method'
+              'You can locate this URL on the integration page of the tool if it supports this method',
             ),
             type: 'hint',
           } as const,
@@ -482,11 +534,12 @@ const jsonFetchMessages = (state: RegistrationWizardModalState): Array<FormMessa
      */
     const configurationError =
       errorType === 'InvalidJson' || (errorType === 'ApiError' && jsonFetch.result.status === 422)
+
     return [
       {
         text: configurationError
           ? I18n.t(
-              'The configuration is invalid. Please reach out to the app provider for assistance.'
+              'The configuration is invalid. Please reach out to the app provider for assistance.',
             )
           : I18n.t('An error occurred. Please try again.'),
         type: 'error',

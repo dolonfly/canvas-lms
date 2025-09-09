@@ -35,7 +35,11 @@ export const ZInternalBaseLaunchSettings = z.object({
   launch_width: z.number().optional(),
   icon_url: z.string().optional(),
   canvas_icon_class: z.string().optional(),
-  required_permissions: z.array(z.string()).optional(),
+  /**
+   * A comma separated list of permissions that are required for the tool to be launched
+   * from this placement.
+   */
+  required_permissions: z.string().optional(),
   windowTarget: z.literal('_blank').optional(),
   display_type: ZLtiDisplayType.optional(),
   url: z.string().optional(),
@@ -51,6 +55,13 @@ export const ZInternalBaseLaunchSettings = z.object({
   default: z.enum(['disabled', 'enabled']).optional(),
   accept_media_types: z.string().optional().nullable(),
   use_tray: z.boolean().optional().nullable(),
+  eula: z
+    .object({
+      enabled: z.boolean(),
+      target_link_uri: z.string().optional(),
+      custom_fields: z.record(z.string()).optional(),
+    })
+    .optional(),
 })
 
 export interface InternalBaseLaunchSettings extends z.infer<typeof ZInternalBaseLaunchSettings> {}

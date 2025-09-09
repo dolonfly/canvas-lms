@@ -63,6 +63,20 @@ module Types
       )
     end
 
+    field :indent, Integer, null: true
+    delegate :indent, to: :object
+
+    field :new_tab, Boolean, null: true
+    delegate :new_tab, to: :object
+
+    field :published, Boolean, null: true
+    def published
+      object.published?
+    end
+
+    field :title, String, null: true
+    delegate :title, to: :object
+
     field :next, Types::ModuleItemType, null: true, resolver_method: :next_resolver
     def next_resolver
       Loaders::AssociationLoader.for(ContentTag, :context).load(content_tag).then do |context|
@@ -88,7 +102,7 @@ module Types
           next nil if index.nil?
           next [] if index == visible_tag_ids.size - 1
 
-          previous_ids = visible_tag_ids[index + 1..]
+          previous_ids = visible_tag_ids[(index + 1)..]
           previous_ids.map { |id| Loaders::IDLoader.for(ContentTag).load(id) }
         end
       end
@@ -125,6 +139,9 @@ module Types
       end
     end
 
+    field :position, Integer, null: true
+    delegate :position, to: :object
+
     field :content, Interfaces::ModuleItemInterface, null: true
     def content
       # External Urls don't have a seperate content_id, and external tools don't
@@ -135,6 +152,18 @@ module Types
       else
         Loaders::AssociationLoader.for(ContentTag, :content).load(content_tag)
       end
+    end
+
+    field :estimated_duration, GraphQL::Types::ISO8601Duration, null: true
+    def estimated_duration
+      Loaders::AssociationLoader.for(ContentTag, :estimated_duration).load(content_tag).then do |estimated_duration|
+        estimated_duration&.duration&.iso8601
+      end
+    end
+
+    field :master_course_restrictions, Types::ModuleItemMasterCourseRestrictionType, null: true, description: "Restrictions from master courses for this module item", camelize: true
+    def master_course_restrictions
+      Loaders::ModuleItemMasterCourseRestrictionsLoader.for(current_user).load(content_tag)
     end
   end
 end

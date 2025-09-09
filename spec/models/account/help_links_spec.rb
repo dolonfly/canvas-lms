@@ -22,10 +22,6 @@ describe Account::HelpLinks do
   let(:account) { Account.create! }
   let(:subject) { Account::HelpLinks.new(account) }
 
-  before do
-    Account.site_admin.enable_feature! :featured_help_links
-  end
-
   describe ".instantiate_links" do
     it "calls procs" do
       links = [{ text: -> { "abc" } }]
@@ -118,15 +114,13 @@ describe Account::HelpLinks do
     end
   end
 
-  describe "with featured_help_links disabled" do
-    it "does not return featured_help_links fields" do
-      Account.site_admin.disable_feature! :featured_help_links
-      links = account.help_links
-      links.each do |link|
-        expect(link).not_to have_key(:is_featured)
-        expect(link).not_to have_key(:is_new)
-        expect(link).not_to have_key(:feature_headline)
-      end
+  describe "#default_links" do
+    it "includes ada chatbot link when feature flag is enabled" do
+      account.root_account.enable_feature!(:ada_chatbot)
+      default_links = subject.default_links(false)
+      ada_link = default_links.find { |link| link[:id] == :ada_chatbot }
+      expect(ada_link).to be_present
+      expect(ada_link[:url]).to eq("#ada_chatbot")
     end
   end
 end

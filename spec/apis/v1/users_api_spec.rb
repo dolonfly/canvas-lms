@@ -398,6 +398,11 @@ describe Api::V1::User do
       expect(@test_api.user_json(@student, @admin, {}, ["uuid"], @course)).to have_key("past_uuid")
     end
 
+    it "includes the user's account UUID when requested" do
+      expect(@test_api.user_json(@student, @admin, {}, [], @course)).not_to have_key("account_uuid")
+      expect(@test_api.user_json(@student, @admin, {}, ["uuid"], @course)).to have_key("account_uuid")
+    end
+
     it "outputs last_login in json with includes params present" do
       expect(@test_api.user_json(@student, @admin, {}, [], @course)).not_to have_key("last_login")
       expect(@test_api.user_json(@student, @admin, {}, ["last_login"], @course)).to have_key("last_login")
@@ -759,7 +764,7 @@ describe "Users API", type: :request do
                  action: "profile_pics",
                  user_id: @admin.to_param,
                  format: "json")
-    assert_status(401)
+    assert_forbidden
   end
 
   describe "page view api" do
@@ -966,6 +971,39 @@ describe "Users API", type: :request do
                  { expected_status: 404 })
       end
 
+      context "with include of confirmation_url" do
+        before do
+          c = CommunicationChannel.create!(user: @other_user, path_type: "email", path: "example@example.com")
+          c.save!
+          p = @other_user.pseudonyms.first
+          p.communication_channel = c
+          p.save!
+        end
+
+        it "returns confirmation_url when included" do
+          json = api_call(:get,
+                          "/api/v1/users/#{@other_user.id}",
+                          { controller: "users", action: "api_show", id: @other_user.id.to_param, format: "json", include: "confirmation_url" },
+                          {},
+                          {},
+                          {})
+
+          expect(json).to have_key("confirmation_url")
+        end
+
+        it "requires :manager_user_login to include confirmation_url" do
+          account_admin_user_with_role_changes(role_changes: { manage_user_logins: false })
+          json = api_call(:get,
+                          "/api/v1/users/#{@other_user.id}",
+                          { controller: "users", action: "api_show", id: @other_user.id.to_param, format: "json", include: "confirmation_url" },
+                          {},
+                          {},
+                          {})
+
+          expect(json).not_to have_key("confirmation_url")
+        end
+      end
+
       it "404s on a deleted user" do
         @other_user.destroy
         account_admin_user
@@ -1099,11 +1137,41 @@ describe "Users API", type: :request do
       expect(api_call(:get, "/api/v1/accounts/#{@account.id}/users?per_page=2", controller: "users", action: "api_index", account_id: @account.id.to_param, format: "json", per_page: "2").size).to eq 1
     end
 
-    it "returns unauthorized for users without permissions" do
+    it "returns forbidden for users without permissions" do
       @account = @student.account
       @user    = @student
       raw_api_call(:get, "/api/v1/accounts/#{@account.id}/users", controller: "users", action: "api_index", account_id: @account.id.to_param, format: "json")
-      expect(response).to have_http_status :unauthorized
+      expect(response).to have_http_status :forbidden
+    end
+
+    it "does not show deleted users" do
+      @account = Account.default
+      course_with_teacher(active_all: 1, user: user_with_pseudonym(user: user_factory(name: "deleted teacher")))
+      account_admin_user(active_all: true)
+      user_session(@admin)
+      @teacher.remove_from_root_account(Account.default)
+
+      raw_api_call(:get, "/api/v1/accounts/#{@account.id}/users", controller: "users", action: "api_index", account_id: @account.id.to_param, format: "json")
+      expect(JSON.parse(response.body).pluck("name")).not_to include "deleted teacher"
+
+      raw_api_call(:get, "/api/v1/accounts/#{@account.id}/users", controller: "users", action: "api_index", account_id: @account.id.to_param, format: "json", search_term: "deleted")
+      expect(JSON.parse(response.body).pluck("name")).not_to include "deleted teacher"
+      expect(JSON.parse(response.body).length).to be 0
+    end
+
+    it "shows deleted users if the include_deleted_users flag is set" do
+      @account = Account.default
+      course_with_teacher(active_all: 1, user: user_with_pseudonym(user: user_factory(name: "deleted teacher")))
+      account_admin_user(active_all: true)
+      user_session(@admin)
+      @teacher.remove_from_root_account(Account.default)
+
+      raw_api_call(:get, "/api/v1/accounts/#{@account.id}/users", controller: "users", action: "api_index", account_id: @account.id.to_param, format: "json", include_deleted_users: true)
+      expect(JSON.parse(response.body).pluck("name")).to include "deleted teacher"
+
+      raw_api_call(:get, "/api/v1/accounts/#{@account.id}/users", controller: "users", action: "api_index", account_id: @account.id.to_param, format: "json", include_deleted_users: true, search_term: "deleted")
+      expect(JSON.parse(response.body).pluck("name")).to include "deleted teacher"
+      expect(JSON.parse(response.body).length).to be 1
     end
 
     it "returns an error when search_term is fewer than 2 characters" do
@@ -1174,6 +1242,40 @@ describe "Users API", type: :request do
                       { role_filter_id: student_role.id.to_s, sort: "email" })
 
       expect(json.pluck("id")).to eq [@student.id]
+    end
+
+    context "uuid filter" do
+      before :once do
+        @account = Account.default
+        @user1 = User.create!(name: "User 1")
+        @user1.pseudonyms.create!(unique_id: "useruuid1", account: @account) { |p| p.sis_user_id = "user1" }
+        @user2 = User.create!(name: "User 2")
+        @user2.pseudonyms.create!(unique_id: "useruuid2", account: @account) { |p| p.sis_user_id = "user2" }
+        @user3 = User.create!(name: "User 3")
+        @user3.pseudonyms.create!(unique_id: "useruuid3", account: @account) { |p| p.sis_user_id = "user3" }
+      end
+
+      it "correctly filters by user uuids" do
+        json = api_call(:get,
+                        "/api/v1/accounts/#{@account.id}/users",
+                        { controller: "users", action: "api_index", format: "json", account_id: @account.id.to_param },
+                        { uuids: [@user1.uuid, @user2.uuid] })
+
+        expect(json.count).to eq 2
+        expect(json.pluck("id")).to match_array([@user1.id, @user2.id])
+      end
+
+      it "returns an error when uuids param is bigger than MAX_UUIDS_IN_FILTER" do
+        max_uuids = 2
+        stub_const("UsersController::MAX_UUIDS_IN_FILTER", max_uuids)
+        json = api_call(:get,
+                        "/api/v1/accounts/#{@account.id}/users",
+                        { controller: "users", action: "api_index", format: "json", account_id: @account.id.to_param },
+                        { uuids: [@user1.uuid, @user2.uuid, @user3.uuid] })
+
+        expect(response).to have_http_status :bad_request
+        expect(json).to eq({ "error" => "Too many UUIDs in filter. Current limit is #{max_uuids}" })
+      end
     end
 
     context "includes ui_invoked" do
@@ -1423,6 +1525,38 @@ describe "Users API", type: :request do
       expect(json.length).to eq 1
       expect(response.headers["Link"]).to_not include("rel=\"next\"")
     end
+
+    it "does bookmarked pagination when sorting by id" do
+      @account = Account.default
+      3.times { |x| user_with_pseudonym(name: "testuser #{x}") }
+      account_admin_user
+      json = api_call(:get,
+                      "/api/v1/accounts/#{@account.id}/users?search_term=testuser&sort=id&per_page=1",
+                      { controller: "users",
+                        action: "api_index",
+                        format: "json",
+                        account_id: @account.id.to_param,
+                        search_term: "testuser",
+                        per_page: "1",
+                        sort: "id" })
+      expect(json.map { |user| user["name"] }).to eq ["testuser 0"]
+
+      links = Api.parse_pagination_links(response.headers["Link"])
+      next_link = links.detect { |link| link[:rel] == "next" }
+      expect(next_link["page"]).to start_with "bookmark:"
+
+      json = api_call(:get,
+                      next_link[:uri].to_s,
+                      { controller: "users",
+                        action: "api_index",
+                        format: "json",
+                        account_id: @account.id.to_param,
+                        search_term: "testuser",
+                        per_page: "1",
+                        sort: "id",
+                        page: next_link["page"] })
+      expect(json.map { |user| user["name"] }).to eq ["testuser 1"]
+    end
   end
 
   describe "user account creation" do
@@ -1515,7 +1649,8 @@ describe "Users API", type: :request do
                                "sis_user_id" => nil,
                                "login_id" => "bademail@",
                                "locale" => nil,
-                               "uuid" => user.uuid
+                               "uuid" => user.uuid,
+                               "account_uuid" => user.account.uuid
                              })
         end
       end
@@ -1550,7 +1685,7 @@ describe "Users API", type: :request do
         communication_channel = user.communication_channels.email.first
         expect(communication_channel).not_to be_nil
         # create presenter with a mock request
-        request = instance_double("ActionDispatch::Request", host_with_port: "example.com")
+        request = instance_double(ActionDispatch::Request, host_with_port: "example.com")
         presenter = CommunicationChannelPresenter.new(communication_channel, request)
 
         expect(user.name).to eql "Test User"
@@ -1576,7 +1711,8 @@ describe "Users API", type: :request do
           "integration_id" => nil,
           "locale" => "en",
           "confirmation_url" => presenter.confirmation_url,
-          "uuid" => user.uuid
+          "uuid" => user.uuid,
+          "account_uuid" => user.account.uuid
         }
         expect(JSON.parse(response.body)).to eq(expected_response)
       end
@@ -1715,6 +1851,8 @@ describe "Users API", type: :request do
           # We need to return the pseudonym here, or one is created from the api_call method,
           # or we'd need to setup more stuff in a plugin that would make this return happen without the allow method
           allow(SisPseudonym).to receive(:for).with(@user, Account.default, type: :implicit, require_sis: false).and_return(@pseudonym)
+          # this is not relevant to this spec, and confused the above stub
+          allow(Canvas::LiveEvents).to receive(:user_updated)
           api_call(:put,
                    "/api/v1/users/#{@user.id}",
                    { controller: "users", action: "update", format: "json", id: @user.id.to_s },
@@ -1775,7 +1913,7 @@ describe "Users API", type: :request do
                        user: { name: "Test User" },
                        pseudonym: { unique_id: "test@example.com" }
                      })
-        assert_status(403)
+        assert_forbidden
       end
 
       it "requires an email pseudonym" do
@@ -1892,7 +2030,7 @@ describe "Users API", type: :request do
                        user: { name: "Test User" },
                        pseudonym: { unique_id: "test@example.com" }
                      })
-        assert_status(403)
+        assert_forbidden
       end
 
       it "requires an email pseudonym" do
@@ -1996,7 +2134,7 @@ describe "Users API", type: :request do
 
     context "an admin user" do
       it "is able to update a user" do
-        birthday = Time.now
+        birthday = Time.zone.now
         json = api_call(:put, @path, @path_options, {
                           user: {
                             name: "Tobias Funke",
@@ -2164,7 +2302,7 @@ describe "Users API", type: :request do
         raw_api_call(:put, @path, @path_options, { user: { pronunciation: new_pronunciation } })
         json = JSON.parse(response.body)
 
-        expect(response).to have_http_status :unauthorized
+        expect(response).to have_http_status :forbidden
         expect(json["status"]).to eq "unauthorized"
         expect(json["errors"][0]["message"]).to eq "user not authorized to perform that action"
         expect(@student.reload.profile.pronunciation).to eq original_pronunciation
@@ -2212,7 +2350,7 @@ describe "Users API", type: :request do
         raw_api_call(:put, @path, @path_options, { user: { pronunciation: new_pronunciation } })
         json = JSON.parse(response.body)
 
-        expect(response).to have_http_status :unauthorized
+        expect(response).to have_http_status :forbidden
         expect(json["status"]).to eq "unauthorized"
         expect(json["errors"][0]["message"]).to eq "user not authorized to perform that action"
         expect(@student.reload.profile.pronunciation).to eq original_pronunciation
@@ -2388,7 +2526,7 @@ describe "Users API", type: :request do
           test_pronoun = "He/Him"
           raw_api_call(:put, @path, @path_options, { user: { pronouns: test_pronoun } })
           json = JSON.parse(response.body)
-          expect(response).to have_http_status :unauthorized
+          expect(response).to have_http_status :forbidden
           expect(json["status"]).to eq "unauthorized"
           expect(json["errors"][0]["message"]).to eq "user not authorized to perform that action"
           expect(@student.reload.pronouns).to eq original_pronoun
@@ -2422,7 +2560,7 @@ describe "Users API", type: :request do
                    @path_options.merge(id: @user.id),
                    { user: { name: "Ovaltine Jenkins" } },
                    {},
-                   { expected_status: 401 })
+                   { expected_status: 403 })
         end
       end
 
@@ -2434,7 +2572,7 @@ describe "Users API", type: :request do
                          }
                        }
                      })
-        expect(response).to have_http_status :unauthorized
+        expect(response).to have_http_status :forbidden
       end
 
       it "cannot see avatar_state" do
@@ -2489,12 +2627,12 @@ describe "Users API", type: :request do
     end
 
     context "an unauthorized user" do
-      it "receives a 401" do
+      it "receives a 403" do
         user_factory
         raw_api_call(:put, @path, @path_options, {
                        user: { name: "Gob Bluth" }
                      })
-        expect(response).to have_http_status :unauthorized
+        expect(response).to have_http_status :forbidden
       end
     end
   end
@@ -2554,10 +2692,10 @@ describe "Users API", type: :request do
         expect(json["manual_mark_as_read"]).to be_falsey
       end
 
-      it "receives 401 if updating another user's settings" do
+      it "receives 403 if updating another user's settings" do
         @course.enroll_student(user_factory).accept!
         raw_api_call(:put, path, path_options, manual_mark_as_read: true)
-        expect(response).to have_http_status :unauthorized
+        expect(response).to have_http_status :forbidden
       end
     end
   end
@@ -2695,17 +2833,17 @@ describe "Users API", type: :request do
     end
 
     context "an unauthorized user" do
-      it "receives a 401" do
+      it "receives a 403" do
         user_factory
         raw_api_call(:delete, @path, @path_options)
-        expect(response).to have_http_status :unauthorized
+        expect(response).to have_http_status :forbidden
       end
     end
 
     context "a non-admin user" do
       it "is not able to delete itself" do
         path = "/api/v1/accounts/#{Account.default.to_param}/users/#{@student.id}"
-        api_call_as_user(@student, :delete, path, @path_options.merge(user_id: @student.to_param), {}, {}, expected_status: 401)
+        api_call_as_user(@student, :delete, path, @path_options.merge(user_id: @student.to_param), {}, {}, expected_status: 403)
       end
     end
   end
@@ -2717,7 +2855,7 @@ describe "Users API", type: :request do
     let_once(:path_options) { { controller: "users", action: "expire_mobile_sessions", format: "json" } }
 
     before do
-      user.access_tokens.create!
+      user.access_tokens.create!(purpose: "Test Access Token")
     end
 
     it "allows admin to expire mobile sessions" do
@@ -2761,7 +2899,7 @@ describe "Users API", type: :request do
                { controller: "users", action: "create_file", format: "json", user_id: user2.to_param, },
                { name: "my_essay.doc" },
                {},
-               expected_status: 401)
+               expected_status: 403)
     end
 
     context "student in limited access account" do
@@ -2772,13 +2910,13 @@ describe "Users API", type: :request do
         @course.account.save!
       end
 
-      it "renders unauthorized" do
+      it "renders forbidden" do
         api_call(:post,
                  "/api/v1/users/#{@user.id}/files",
                  { controller: "users", action: "create_file", format: "json", user_id: @user.to_param, },
                  { name: "my_essay.doc" },
                  {},
-                 expected_status: 401)
+                 expected_status: 403)
       end
     end
   end
@@ -2865,7 +3003,7 @@ describe "Users API", type: :request do
           id: @user2.to_param,
           destination_user_id: @user1.to_param }
       )
-      assert_status(401)
+      assert_forbidden
     end
 
     it "fails to split users that have not been merged" do
@@ -3007,7 +3145,7 @@ describe "Users API", type: :request do
 
       it "emits user.set_custom_color to statsd" do
         course_with_student(active_all: true)
-        allow(InstStatsd::Statsd).to receive(:increment)
+        allow(InstStatsd::Statsd).to receive(:distributed_increment)
         api_call(
           :put,
           "/api/v1/users/#{@user.id}/colors/course_#{@course.id}",
@@ -3021,7 +3159,7 @@ describe "Users API", type: :request do
           {},
           { expected_status: 200 }
         )
-        expect(InstStatsd::Statsd).to have_received(:increment).once.with("user.set_custom_color", tags: %w[enrollment_type:StudentEnrollment])
+        expect(InstStatsd::Statsd).to have_received(:distributed_increment).once.with("user.set_custom_color", tags: %w[enrollment_type:StudentEnrollment])
       end
     end
 
@@ -3086,6 +3224,64 @@ describe "Users API", type: :request do
                         { expected_status: 200 })
         expect(json["custom_colors"]["course_#{@local_course.global_id}"]).to eq "#ababab"
       end
+    end
+  end
+
+  describe "files ui version preference" do
+    before do
+      @a = Account.default
+      @user = user_factory(active_all: true)
+      @a.account_users.create!(user: @user)
+    end
+
+    it "defaults to v2 if no preference has been set" do
+      expect(@user.files_ui_version).to eq "v2"
+    end
+
+    it "updates the files ui version for a user" do
+      json = api_call(
+        :put,
+        "/api/v1/users/#{@user.id}/files_ui_version_preference",
+        { controller: "users",
+          action: "set_files_ui_version_preference",
+          format: "json",
+          id: @user.to_param },
+        { files_ui_version: "v1" },
+        {},
+        { expected_status: 200 }
+      )
+      expect(json["files_ui_version"]).to eq "v1"
+      expect(@user.reload.files_ui_version).to eq "v1"
+    end
+
+    it "returns a 400 if the files ui version is invalid" do
+      json = api_call(
+        :put,
+        "/api/v1/users/#{@user.id}/files_ui_version_preference",
+        { controller: "users",
+          action: "set_files_ui_version_preference",
+          format: "json",
+          id: @user.to_param },
+        { files_ui_version: "v3" },
+        {},
+        { expected_status: 400 }
+      )
+      expect(json["message"]).to eq "Invalid files_ui_version provided"
+    end
+
+    it "returns a 400 if the files ui version is not provided" do
+      json = api_call(
+        :put,
+        "/api/v1/users/#{@user.id}/files_ui_version_preference",
+        { controller: "users",
+          action: "set_files_ui_version_preference",
+          format: "json",
+          id: @user.to_param },
+        {},
+        {},
+        { expected_status: 400 }
+      )
+      expect(json["message"]).to eq "Invalid files_ui_version provided"
     end
   end
 
@@ -3224,7 +3420,7 @@ describe "Users API", type: :request do
             }
           },
           {},
-          { expected_status: 401 }
+          { expected_status: 403 }
         )
       end
 
@@ -3566,14 +3762,14 @@ describe "Users API", type: :request do
         user_session(@observer)
       end
 
-      it "renders unauthorized if course_ids is not passed" do
+      it "renders forbidden if course_ids is not passed" do
         api_call(:get, @path, @params.merge(observed_user_id: @student.id))
-        assert_unauthorized
+        assert_forbidden
       end
 
-      it "renders unauthorized if course_ids is empty" do
+      it "renders forbidden if course_ids is empty" do
         api_call(:get, @path, @params.merge(observed_user_id: @student.id, course_ids: []))
-        assert_unauthorized
+        assert_forbidden
       end
 
       it "returns missing assignments data for observed student" do
@@ -3583,19 +3779,19 @@ describe "Users API", type: :request do
         expect(json[1]["course_id"]).to eq(@course.id)
       end
 
-      it "renders unauthorized if the observer's enrollment is deleted" do
+      it "renders forbidden if the observer's enrollment is deleted" do
         @observer.enrollments.first.destroy
         api_call(:get, @path, @params.merge(observed_user_id: @student.id, course_ids: [@course.id]))
-        assert_unauthorized
+        assert_forbidden
       end
 
-      it "renders unauthorized if the observer isn't observing the student in a passed course" do
+      it "renders forbidden if the observer isn't observing the student in a passed course" do
         course1 = @course
         course2 = course_factory(active_all: true)
         course2.enroll_student(@student, enrollment_state: "active")
         course2.enroll_user(@observer, "ObserverEnrollment")
         api_call(:get, @path, @params.merge(observed_user_id: @student.id, course_ids: [course1.id, course2.id]))
-        assert_unauthorized
+        assert_forbidden
       end
 
       it "returns missing assignments for all courses provided" do
@@ -3684,7 +3880,7 @@ describe "Users API", type: :request do
                       "/api/v1/users/self/pandata_events_token",
                       { controller: "users", action: "pandata_events_token", format: "json", id: @user.to_param },
                       { app_key: "IOS_key" })
-      assert_status(403)
+      assert_forbidden
       expect(json["message"]).to eq "Developer key not authorized"
     end
   end
@@ -3735,7 +3931,7 @@ describe "Users API", type: :request do
                          action: "user_graded_submissions",
                          format: "json"
                        })
-      assert_status(401)
+      assert_forbidden
     end
 
     it "allows a user who can :read_grades to get a users submissions" do

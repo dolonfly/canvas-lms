@@ -25,5 +25,6 @@ import {initializeTopNavPortal} from '@canvas/top-navigation/react/TopNavPortal'
 
 ready(() => {
   initializeTopNavPortal()
+
   ReactDOM.render(<WebZipExportApp />, $('#course-webzip-export-app')[0])
 })

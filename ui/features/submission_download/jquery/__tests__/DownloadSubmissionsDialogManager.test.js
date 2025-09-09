@@ -18,7 +18,6 @@
 
 import DownloadSubmissionsDialogManager from '@canvas/grading/DownloadSubmissionsDialogManager'
 import '../index'
-import sinon from 'sinon'
 
 if (!('INST' in window)) window.INST = {}
 
@@ -28,7 +27,7 @@ describe('DownloadSubmissionsDialogManager#constructor', () => {
       {
         id: 'the_id',
       },
-      'the_{{ assignment_id }}_url'
+      'the_{{ assignment_id }}_url',
     )
 
     expect(manager.downloadUrl).toBe('the_the_id_url')
@@ -42,7 +41,7 @@ describe('DownloadSubmissionsDialogManager#isDialogEnabled', () => {
         submission_types: ['online_upload'],
         has_submitted_submissions: true,
       },
-      'the_url'
+      'the_url',
     )
     expect(manager.isDialogEnabled()).toBe(true)
   })
@@ -53,7 +52,7 @@ describe('DownloadSubmissionsDialogManager#isDialogEnabled', () => {
         submission_types: ['online_text_entry'],
         has_submitted_submissions: true,
       },
-      'the_url'
+      'the_url',
     )
     expect(manager.isDialogEnabled()).toBe(true)
   })
@@ -64,7 +63,7 @@ describe('DownloadSubmissionsDialogManager#isDialogEnabled', () => {
         submission_types: ['online_url'],
         has_submitted_submissions: true,
       },
-      'the_url'
+      'the_url',
     )
     expect(manager.isDialogEnabled()).toBe(true)
   })
@@ -75,7 +74,7 @@ describe('DownloadSubmissionsDialogManager#isDialogEnabled', () => {
         submission_types: ['foo'],
         has_submitted_submissions: true,
       },
-      'the_url'
+      'the_url',
     )
     expect(manager.isDialogEnabled()).toBe(false)
   })
@@ -86,26 +85,23 @@ describe('DownloadSubmissionsDialogManager#isDialogEnabled', () => {
         submission_types: ['online_url'],
         has_submitted_submissions: false,
       },
-      '/foo/bar'
+      '/foo/bar',
     )
     expect(manager.isDialogEnabled()).toBe(false)
   })
 })
 
 describe('DownloadSubmissionsDialogManager#showDialog', () => {
-  let sandbox
-
   beforeEach(() => {
-    sandbox = sinon.createSandbox()
+    INST.downloadSubmissions = jest.fn()
   })
 
   afterEach(() => {
-    sandbox.restore()
+    delete INST.downloadSubmissions
   })
 
   it('calls submissions downloading callback and opens downloadSubmissions dialog', () => {
-    sandbox.stub(INST, 'downloadSubmissions')
-    const submissionsDownloading = sandbox.stub()
+    const submissionsDownloading = jest.fn()
     const manager = new DownloadSubmissionsDialogManager(
       {
         id: 'the_id',
@@ -113,11 +109,11 @@ describe('DownloadSubmissionsDialogManager#showDialog', () => {
         has_submitted_submissions: true,
       },
       'the_{{ assignment_id }}_url',
-      submissionsDownloading
+      submissionsDownloading,
     )
     manager.showDialog()
 
-    expect(submissionsDownloading.calledWith('the_id')).toBe(true)
-    expect(INST.downloadSubmissions.calledWith('the_the_id_url')).toBe(true)
+    expect(submissionsDownloading).toHaveBeenCalledWith('the_id')
+    expect(INST.downloadSubmissions).toHaveBeenCalledWith('the_the_id_url', undefined)
   })
 })

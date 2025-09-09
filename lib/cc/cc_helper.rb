@@ -85,6 +85,8 @@ module CC
     EVENTS = "events.xml"
     LATE_POLICY = "late_policy.xml"
     LEARNING_OUTCOMES = "learning_outcomes.xml"
+    LTI_CONTEXT_CONTROLS = "lti_context_controls.xml"
+    LTI_CONTEXT_CONTROLS_FOLDER = "lti_context_controls"
     MANIFEST = "imsmanifest.xml"
     MODULE_META = "module_meta.xml"
     COURSE_PACES = "course_paces.xml"
@@ -105,11 +107,11 @@ module CC
 
     REPLACEABLE_MEDIA_TYPES = ["audio", "video"].freeze
 
-    def ims_date(date = nil, default = Time.now)
+    def ims_date(date = nil, default = Time.zone.now)
       CCHelper.ims_date(date, default)
     end
 
-    def ims_datetime(date = nil, default = Time.now)
+    def ims_datetime(date = nil, default = Time.zone.now)
       CCHelper.ims_datetime(date, default)
     end
 
@@ -125,14 +127,14 @@ module CC
       (global ? "g" : "i") + Digest::MD5.hexdigest(prepend + key)
     end
 
-    def self.ims_date(date = nil, default = Time.now)
+    def self.ims_date(date = nil, default = Time.zone.now)
       date ||= default
       return nil unless date
 
       date.respond_to?(:utc) ? date.utc.strftime(IMS_DATE) : date.strftime(IMS_DATE)
     end
 
-    def self.ims_datetime(date = nil, default = Time.now)
+    def self.ims_datetime(date = nil, default = Time.zone.now)
       date ||= default
       return nil unless date
 
@@ -347,6 +349,17 @@ module CC
         query.sub(original_param, new_param)
       end
 
+      def json_page(block_editor, title, meta_fields = {})
+        json = {}
+        json["title"] = title
+        json["meta"] = meta_fields
+        json["block_editor"] = {
+          "blocks" => @rewriter.translate_blocks(block_editor),
+          "editor_version" => block_editor.editor_version
+        }
+        json.to_json
+      end
+
       def html_page(html, title, meta_fields = {})
         content = html_content(html)
         meta_html = ""
@@ -391,7 +404,7 @@ module CC
         html = @rewriter.translate_content(html)
         return html if html.blank?
 
-        doc = Nokogiri::HTML5.fragment(html)
+        doc = Nokogiri::HTML5.fragment(html, nil, **CanvasSanitize::SANITIZE[:parser_options])
         # keep track of found media comments, and translate them into links into the files tree
         # if imported back into canvas, they'll get uploaded to the media server
         # and translated back into media comments
@@ -502,6 +515,8 @@ module CC
     # path components and the query string
     def self.file_query_string(sub_path)
       return if sub_path.blank?
+
+      sub_path = CGI.unescapeHTML(sub_path)
 
       qs = []
       begin

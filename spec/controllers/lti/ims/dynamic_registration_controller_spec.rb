@@ -34,10 +34,6 @@ describe Lti::IMS::DynamicRegistrationController do
 
   verifier = OpenApiSpecHelper::SchemaVerifier.new(openapi_spec)
 
-  before do
-    Account.default.root_account.enable_feature! :lti_dynamic_registration
-  end
-
   after do
     verifier.verify(request, response) if response.sent?
   end
@@ -56,7 +52,8 @@ describe Lti::IMS::DynamicRegistrationController do
     let(:scopes) do
       [
         "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly",
-        "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+        "https://purl.imsglobal.org/spec/lti-ags/scope/score",
+        "https://canvas.instructure.com/lti/data_services/scope/create"
       ]
     end
 
@@ -94,6 +91,7 @@ describe Lti::IMS::DynamicRegistrationController do
           "claims" => ["iss", "sub"],
           "target_link_uri" => "https://example.com/launch",
           "https://canvas.instructure.com/lti/privacy_level" => "email_only",
+          "https://canvas.instructure.com/lti/vendor" => "Vendor",
         },
       }.merge(
         scopes ? { "scope" => scopes.join(" ") } : {}
@@ -126,6 +124,21 @@ describe Lti::IMS::DynamicRegistrationController do
         it "accepts registrations" do
           subject
           expect(response).to have_http_status(:ok)
+        end
+      end
+
+      context "with invalid scopes" do
+        subject do
+          request.headers["Authorization"] = "Bearer #{valid_token}"
+          post :create, params: { **registration_params }
+        end
+
+        let(:scopes) { ["invalid_scope"] }
+
+        it "rejects the registration" do
+          subject
+          expect(response).to have_http_status(:unprocessable_entity)
+          expect(response.body).to match(/invalid_scope/)
         end
       end
 
@@ -189,6 +202,111 @@ describe Lti::IMS::DynamicRegistrationController do
           expect(dk.is_lti_key).to be(true)
           expect(dk.icon_url).to eq("https://example.com/logo.jpg")
           expect(dk.oidc_initiation_url).to eq(registration_params["initiate_login_uri"])
+        end
+
+        it "creates an Lti::Registration with expected values" do
+          subject
+          registration = Lti::Registration.last
+          expect(registration.account.global_id).to eq(token_hash[:root_account_global_id])
+          expect(registration.workflow_state).to eq("active")
+          expect(registration.created_by.id).to eq(token_hash[:user_id])
+          expect(registration.updated_by.id).to eq(token_hash[:user_id])
+          expect(registration.admin_nickname).to eq(registration_params["client_name"])
+          expect(registration.name).to eq(registration_params["client_name"])
+          expect(registration.vendor).to eq("Vendor")
+          expect(registration.ims_registration).to eq(Lti::IMS::Registration.last)
+        end
+
+        context "with flag disabled" do
+          before do
+            Account.default.disable_feature!(:lti_registrations_next)
+          end
+
+          it "does not deploy the tool" do
+            expect { subject }.not_to change { ContextExternalTool.count }
+          end
+        end
+
+        context "with flag enabled" do
+          before do
+            Account.default.enable_feature!(:lti_registrations_next)
+          end
+
+          it "deploys the tool" do
+            expect { subject }.to change { ContextExternalTool.count }.by(1)
+          end
+
+          it "returns the tool's deployment_id" do
+            subject
+            parsed_body = response.parsed_body
+            expect(parsed_body["deployment_id"]).to eq ContextExternalTool.last.deployment_id
+          end
+
+          it "marks the tool as unavailable" do
+            subject
+            context_control = Lti::ContextControl.last
+            expect(context_control.deployment).to eq ContextExternalTool.last
+            expect(context_control.available).to be false
+          end
+        end
+
+        # Context: In production Canvas cloud, all Dynamic Registration install requests
+        # are routed through sso.canvaslms.com and we handle routing to the correct shard.
+        # This test ensures that even with that happening, we still create all the right records
+        # in all the right places.
+        context "with an installation happening across shards" do
+          specs_require_sharding
+
+          let(:token_hash) do
+            # Mimic the token being created on the user's shard, like would happen typically.
+            @shard2.activate do
+              {
+                user_id: user.id,
+                initiated_at: 1.minute.ago,
+                root_account_global_id: account.global_id,
+                uuid: SecureRandom.uuid,
+                unified_tool_id: "asdf",
+                registration_url: "https://example.com/registration",
+              }
+            end
+          end
+
+          let(:account) { @shard2.activate { account_model } }
+          let(:user) { @shard2.activate { user_model } }
+
+          it "still finds the user, even though we start the create request on the other shard" do
+            subject
+            expect(response).to be_successful
+
+            # Everything should exist on shard2
+            @shard2.activate do
+              parsed_body = response.parsed_body
+              expected_response_keys = {
+                "application_type" => registration_params["application_type"],
+                "grant_types" => registration_params["grant_types"],
+                "initiate_login_uri" => registration_params["initiate_login_uri"],
+                "redirect_uris" => registration_params["redirect_uris"],
+                "logo_uri" => registration_params["logo_uri"],
+                "response_types" => registration_params["response_types"],
+                "client_name" => registration_params["client_name"],
+                "jwks_uri" => registration_params["jwks_uri"],
+                "token_endpoint_auth_method" => registration_params["token_endpoint_auth_method"],
+                "scope" => registration_params["scope"],
+              }
+
+              expect(parsed_body).to include(expected_response_keys)
+              expect(parsed_body["client_id"]).to eq DeveloperKey.last.global_id.to_s
+              created_registration = Lti::IMS::Registration.last
+              expect(created_registration.privacy_level).to eq("email_only")
+              expect(created_registration).not_to be_nil
+              expect(parsed_body["https://purl.imsglobal.org/spec/lti-tool-configuration"]["https://canvas.instructure.com/lti/registration_config_url"]).to eq "http://test.host/api/lti/registrations/#{created_registration.global_id}/view"
+              expect(created_registration.canvas_configuration["custom_fields"]).to eq({ "global_foo" => "global_bar" })
+              expect(created_registration.unified_tool_id).to eq("asdf")
+              expect(created_registration.registration_url).to eq("https://example.com/registration")
+              expect(created_registration.lti_registration.account).to eq(account)
+              expect(created_registration.lti_registration.created_by).to eq(user)
+            end
+          end
         end
       end
 
@@ -306,10 +424,6 @@ describe Lti::IMS::DynamicRegistrationController do
     let(:account) { Account.default }
     let(:registration) { lti_ims_registration_model(account:) }
 
-    before do
-      account.enable_feature!(:lti_dynamic_registration)
-    end
-
     context "with a user session" do
       let(:user) { account_admin_user(account:) }
 
@@ -353,14 +467,6 @@ describe Lti::IMS::DynamicRegistrationController do
 
     context "without a user session" do
       it { is_expected.to be_redirect }
-    end
-
-    context "without the feature flag enabled" do
-      before do
-        account.disable_feature!(:lti_dynamic_registration)
-      end
-
-      it { is_expected.to be_not_found }
     end
   end
 
@@ -502,10 +608,50 @@ describe Lti::IMS::DynamicRegistrationController do
     end
   end
 
+  describe "#lti_registration_by_uuid" do
+    let(:admin) { account_admin_user(account: Account.default) }
+
+    it "returns a 404 if the registration cannot be found" do
+      user_session(admin)
+      get :lti_registration_by_uuid, params: { account_id: Account.default.id, registration_uuid: "123" }
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "returns an Lti::Registration with it's configuration and overlay" do
+      user_session(admin)
+      registration = lti_ims_registration_model(account: Account.default)
+      Lti::Overlay.create!(account: Account.default, registration: registration.lti_registration, data: { "description" => "test" })
+      get :lti_registration_by_uuid, params: { account_id: Account.default.id, registration_uuid: registration.guid }
+      expect(response).to be_successful
+      expect(response.parsed_body["configuration"]).to eq(registration.lti_registration.internal_lti_configuration(include_overlay: false))
+      expect(response.parsed_body["overlay"]["data"]).to eq({ "description" => "test" })
+    end
+  end
+
+  describe "#ims_registration_by_uuid" do
+    let(:admin) { account_admin_user(account: Account.default) }
+
+    it "returns a 404 if the registration cannot be found" do
+      user_session(admin)
+      get :ims_registration_by_uuid, params: { account_id: Account.default.id, registration_uuid: "123" }
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "returns an Lti::IMS::Registration with it's configuration and overlay" do
+      user_session(admin)
+      registration = lti_ims_registration_model(account: Account.default, registration_overlay: { "description" => "test" })
+      get :ims_registration_by_uuid, params: { account_id: Account.default.id, registration_uuid: registration.guid }
+      expect(response).to be_successful
+      expect(response.parsed_body["lti_tool_configuration"].with_indifferent_access).to eq(registration.lti_tool_configuration.with_indifferent_access)
+      expect(response.parsed_body["overlay"].with_indifferent_access).to eq(registration.registration_overlay.with_indifferent_access)
+    end
+  end
+
   describe "#update_registration_overlay" do
     let(:overlay) do
       {
         disabledPlacements: ["course_navigation"],
+        disabledScopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"],
         placements: [
           {
             type: "account_navigation",
@@ -514,20 +660,143 @@ describe Lti::IMS::DynamicRegistrationController do
         ]
       }
     end
+    let(:account) { Account.default }
+    let(:registration) { lti_ims_registration_model(account:) }
+    let(:user) { account_admin_user(account:) }
 
     it "updates the registration_overlay on the registration" do
-      registration = lti_ims_registration_model(account: Account.default)
-      user_session(account_admin_user(account: Account.default))
-      put :update_registration_overlay, params: { account_id: Account.default.id, registration_id: registration.id }, body: overlay.to_json
+      user_session(user)
+      put :update_registration_overlay,
+          params: { account_id: Account.default.id,
+                    registration_id: registration.id },
+          body: overlay.to_json
       expect(response).to be_successful
-      expect(Lti::IMS::Registration.find(registration.id).registration_overlay).to eq(overlay.deep_stringify_keys)
+      expect(registration.reload.registration_overlay).to eq(overlay.deep_stringify_keys)
+    end
+
+    it "removes disabled scopes from the associated developer key" do
+      user_session(user)
+      put :update_registration_overlay,
+          params: { account_id: Account.default.id,
+                    registration_id: registration.id },
+          body: overlay.to_json
+      expect(response).to be_successful
+      expect(registration.reload.developer_key.scopes).not_to include("https://purl.imsglobal.org/spec/lti-ags/scope/lineitem")
+    end
+
+    it "doesn't error if no disabledScopes are included in the request" do
+      user_session(user)
+      put :update_registration_overlay,
+          params: { account_id: Account.default.id,
+                    registration_id: registration.id },
+          body: overlay.except(:disabledScopes).to_json
+      expect(response).to be_successful
+
+      expect(registration.reload.registration_overlay).to eq(overlay.except(:disabledScopes).deep_stringify_keys)
     end
 
     it "returns a 422 if the request body does not meet the schema" do
-      registration = lti_ims_registration_model(account: Account.default)
-      user_session(account_admin_user(account: Account.default))
-      put :update_registration_overlay, params: { account_id: Account.default.id, registration_id: registration.id }, body: overlay.merge({ invalid: "data" }).to_json
+      user_session(user)
+      put :update_registration_overlay,
+          params: {
+            account_id: Account.default.id,
+            registration_id: registration.id
+          },
+          body: overlay.merge({ invalid: "data" }).to_json
       expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "returns a 404 if the registration cannot be found" do
+      user_session(user)
+      put :update_registration_overlay,
+          params: {
+            account_id: Account.default.id,
+            registration_id: registration.id + 500,
+          },
+          body: overlay.to_json
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "creates an Lti::Overlay if one isn't present" do
+      user_session(user)
+
+      expect do
+        put :update_registration_overlay,
+            params: { account_id: Account.default.id, registration_id: registration.id },
+            body: overlay.to_json
+      end.to change { Lti::Overlay.count }
+      expect(response).to be_successful
+
+      expect(Lti::Overlay.last.data)
+        .to eq({
+                 "disabled_placements" => overlay[:disabledPlacements],
+                 "disabled_scopes" => overlay[:disabledScopes],
+                 "placements" => {
+                   "account_navigation" => {
+                     "icon_url" => "https://example.com/icon.jpg"
+                   }
+                 }
+               })
+    end
+
+    context "Lti::Overlay is present" do
+      let(:lti_overlay) do
+        lti_overlay = Lti::Overlay.new(account: Account.default,
+                                       updated_by: user_model,
+                                       registration: registration.lti_registration,
+                                       data: {})
+        lti_overlay.save!
+        lti_overlay
+      end
+
+      before do
+        lti_overlay
+      end
+
+      it "updates the registration and Lti::Overlay model" do
+        user_session(user)
+        put :update_registration_overlay, params: { account_id: Account.default.id, registration_id: registration.id }, body: overlay.to_json
+
+        expect(response).to be_successful
+        expect(registration.reload.registration_overlay).to eq(overlay.deep_stringify_keys)
+        expect(lti_overlay.reload.updated_by).to eq(user)
+        expect(lti_overlay.data).to eq({
+                                         "disabled_placements" => ["course_navigation"],
+                                         "disabled_scopes" => ["https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"],
+                                         "placements" => {
+                                           "account_navigation" => {
+                                             "icon_url" => "https://example.com/icon.jpg"
+                                           }
+                                         }
+                                       })
+      end
+
+      # This is rare but does happen, particularly for overlays that were
+      # backfilled from IMS registrations
+      context "the overlay doesn't have a user associated with it" do
+        before do
+          lti_overlay.update_column(:updated_by_id, nil)
+        end
+
+        it "updates the registration and Lti::Overlay model" do
+          user_session(user)
+          put :update_registration_overlay, params: { account_id: Account.default.id, registration_id: registration.id }, body: overlay.to_json
+
+          expect(response).to be_successful
+          expect(registration.reload.registration_overlay).to eq(overlay.deep_stringify_keys)
+          expect(lti_overlay.reload.updated_by).to eq(user)
+          expect(lti_overlay.data).to eq({
+                                           "disabled_placements" => ["course_navigation"],
+                                           "disabled_scopes" => ["https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"],
+                                           "placements" => {
+                                             "account_navigation" => {
+                                               "icon_url" => "https://example.com/icon.jpg"
+                                             }
+                                           }
+                                         })
+        end
+      end
     end
   end
 end

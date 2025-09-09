@@ -1129,7 +1129,7 @@ describe SIS::CSV::UserImporter do
       "u,'long_string_for_user_login_should_throw_an_error_and_be_caught_and_be_returned_to_import_and_not_sent_to_sentry',U U,u@example.com,active"
     )
     expect(Canvas::Errors).not_to receive(:capture_exception)
-    expect(importer.errors.pluck(1)).to eq ["Could not save the user with user_id: 'u'. Unknown reason: unique_id is too long (maximum is 100 characters)"]
+    expect(importer.errors.pluck(1)).to eq ["Could not save the user with user_id: 'u'. Unknown reason: Unique ID is too long (maximum is 100 characters)"]
   end
 
   it "does not confirm an email communication channel that has an invalid email" do
@@ -1756,6 +1756,19 @@ describe SIS::CSV::UserImporter do
     expect(user_2.email).to eq "user2@example.com"
     expect(user_1.pseudonym.sis_communication_channel).to eq user_1.email_channel
     expect(user_2.pseudonym.sis_communication_channel).to eq user_2.email_channel
+  end
+
+  it "clears deleted_at when restoring a pseudonym" do
+    user = user_with_pseudonym(active_all: 1, sis_user_id: "user_1", account: @account)
+    user.destroy
+    process_csv_data_cleanly(
+      "user_id,login_id,first_name,last_name,email,status",
+      "user_1,#{@pseudonym.unique_id},User,Uno,#{@pseudonym.unique_id},active",
+      { override_sis_stickiness: true }
+    )
+    ps = user.reload.pseudonyms.take
+    expect(ps.workflow_state).to eq "active"
+    expect(ps.deleted_at).to be_nil
   end
 
   it "does not resurrect a non SIS user" do

@@ -16,7 +16,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import {useScope as useI18nScope} from '@canvas/i18n'
+import {useScope as createI18nScope} from '@canvas/i18n'
 import PropTypes from 'prop-types'
 import React from 'react'
 import {InlineList} from '@instructure/ui-list'
@@ -24,6 +24,7 @@ import {Reply} from './Reply'
 import {Like} from './Like'
 import {Expansion} from './Expansion'
 import {MarkAsRead} from './MarkAsRead'
+import {Restore} from './Restore'
 import {SpeedGraderNavigator} from './SpeedGraderNavigator'
 import {Link} from '@instructure/ui-link'
 import {Text} from '@instructure/ui-text'
@@ -31,8 +32,9 @@ import {Responsive} from '@instructure/ui-responsive'
 import {responsiveQuerySizes} from '../../utils'
 import {isSpeedGraderInTopUrl} from '../../utils/constants'
 import {View} from '@instructure/ui-view'
+import {Pin} from './Pin'
 
-const I18n = useI18nScope('discussion_posts')
+const I18n = createI18nScope('discussion_posts')
 
 export function ThreadingToolbar({...props}) {
   return (
@@ -101,7 +103,9 @@ ThreadingToolbar.propTypes = {
 
 ThreadingToolbar.Reply = Reply
 ThreadingToolbar.Like = Like
+ThreadingToolbar.Pin = Pin
 ThreadingToolbar.Expansion = Expansion
 ThreadingToolbar.MarkAsRead = MarkAsRead
+ThreadingToolbar.Restore = Restore
 
 export default ThreadingToolbar

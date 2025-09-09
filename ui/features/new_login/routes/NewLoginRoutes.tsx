@@ -16,45 +16,50 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, {lazy, Suspense} from 'react'
+import React, {lazy} from 'react'
 import {Route} from 'react-router-dom'
-import {LoginLayout} from '../layouts'
-import {Spinner} from '@instructure/ui-spinner'
-import {useScope as useI18nScope} from '@canvas/i18n'
-import {NewLoginProvider} from '../context/NewLoginContext'
-
-const I18n = useI18nScope('new_login')
+import {HelpTrayProvider, NewLoginDataProvider, NewLoginProvider} from '../context'
+import {LoginLayout} from '../layouts/LoginLayout'
+import {HelpTray} from '../shared'
+import RegistrationRoutesMiddleware from './RegistrationRoutesMiddleware'
+import RenderGuard from './RenderGuard'
 
 const SignIn = lazy(() => import('../pages/SignIn'))
 const ForgotPassword = lazy(() => import('../pages/ForgotPassword'))
-
-const Fallback = () => <Spinner renderTitle={I18n.t('Loading page')} />
+const RegisterLanding = lazy(() => import('../pages/register/Landing'))
+const RegisterStudent = lazy(() => import('../pages/register/Student'))
+const RegisterParent = lazy(() => import('../pages/register/Parent'))
+const RegisterTeacher = lazy(() => import('../pages/register/Teacher'))
 
 export const NewLoginRoutes = (
   <Route
-    path="/login/canvas"
+    path="login"
     element={
-      <NewLoginProvider>
-        <LoginLayout />
-      </NewLoginProvider>
+      <RenderGuard>
+        <NewLoginProvider>
+          <NewLoginDataProvider>
+            <HelpTrayProvider>
+              <LoginLayout />
+              <HelpTray />
+            </HelpTrayProvider>
+          </NewLoginDataProvider>
+        </NewLoginProvider>
+      </RenderGuard>
     }
   >
-    <Route
-      index={true}
-      element={
-        <Suspense fallback={<Fallback />}>
-          <SignIn />
-        </Suspense>
-      }
-    />
-    <Route
-      path="forgot-password"
-      element={
-        <Suspense fallback={<Fallback />}>
-          <ForgotPassword />
-        </Suspense>
-      }
-    />
-    <Route path="*" element={<SignIn />} />
+    {/* standalone LDAP login route */}
+    <Route path="ldap" element={<SignIn />} />
+    {/* everything else under /login/canvas/… */}
+    <Route path="canvas">
+      <Route index={true} element={<SignIn />} />
+      <Route path="forgot-password" element={<ForgotPassword />} />
+      <Route path="register" element={<RegistrationRoutesMiddleware />}>
+        <Route index={true} element={<RegisterLanding />} />
+        <Route path="student" element={<RegisterStudent />} />
+        <Route path="parent" element={<RegisterParent />} />
+        <Route path="teacher" element={<RegisterTeacher />} />
+      </Route>
+      <Route path="*" element={<SignIn />} />
+    </Route>
   </Route>
 )

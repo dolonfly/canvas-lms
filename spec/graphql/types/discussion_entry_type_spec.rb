@@ -84,13 +84,30 @@ describe Types::DiscussionEntryType do
     expect(type.resolve("discussionTopic { _id }")).to eq parent_entry.discussion_topic.id.to_s
   end
 
-  it "has an attachment" do
-    a = attachment_model
-    discussion_entry.attachment = a
-    discussion_entry.save!
+  describe "with attachment" do
+    let(:attachment) { attachment_model }
 
-    expect(discussion_entry_type.resolve("attachment { _id }")).to eq discussion_entry.attachment.id.to_s
-    expect(discussion_entry_type.resolve("attachment { displayName }")).to eq discussion_entry.attachment.display_name
+    it "has an attachment" do
+      discussion_entry.attachment = attachment
+      discussion_entry.save!
+
+      expect(discussion_entry_type.resolve("attachment { _id }")).to eq discussion_entry.attachment.id.to_s
+      expect(discussion_entry_type.resolve("attachment { displayName }")).to eq discussion_entry.attachment.display_name
+    end
+
+    it "adds attachment location tag to url when file_association_access feature flag is enabled" do
+      attachment.root_account.enable_feature!(:file_association_access)
+      discussion_entry.attachment = attachment
+      discussion_entry.save!
+
+      type = GraphQLTypeTester.new(discussion_entry, current_user: @teacher, domain_root_account: @course.root_account)
+      expect(
+        type.resolve("attachment { url }", request: ActionDispatch::TestRequest.create)
+      ).to include "location=#{discussion_entry.asset_string}"
+      expect(
+        type.resolve("attachment { url }", request: ActionDispatch::TestRequest.create)
+      ).not_to include "verifier=#{discussion_entry.attachment.uuid}"
+    end
   end
 
   describe "converts anchor tag to video tag" do
@@ -108,6 +125,23 @@ describe Types::DiscussionEntryType do
       expect(
         type.resolve("message", request: ActionDispatch::TestRequest.create)
       ).to include "/courses/#{@course.id}/files/12/download"
+    end
+  end
+
+  describe "when file_association_access ff is enabled" do
+    it "adds attachment location tag to the message" do
+      attachment = attachment_model(filename: "test.test", context: @teacher)
+      attachment.root_account.enable_feature!(:file_association_access)
+
+      message = "<img src='/users/#{@teacher.id}/files/#{attachment.id}/download'>"
+      new_entry = discussion_entry.discussion_topic.discussion_entries.create!(message:, user: @teacher, parent_id: discussion_entry.id, editor: @teacher)
+      discussion_entry.attachment = attachment
+      discussion_entry.save!
+
+      type = GraphQLTypeTester.new(discussion_entry, current_user: @teacher, domain_root_account: @course.root_account)
+      expect(
+        type.resolve("discussionSubentriesConnection { nodes { message } }", request: ActionDispatch::TestRequest.create).first
+      ).to include "location=#{new_entry.asset_string}"
     end
   end
 
@@ -598,9 +632,9 @@ describe Types::DiscussionEntryType do
     entry_type = GraphQLTypeTester.new(entry, current_user: @teacher)
     sub_entry_type = GraphQLTypeTester.new(sub_entry, current_user: @teacher)
 
-    result = entry_type.resolve("rootEntryPageNumber(perPage: 5,sortOrder: desc)")
+    result = entry_type.resolve("rootEntryPageNumber(perPage: 5)")
     expect(result).to eq 0
-    result = sub_entry_type.resolve("rootEntryPageNumber(perPage: 5,sortOrder: desc)")
+    result = sub_entry_type.resolve("rootEntryPageNumber(perPage: 5)")
     expect(result).to eq 0
 
     entry = topic.discussion_entries.where(message: "reply to topic 4").first
@@ -608,9 +642,9 @@ describe Types::DiscussionEntryType do
     entry_type = GraphQLTypeTester.new(entry, current_user: @teacher)
     sub_entry_type = GraphQLTypeTester.new(sub_entry, current_user: @teacher)
 
-    result = entry_type.resolve("rootEntryPageNumber(perPage: 5,sortOrder: desc)")
+    result = entry_type.resolve("rootEntryPageNumber(perPage: 5)")
     expect(result).to eq 1
-    result = sub_entry_type.resolve("rootEntryPageNumber(perPage: 5,sortOrder: desc)")
+    result = sub_entry_type.resolve("rootEntryPageNumber(perPage: 5)")
     expect(result).to eq 1
   end
 
@@ -624,7 +658,7 @@ describe Types::DiscussionEntryType do
     end
 
     it "returns nil if it is not a root entry" do
-      expect(discussion_sub_entry_type.resolve("allRootEntries { _id }")).to be_nil
+      expect(discussion_sub_entry_type.resolve("allRootEntries { _id }")).to eq []
     end
   end
 end

@@ -16,23 +16,22 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react'
 import {render, screen} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {PrivacyConfirmationWrapper} from '../components/PrivacyConfirmationWrapper'
-import {createLti1p3RegistrationOverlayStore} from '../Lti1p3RegistrationOverlayState'
+import {createLti1p3RegistrationOverlayStore} from '../../registration_overlay/Lti1p3RegistrationOverlayStore'
 import {mockInternalConfiguration} from './helpers'
 import {LtiPrivacyLevels} from '../../model/LtiPrivacyLevel'
 import {i18nLtiPrivacyLevel} from '../../model/i18nLtiPrivacyLevel'
 
 describe('PrivacyConfirmationWrapper', () => {
-  const appName = 'Test App'
-
   it('renders the PrivacyConfirmation component with the correct props', () => {
-    const internalConfig = mockInternalConfiguration()
-    const overlayStore = createLti1p3RegistrationOverlayStore(internalConfig)
+    const internalConfig = mockInternalConfiguration({title: 'Test App'})
+    const overlayStore = createLti1p3RegistrationOverlayStore(internalConfig, '')
 
-    render(<PrivacyConfirmationWrapper overlayStore={overlayStore} appName={appName} />)
+    render(
+      <PrivacyConfirmationWrapper overlayStore={overlayStore} internalConfig={internalConfig} />,
+    )
 
     expect(screen.getByText(/Data Sharing/i)).toBeInTheDocument()
     expect(screen.getByText(/Test App/i)).toBeInTheDocument()
@@ -41,9 +40,11 @@ describe('PrivacyConfirmationWrapper', () => {
 
   it('displays the correct initial privacy level', () => {
     const internalConfig = mockInternalConfiguration()
-    const overlayStore = createLti1p3RegistrationOverlayStore(internalConfig)
+    const overlayStore = createLti1p3RegistrationOverlayStore(internalConfig, '')
 
-    render(<PrivacyConfirmationWrapper overlayStore={overlayStore} appName={appName} />)
+    render(
+      <PrivacyConfirmationWrapper overlayStore={overlayStore} internalConfig={internalConfig} />,
+    )
 
     const select = screen.getByLabelText(/User Data Shared With This App/i)
     expect(select).toHaveValue(i18nLtiPrivacyLevel(LtiPrivacyLevels.Anonymous))
@@ -51,9 +52,11 @@ describe('PrivacyConfirmationWrapper', () => {
 
   it('updates the privacy level when a new option is selected', async () => {
     const internalConfig = mockInternalConfiguration()
-    const overlayStore = createLti1p3RegistrationOverlayStore(internalConfig)
+    const overlayStore = createLti1p3RegistrationOverlayStore(internalConfig, '')
 
-    render(<PrivacyConfirmationWrapper overlayStore={overlayStore} appName={appName} />)
+    render(
+      <PrivacyConfirmationWrapper overlayStore={overlayStore} internalConfig={internalConfig} />,
+    )
 
     const select = screen.getByLabelText(/User Data Shared With This App/i)
     await userEvent.click(select)

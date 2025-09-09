@@ -41,6 +41,8 @@ class Lti::IMS::Registration < ApplicationRecord
   LAUNCH_WIDTH_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/launch_width".freeze
   LAUNCH_HEIGHT_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/launch_height".freeze
   TOOL_ID_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/tool_id".freeze
+  VENDOR_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/vendor".freeze
+  CONTENT_MIGRATION_EXTENSION = "#{CANVAS_EXTENSION_PREFIX}/content_migration".freeze
 
   validates :redirect_uris,
             :initiate_login_uri,
@@ -68,25 +70,17 @@ class Lti::IMS::Registration < ApplicationRecord
 
   resolves_root_account through: :developer_key
 
-  def settings
-    canvas_configuration
-  end
-
-  def configuration
-    canvas_configuration
-  end
-
   # An IMS::Registration (this class) denotes a registration of a tool with a platform. This
   # follows the IMS Dynamic Registration specification. A "Tool Configuration" is
   # Canvas' proprietary representation of a tool's configuration, which predates
   # the dynamic registration specification. This method converts an ims registration
   # into the Canvas proprietary configuration format.
-  def canvas_configuration(apply_overlay: true)
+  def canvas_configuration
     config = lti_tool_configuration
 
     {
       title: client_name,
-      scopes: overlaid_scopes(apply_overlay:),
+      scopes:,
       public_jwk_url: jwks_uri,
       description: config["description"],
       custom_fields: config["custom_parameters"],
@@ -103,7 +97,7 @@ class Lti::IMS::Registration < ApplicationRecord
           text: client_name,
           icon_url: logo_uri,
           platform: "canvas.instructure.com",
-          placements: placements(apply_overlay:)
+          placements:
         }
       }]
     }.with_indifferent_access
@@ -119,7 +113,7 @@ class Lti::IMS::Registration < ApplicationRecord
       target_link_uri: config["target_link_uri"],
       oidc_initiation_url: registration.initiate_login_uri,
       public_jwk_url: registration.jwks_uri,
-      scopes: registration.overlaid_scopes,
+      scopes: registration.scopes,
       redirect_uris: registration.redirect_uris,
       domain: config["domain"],
       tool_id: registration.tool_id,
@@ -127,7 +121,9 @@ class Lti::IMS::Registration < ApplicationRecord
       placements: registration.placements,
       launch_settings: {
         icon_url: registration.logo_uri,
-      }
+        text: registration.client_name,
+        content_migration: config[CONTENT_MIGRATION_EXTENSION],
+      }.compact
     }.compact.with_indifferent_access
   end
 
@@ -138,24 +134,10 @@ class Lti::IMS::Registration < ApplicationRecord
     Lti::IMS::Registration.to_internal_lti_configuration(self)
   end
 
-  def importable_configuration
-    configuration&.merge(canvas_extensions)&.merge(configuration_to_cet_settings_map)
-  end
-
-  def configuration_to_cet_settings_map
-    { url: configuration["target_link_uri"], lti_version: "1.3", unified_tool_id: }
-  end
-
   def privacy_level
     claims = lti_tool_configuration["claims"] || []
-    infered_privacy_level = infer_privacy_level_from(claims)
-    registration_overlay["privacy_level"] || lti_tool_configuration[PRIVACY_LEVEL_EXTENSION] || infered_privacy_level
-  end
-
-  def overlaid_scopes(apply_overlay: true)
-    return scopes unless apply_overlay
-
-    scopes.reject { |s| registration_overlay["disabledScopes"]&.include?(s) || false }
+    inferred_privacy_level = infer_privacy_level_from(claims)
+    lti_tool_configuration[PRIVACY_LEVEL_EXTENSION] || inferred_privacy_level
   end
 
   def update_external_tools?
@@ -164,14 +146,19 @@ class Lti::IMS::Registration < ApplicationRecord
 
   delegate :update_external_tools!, to: :developer_key
 
-  def placements(apply_overlay: true)
-    lti_tool_configuration["messages"].map do |message|
-      if message["placements"].blank?
+  def placements
+    messages = lti_tool_configuration["messages"]
+    eula_message = messages.find { it["type"] == LtiAdvantage::Messages::EulaRequest::MESSAGE_TYPE }
+
+    messages.map do |message|
+      if Lti::ResourcePlacement::PLACEMENTLESS_MESSAGE_TYPES.include?(message["type"])
+        [] # EULA -- handled with eula_message variable
+      elsif message["placements"].blank?
         # default to link_selection if no placements are specified
         [build_placement_for("link_selection", message)]
       else
         message["placements"].flat_map do |placement|
-          build_placement_for(placement, message, apply_overlay:)
+          build_placement_for(placement, message, eula_message:)
         end
       end
     end.flatten.uniq { |p| p[:placement] }
@@ -180,7 +167,7 @@ class Lti::IMS::Registration < ApplicationRecord
   # Builds a placement object for a given message and placement type
   # returns a list with one item, or an empty list if the placement
   # type is not supported by Canvas
-  def build_placement_for(placement_type, message, apply_overlay: true)
+  def build_placement_for(placement_type, message, eula_message: nil)
     placement_name = canvas_placement_name(placement_type)
 
     # Return no placement if the placement type is not supported by Canvas
@@ -188,59 +175,24 @@ class Lti::IMS::Registration < ApplicationRecord
       return []
     end
 
-    display_type = message[DISPLAY_TYPE_EXTENSION]
-    window_target = nil
-    if display_type == "new_window"
-      display_type = "default"
-      window_target = "_blank"
-    end
-
-    placement_overlay = lookup_placement_overlay(placement_name) || {}
-
-    text = apply_overlay ? (placement_overlay["label"] || message["label"]) : message["label"]
-    icon_url = apply_overlay ? (placement_overlay["icon_url"] || message["icon_uri"]) : message["icon_uri"]
-    enabled = apply_overlay ? !placement_disabled?(placement_name) : true
-    default = if apply_overlay && placement_name == "course_navigation"
-                # The placement overlay stores everything in the Canvas proprietary format, in which
-                # default is either 'enabled' or 'disabled', so we can fetch the
-                # default value directly from the overlay
-                placement_overlay["default"] || fetch_default_enabled_setting(message, placement_name)
-              else
-                fetch_default_enabled_setting(message, placement_name)
-              end
-
     [
       {
         placement: placement_name,
-        enabled:,
+        enabled: true,
         message_type: message["type"],
-        text:,
+        text: message["label"],
         # TODO: add support for i18n titles
         # labels: ,
         custom_fields: message["custom_parameters"],
-        # TODO: add support for height/width in dyn reg
-        # selection_height:,
-        # selection_width:,
-        # launch_height:,
-        # launch_width:,
-
-        icon_url:,
+        icon_url: message["icon_uri"],
         target_link_uri: message["target_link_uri"],
-        display_type:,
-        windowTarget: window_target,
         visibility: placement_visibility(message),
-        default:,
-      }.merge(width_and_height_settings(message, placement_name)).compact
+        default: fetch_default_enabled_setting(message, placement_name),
+        eula: placement_eula(placement_name:, eula_message:),
+        **placement_display_settings(message),
+        **placement_width_and_height_settings(message, placement_name)
+      }.compact
     ]
-  end
-
-  def placement_visibility(message)
-    availability = message[PLACEMENT_VISIBILITY_EXTENSION]
-    if availability
-      PLACEMENT_VISIBILITY_OPTIONS.include?(availability) ? availability : nil
-    else
-      nil
-    end
   end
 
   # This supports a very old parameter (hence the obtuse name) that *only* applies to the course navigation placement. It hides the
@@ -253,23 +205,6 @@ class Lti::IMS::Registration < ApplicationRecord
 
   def lookup_placement_overlay(placement_type)
     registration_overlay["placements"]&.find { |p| p["type"] == placement_type }
-  end
-
-  def placement_disabled?(placement_name)
-    registration_overlay["disabledPlacements"]&.include?(placement_name) || false
-  end
-
-  def canvas_extensions
-    return {} if configuration.blank?
-
-    extension = configuration["extensions"]&.find { |e| e["platform"] == CANVAS_EXTENSION_LABEL }&.deep_dup || { "settings" => {} }
-    # remove any placements at the root level
-    extension["settings"].delete_if { |p| Lti::ResourcePlacement::PLACEMENTS.include?(p.to_sym) }
-    # read valid placements to root settings hash
-    extension["settings"].fetch("placements", []).each do |p|
-      extension["settings"][p["placement"]] = p
-    end
-    extension
   end
 
   def as_json(options = {})
@@ -296,13 +231,19 @@ class Lti::IMS::Registration < ApplicationRecord
       created_at:,
       updated_at:,
       guid:,
-      tool_configuration: canvas_configuration,
-      default_configuration: canvas_configuration(apply_overlay: false)
+      tool_configuration: Schemas::LtiConfiguration.from_internal_lti_configuration(
+        lti_registration.internal_lti_configuration(context: options[:context])
+      ),
+      default_configuration: canvas_configuration
     }.as_json(options)
   end
 
   def tool_id
     lti_tool_configuration[TOOL_ID_EXTENSION]
+  end
+
+  def vendor
+    lti_tool_configuration[VENDOR_EXTENSION]
   end
 
   private
@@ -314,24 +255,17 @@ class Lti::IMS::Registration < ApplicationRecord
   end
 
   def scopes_are_valid
-    invalid_scopes = scopes - TokenScopes::LTI_SCOPES.keys
+    invalid_scopes = scopes - (TokenScopes::LTI_SCOPES.keys + TokenScopes::LTI_HIDDEN_SCOPES.keys)
     return if invalid_scopes.empty?
 
     errors.add(:scopes, "Invalid scopes: #{invalid_scopes.join(", ")}")
   end
 
   def lti_tool_configuration_is_valid
-    config_errors = Schemas::Lti::IMS::LtiToolConfiguration.simple_validation_first_error(
+    Schemas::Lti::IMS::LtiToolConfiguration.simple_validation_errors(
       lti_tool_configuration,
       error_format: :hash
-    )
-    return if config_errors.blank?
-
-    errors.add(
-      :lti_tool_configuration,
-      # Convert errors represented as a Hash to JSON
-      config_errors.is_a?(Hash) ? config_errors.to_json : config_errors
-    )
+    )&.each { |error| errors.add(:lti_tool_configuration, error.to_json) }
   end
 
   def validate_overlay
@@ -341,34 +275,6 @@ class Lti::IMS::Registration < ApplicationRecord
     if overlay_errors.present?
       errors.add(:registration_overlay, overlay_errors.join("; "))
     end
-  end
-
-  def canvas_placement_name(placement)
-    # IMS placement names that have different names in Canvas
-    return "link_selection" if placement == "ContentArea"
-    return "editor_button" if placement == "RichTextEditor"
-
-    # Otherwise, remove our URL prefix from the Canvas-specific placements
-    canvas_extension = CANVAS_EXTENSION_PREFIX + "/"
-    placement.start_with?(canvas_extension) ? placement.sub(canvas_extension, "") : placement
-  end
-
-  def width_and_height_settings(message, placement)
-    keys = ["selection_width", "selection_height"]
-    # placements that use launch_width and launch_height
-    # instead of selection_width and selection_height
-    uses_launch_width = ["assignment_edit", "post_grades"]
-    keys = ["launch_width", "launch_height"] if uses_launch_width.include?(placement)
-
-    values = [
-      message[LAUNCH_WIDTH_EXTENSION]&.to_i,
-      message[LAUNCH_HEIGHT_EXTENSION]&.to_i,
-    ]
-
-    {
-      keys[0].to_sym => values[0],
-      keys[1].to_sym => values[1],
-    }
   end
 
   def infer_privacy_level_from(claims)
@@ -385,5 +291,65 @@ class Lti::IMS::Registration < ApplicationRecord
     else
       "anonymous"
     end
+  end
+
+  def canvas_placement_name(placement)
+    # IMS placement names that have different names in Canvas
+    return "link_selection" if placement == "ContentArea"
+    return "editor_button" if placement == "RichTextEditor"
+
+    # Otherwise, remove our URL prefix from the Canvas-specific placements
+    canvas_extension = CANVAS_EXTENSION_PREFIX + "/"
+    placement.start_with?(canvas_extension) ? placement.sub(canvas_extension, "") : placement
+  end
+
+  # placement_* Methods used to construct placement in build_placement_for:
+
+  def placement_display_settings(message)
+    display_type = message[DISPLAY_TYPE_EXTENSION]
+    if display_type == "new_window"
+      { display_type: "default", windowTarget: "_blank" }
+    else
+      { display_type: }
+    end
+  end
+
+  def placement_visibility(message)
+    availability = message[PLACEMENT_VISIBILITY_EXTENSION]
+    if availability
+      PLACEMENT_VISIBILITY_OPTIONS.include?(availability) ? availability : nil
+    else
+      nil
+    end
+  end
+
+  def placement_eula(placement_name:, eula_message:)
+    if eula_message && placement_name == "ActivityAssetProcessor"
+      {
+        enabled: true,
+        target_link_uri: eula_message["target_link_uri"],
+        custom_fields: eula_message["custom_parameters"]
+      }.compact
+    else
+      nil
+    end
+  end
+
+  def placement_width_and_height_settings(message, placement)
+    keys = ["selection_width", "selection_height"]
+    # placements that use launch_width and launch_height
+    # instead of selection_width and selection_height
+    uses_launch_width = ["assignment_edit", "post_grades"]
+    keys = ["launch_width", "launch_height"] if uses_launch_width.include?(placement)
+
+    values = [
+      message[LAUNCH_WIDTH_EXTENSION]&.to_i,
+      message[LAUNCH_HEIGHT_EXTENSION]&.to_i,
+    ]
+
+    {
+      keys[0].to_sym => values[0],
+      keys[1].to_sym => values[1],
+    }
   end
 end
